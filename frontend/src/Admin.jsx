@@ -1,0 +1,801 @@
+import React, { useEffect, useState } from 'react'
+import axios from 'axios'
+
+export default function Admin({ user }) {
+  const [activeTab, setActiveTab] = useState('season')
+  const [seasons, setSeasons] = useState([])
+  const [matches, setMatches] = useState([])
+  const [users, setUsers] = useState([])
+  const [newSeason, setNewSeason] = useState('')
+  const [newUser, setNewUser] = useState({ username: '', password: '', role: 'picker', balance: 500, display_name: '', season_ids: [] })
+  const [csvInput, setCsvInput] = useState('')
+  const [selectedSeason, setSelectedSeason] = useState('')
+  const [winnerModal, setWinnerModal] = useState({show: false, matchId: null, team1: '', team2: '', selectedTeam: ''})
+  const [editModal, setEditModal] = useState({show: false, match: null, formData: {}})
+  const [editUserModal, setEditUserModal] = useState({show: false, user: null, formData: {}, assignedSeasons: []})
+  const [editSeasonModal, setEditSeasonModal] = useState({show: false, season: null, formData: {}})
+
+  useEffect(() => {
+    fetchSeasons()
+    fetchUsers()
+  }, [])
+
+  async function fetchSeasons() {
+    const r = await axios.get('/api/seasons')
+    setSeasons(r.data)
+    if (r.data.length && !selectedSeason) setSelectedSeason(r.data[0].id)
+  }
+
+  async function fetchUsers() {
+    try {
+      const r = await axios.get('/api/admin/users', {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      setUsers(r.data)
+    } catch (e) {
+      console.log('Error fetching users:', e)
+    }
+  }
+
+  async function fetchMatches(sId) {
+    if (!sId) return
+    const r = await axios.get(`/api/seasons/${sId}/matches`)
+    setMatches(r.data)
+  }
+
+  useEffect(() => { if (selectedSeason) fetchMatches(selectedSeason) }, [selectedSeason])
+
+  async function addSeason() {
+    if (!newSeason) return alert('Enter season name')
+    try {
+      await axios.post('/api/admin/seasons', { name: newSeason }, {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      setNewSeason('')
+      fetchSeasons()
+      alert('Season created successfully')
+    } catch (e) {
+      alert(e.response?.data?.error || 'Failed to create season')
+    }
+  }
+
+  async function approveUser(userId) {
+    const balanceStr = window.prompt('Enter starting points for this user', '500')
+    if (balanceStr === null) return
+    const balance = parseInt(balanceStr)
+    if (Number.isNaN(balance)) {
+      alert('Invalid balance')
+      return
+    }
+    try {
+      await axios.post(`/api/admin/users/${userId}/approve`, { balance }, {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      fetchUsers()
+      alert('User approved')
+    } catch (e) {
+      alert(e.response?.data?.error || 'Failed to approve user')
+    }
+  }
+
+  async function createUser() {
+    if (!newUser.username) return alert('Enter username')
+    if (!newUser.password) return alert('Enter password')
+    if (!newUser.display_name) return alert('Enter display name')
+    try {
+      await axios.post('/api/admin/users', newUser, {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      setNewUser({ username: '', password: '', role: 'picker', balance: 500, display_name: '', season_ids: [] })
+      fetchUsers()
+      alert('User created successfully')
+    } catch (e) {
+      alert(e.response?.data?.error || 'Failed to create user')
+    }
+  }
+
+  async function editUser(userObj) {
+    try {
+      // Fetch user's assigned seasons
+      const seasonsRes = await axios.get(`/api/admin/users/${userObj.id}/seasons`, {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      setEditUserModal({
+        show: true,
+        user: userObj,
+        formData: {
+          username: userObj.username,
+          role: userObj.role,
+          balance: userObj.balance
+        },
+        assignedSeasons: seasonsRes.data || []
+      })
+    } catch (e) {
+      console.error('Error loading user seasons:', e)
+      setEditUserModal({
+        show: true,
+        user: userObj,
+        formData: {
+          username: userObj.username,
+          role: userObj.role,
+          balance: userObj.balance
+        },
+        assignedSeasons: []
+      })
+    }
+  }
+
+  async function submitEditUser() {
+    try {
+      // Update user details
+      await axios.put(`/api/admin/users/${editUserModal.user.id}`,
+        editUserModal.formData,
+        { headers: { 'x-user': user?.username || 'admin' } }
+      )
+      // Update season assignments
+      await axios.put(`/api/admin/users/${editUserModal.user.id}/seasons`,
+        { season_ids: editUserModal.assignedSeasons },
+        { headers: { 'x-user': user?.username || 'admin' } }
+      )
+      alert('User updated successfully')
+      setEditUserModal({show: false, user: null, formData: {}, assignedSeasons: []})
+      fetchUsers()
+    } catch (e) {
+      alert(e.response?.data?.error || 'Failed to update user')
+    }
+  }
+
+  async function deleteUser(userId, username) {
+    if (!window.confirm(`Are you sure you want to delete user "${username}"? This action cannot be undone and will also delete all their votes.`)) {
+      return
+    }
+    try {
+      await axios.delete(`/api/admin/users/${userId}`,
+        { headers: { 'x-user': user?.username || 'admin' } }
+      )
+      alert('User deleted successfully')
+      fetchUsers()
+    } catch (e) {
+      alert(e.response?.data?.error || 'Failed to delete user')
+    }
+  }
+
+  async function editSeason(seasonObj) {
+    setEditSeasonModal({
+      show: true,
+      season: seasonObj,
+      formData: { name: seasonObj.name }
+    })
+  }
+
+  async function submitEditSeason() {
+    if (!editSeasonModal.formData.name) return alert('Enter season name')
+    try {
+      await axios.put(`/api/admin/seasons/${editSeasonModal.season.id}`,
+        { name: editSeasonModal.formData.name },
+        { headers: { 'x-user': user?.username || 'admin' } }
+      )
+      alert('Season updated successfully')
+      setEditSeasonModal({show: false, season: null, formData: {}})
+      fetchSeasons()
+    } catch (e) {
+      alert(e.response?.data?.error || 'Failed to update season')
+    }
+  }
+
+  async function deleteSeason(seasonId, seasonName) {
+    if (!window.confirm(`Are you sure you want to delete "${seasonName}"? This will also delete ALL matches and votes for this season! This action cannot be undone.`)) {
+      return
+    }
+    try {
+      await axios.delete(`/api/admin/seasons/${seasonId}`,
+        { headers: { 'x-user': user?.username || 'admin' } }
+      )
+      alert('Season deleted successfully')
+      setSelectedSeason('')
+      fetchSeasons()
+    } catch (e) {
+      alert(e.response?.data?.error || 'Failed to delete season')
+    }
+  }
+
+  async function uploadCsv() {
+    if (!csvInput || !selectedSeason) return alert('Paste CSV and select season')
+    try {
+      const res = await axios.post('/api/admin/upload-matches', { csvData: csvInput, seasonId: selectedSeason }, {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      alert(`Uploaded ${res.data.inserted} matches`)
+      setCsvInput('')
+      fetchMatches(selectedSeason)
+    } catch (e) {
+      alert(e.response?.data?.error || 'Upload failed')
+    }
+  }
+
+  async function setWinner(matchId, team1, team2) {
+    setWinnerModal({show: true, matchId, team1, team2, selectedTeam: ''})
+  }
+
+  async function submitWinner() {
+    if (!winnerModal.selectedTeam) {
+      alert('Please select a winning team')
+      return
+    }
+    try {
+      await axios.post(`/api/admin/matches/${winnerModal.matchId}/winner`,
+        { winner: winnerModal.selectedTeam },
+        { headers: { 'x-user': user?.username || 'admin' } }
+      )
+      alert('Winner set successfully')
+      setWinnerModal({show: false, matchId: null, team1: '', team2: '', selectedTeam: ''})
+      fetchMatches(selectedSeason)
+    } catch (e) {
+      alert(e.response?.data?.error || 'Failed to set winner')
+    }
+  }
+
+  async function editMatch(match) {
+    setEditModal({
+      show: true,
+      match,
+      formData: {
+        home_team: match.home_team,
+        away_team: match.away_team,
+        venue: match.venue || '',
+        scheduled_at: match.scheduled_at || ''
+      }
+    })
+  }
+
+  async function submitEditMatch() {
+    try {
+      await axios.put(`/api/admin/matches/${editModal.match.id}`,
+        editModal.formData,
+        { headers: { 'x-user': user?.username || 'admin' } }
+      )
+      alert('Match updated successfully')
+      setEditModal({show: false, match: null, formData: {}})
+      fetchMatches(selectedSeason)
+    } catch (e) {
+      alert(e.response?.data?.error || 'Failed to update match')
+    }
+  }
+
+  async function clearAllMatches() {
+    if (!selectedSeason) {
+      alert('Please select a season first')
+      return
+    }
+    if (!window.confirm('Are you sure? This will DELETE ALL MATCHES for this season! This action cannot be undone.')) {
+      return
+    }
+    try {
+      await axios.post('/api/admin/clear-matches',
+        { seasonId: selectedSeason },
+        { headers: { 'x-user': user?.username || 'admin' } }
+      )
+      alert('All matches for this season cleared successfully!')
+      fetchMatches(selectedSeason)
+    } catch (e) {
+      alert(e.response?.data?.error || 'Failed to clear matches')
+    }
+  }
+
+  async function clearMatchVotes(matchId, homeTeam, awayTeam) {
+    if (!window.confirm(`Are you sure? This will clear all votes and odds for ${homeTeam} vs ${awayTeam}, and refund all user balances.`)) {
+      return
+    }
+    try {
+      const res = await axios.post(`/api/admin/matches/${matchId}/clear-votes`,
+        {},
+        { headers: { 'x-user': user?.username || 'admin' } }
+      )
+      alert(`${res.data.message}\n\nVotes cleared: ${res.data.votesCleared || 0}\nTotal refunded: ${res.data.refunded || 0} points`)
+      fetchMatches(selectedSeason)
+    } catch (e) {
+      alert(e.response?.data?.error || 'Failed to clear match votes')
+    }
+  }
+
+  const tabButtonStyle = (isActive) => ({
+    backgroundColor: isActive ? '#2ecc71' : '#bdc3c7',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    padding: '10px 20px',
+    cursor: 'pointer',
+    fontWeight: 'bold',
+    fontSize: '14px',
+    transition: 'all 0.3s ease',
+    boxShadow: isActive ? '0 4px 12px rgba(46, 204, 113, 0.3)' : 'none',
+    flex: 1,
+    textAlign: 'center'
+  })
+
+  const getTabIndex = () => {
+    if (activeTab === 'season') return 0
+    if (activeTab === 'users') return 1
+    if (activeTab === 'matches') return 2
+    return 0
+  }
+
+  const isActiveTab = (tabKey) => activeTab === tabKey
+
+  return (
+    <div style={{padding: '20px', backgroundColor: '#f9f9f9', minHeight: '100vh'}}>
+      <div style={{marginBottom: '40px'}}>
+        {/* Progress Bar Header */}
+        <div style={{
+          display: 'flex',
+          gap: '8px',
+          marginBottom: '20px',
+          alignItems: 'center'
+        }}>
+          {/* Step 1 - Season */}
+          <div style={{
+            flex: 1,
+            height: '50px',
+            backgroundColor: isActiveTab('season') ? '#2ecc71' : '#e0e0e0',
+            borderRadius: '8px 0 0 8px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: isActiveTab('season') ? 'white' : '#666',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            transition: 'all 0.3s ease',
+            fontSize: '14px'
+          }} onClick={() => setActiveTab('season')}>
+            🏆 Season
+          </div>
+
+          {/* Step 2 - Users */}
+          <div style={{
+            flex: 1,
+            height: '50px',
+            backgroundColor: isActiveTab('users') ? '#2ecc71' : '#e0e0e0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: isActiveTab('users') ? 'white' : '#666',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            transition: 'all 0.3s ease',
+            fontSize: '14px'
+          }} onClick={() => setActiveTab('users')}>
+            👥 Users
+          </div>
+
+          {/* Step 3 - Matches */}
+          <div style={{
+            flex: 1,
+            height: '50px',
+            backgroundColor: isActiveTab('matches') ? '#2ecc71' : '#e0e0e0',
+            borderRadius: '0 8px 8px 0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: isActiveTab('matches') ? 'white' : '#666',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            transition: 'all 0.3s ease',
+            fontSize: '14px'
+          }} onClick={() => setActiveTab('matches')}>
+            🎮 Matches
+          </div>
+        </div>
+
+        {/* Admin Panel Title */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px'
+        }}>
+          <div style={{
+            width: '40px',
+            height: '40px',
+            backgroundColor: '#2ecc71',
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'white',
+            fontWeight: 'bold',
+            fontSize: '20px'
+          }}>⚙️</div>
+          <span style={{color: '#333', fontSize: '24px', fontWeight: 'bold'}}>Admin Panel</span>
+        </div>
+      </div>
+
+      {activeTab === 'season' && (
+        <>
+          <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
+            <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Create Season</h3>
+            <div style={{display: 'flex', gap: '10px'}}>
+              <input value={newSeason} onChange={e => setNewSeason(e.target.value)} placeholder="Season name" style={{flex: 1, padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none'}} onFocus={(e) => e.target.style.borderColor = '#2ecc71'} onBlur={(e) => e.target.style.borderColor = '#ddd'} />
+              <button onClick={addSeason} style={{padding: '12px 30px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '25px', cursor: 'pointer', fontWeight: 'bold'}} onMouseOver={(e) => e.target.style.backgroundColor = '#27ae60'} onMouseOut={(e) => e.target.style.backgroundColor = '#2ecc71'}>Create</button>
+            </div>
+          </section>
+
+          <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
+            <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Manage Seasons</h3>
+            {seasons.length === 0 ? <p>No seasons found</p> : (
+              <table style={{width: '100%', borderCollapse: 'collapse'}}>
+                <thead>
+                  <tr style={{backgroundColor: '#f5f5f5', borderBottom: '2px solid #2ecc71'}}>
+                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Season Name</th>
+                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Matches Count</th>
+                    <th style={{padding: '12px', textAlign: 'left'}}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {seasons.map((s, idx) => (
+                    <tr key={s.id} style={{borderBottom: '1px solid #ddd', backgroundColor: idx % 2 === 0 ? '#fafafa' : 'white'}}>
+                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}><strong>{s.name}</strong></td>
+                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{matches.filter(m => m.season_id === s.id).length}</td>
+                      <td style={{padding: '12px'}}>
+                        <button onClick={() => editSeason(s)} style={{padding: '6px 12px', fontSize: '12px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Edit</button>
+                        <button onClick={() => deleteSeason(s.id, s.name)} style={{padding: '6px 12px', fontSize: '12px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', marginLeft: '8px'}}>Delete</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+        </>
+      )}
+
+      {activeTab === 'users' && (
+        <>
+          {/* Pending Approvals */}
+          {users.some(u => u.approved === 0) && (
+            <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
+              <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Pending Approvals</h3>
+              <table style={{width: '100%', borderCollapse: 'collapse'}}>
+                <thead>
+                  <tr style={{backgroundColor: '#f5f5f5', borderBottom: '2px solid #2ecc71'}}>
+                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Username</th>
+                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Display Name</th>
+                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Role</th>
+                    <th style={{padding: '12px', textAlign: 'left'}}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.filter(u => u.approved === 0).map(u => (
+                    <tr key={u.id} style={{borderBottom: '1px solid #ddd'}}>
+                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.username}</td>
+                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.display_name || u.username}</td>
+                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.role}</td>
+                      <td style={{padding: '12px'}}>
+                        <button
+                          onClick={() => approveUser(u.id)}
+                          style={{padding: '6px 12px', fontSize: '12px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}
+                        >
+                          Approve
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
+
+          <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
+            <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Create New User</h3>
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 150px 120px', gap: '10px'}}>
+              <input
+                value={newUser.username}
+                onChange={e => setNewUser({...newUser, username: e.target.value})}
+                placeholder="Username"
+                style={{padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none'}}
+                onFocus={(e) => e.target.style.borderColor = '#2ecc71'}
+                onBlur={(e) => e.target.style.borderColor = '#ddd'}
+              />
+              <input
+                type="password"
+                value={newUser.password}
+                onChange={e => setNewUser({...newUser, password: e.target.value})}
+                placeholder="Password"
+                style={{padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none'}}
+                onFocus={(e) => e.target.style.borderColor = '#2ecc71'}
+                onBlur={(e) => e.target.style.borderColor = '#ddd'}
+              />
+              <input
+                value={newUser.display_name || ''}
+                onChange={e => setNewUser({...newUser, display_name: e.target.value})}
+                placeholder="Display name"
+                style={{padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none'}}
+                onFocus={(e) => e.target.style.borderColor = '#2ecc71'}
+                onBlur={(e) => e.target.style.borderColor = '#ddd'}
+              />
+              <select
+                value={newUser.role}
+                onChange={e => setNewUser({...newUser, role: e.target.value})}
+                style={{padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none', cursor: 'pointer'}}
+              >
+                <option value="picker">Picker</option>
+                <option value="admin">Admin</option>
+              </select>
+              <input
+                type="number"
+                value={newUser.balance}
+                onChange={e => setNewUser({...newUser, balance: parseInt(e.target.value) || 0})}
+                placeholder="Balance"
+                style={{padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none'}}
+                onFocus={(e) => e.target.style.borderColor = '#2ecc71'}
+                onBlur={(e) => e.target.style.borderColor = '#ddd'}
+              />
+            </div>
+            <div style={{marginTop: '15px'}}>
+              <label style={{display: 'block', marginBottom: '10px', fontWeight: 'bold', fontSize: '14px'}}>Assign Seasons:</label>
+              <div style={{border: '1px solid #ddd', borderRadius: '12px', padding: '12px', maxHeight: '120px', overflow: 'auto', backgroundColor: '#fafafa'}}>
+                {seasons.length === 0 ? (
+                  <p style={{margin: 0, color: '#666', fontSize: '12px'}}>No seasons available</p>
+                ) : (
+                  <div style={{display: 'flex', flexWrap: 'wrap', gap: '10px'}}>
+                    {seasons.map(season => (
+                      <label key={season.id} style={{display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px'}}>
+                        <input
+                          type="checkbox"
+                          checked={newUser.season_ids?.includes(season.id) || false}
+                          onChange={e => {
+                            const isChecked = e.target.checked
+                            const newSeasonIds = isChecked
+                              ? [...(newUser.season_ids || []), season.id]
+                              : (newUser.season_ids || []).filter(sid => sid !== season.id)
+                            setNewUser({...newUser, season_ids: newSeasonIds})
+                          }}
+                          style={{cursor: 'pointer'}}
+                        />
+                        <span>{season.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={createUser}
+              style={{marginTop: '15px', padding: '12px 30px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '25px', cursor: 'pointer', fontWeight: 'bold'}}
+              onMouseOver={(e) => e.target.style.backgroundColor = '#27ae60'}
+              onMouseOut={(e) => e.target.style.backgroundColor = '#2ecc71'}
+            >
+              Create User
+            </button>
+          </section>
+
+          <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
+            <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>All Users</h3>
+            {users.length === 0 ? <p>No users found</p> : (
+              <table style={{width: '100%', borderCollapse: 'collapse'}}>
+                <thead>
+                  <tr style={{backgroundColor: '#f5f5f5', borderBottom: '2px solid #2ecc71'}}>
+                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Username</th>
+                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Display Name</th>
+                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Role</th>
+                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Balance</th>
+                    <th style={{padding: '12px', textAlign: 'left'}}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((u, idx) => (
+                    <tr key={u.id} style={{borderBottom: '1px solid #ddd', backgroundColor: idx % 2 === 0 ? '#fafafa' : 'white'}}>
+                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}><strong>{u.username}</strong></td>
+                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.display_name || u.username}</td>
+                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}><span style={{backgroundColor: u.role === 'admin' ? '#dc3545' : '#28a745', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px'}}>{u.role}</span></td>
+                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.balance}</td>
+                      <td style={{padding: '12px'}}>
+                        <button onClick={() => editUser(u)} style={{padding: '6px 12px', fontSize: '12px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Edit</button>
+                        <button onClick={() => deleteUser(u.id, u.username)} style={{padding: '6px 12px', fontSize: '12px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', marginLeft: '8px'}}>Delete</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+        </>
+      )}
+
+      {activeTab === 'matches' && (
+        <>
+          <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
+            <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Bulk Upload CSV Matches</h3>
+            <small style={{display: 'block', marginBottom: '10px', color: '#666'}}>Format: Date,Venue,Team 1,Team 2,Time</small>
+            <textarea
+              value={csvInput}
+              onChange={e => setCsvInput(e.target.value)}
+              placeholder="Date,Venue,Team 1,Team 2,Time"
+              style={{width: '100%', height: 120, fontFamily: 'monospace', padding: '12px 15px', marginBottom: '15px', border: '1px solid #ddd', borderRadius: '15px', fontSize: '13px', outline: 'none'}}
+              onFocus={(e) => e.target.style.borderColor = '#2ecc71'}
+              onBlur={(e) => e.target.style.borderColor = '#ddd'}
+            />
+            <button
+              onClick={uploadCsv}
+              style={{padding: '12px 30px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '25px', cursor: 'pointer', fontWeight: 'bold'}}
+              onMouseOver={(e) => e.target.style.backgroundColor = '#27ae60'}
+              onMouseOut={(e) => e.target.style.backgroundColor = '#2ecc71'}
+            >
+              Upload CSV
+            </button>
+          </section>
+
+          <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
+            <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Manage Matches</h3>
+            <div style={{marginBottom: '15px', display: 'flex', gap: '10px', alignItems: 'center'}}>
+              <label style={{fontWeight: 'bold', color: '#1a1a1a'}}>Select Season:</label>
+              <select value={selectedSeason} onChange={e => setSelectedSeason(e.target.value)} style={{padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none', cursor: 'pointer', flex: 1, maxWidth: '300px'}}>
+                <option value="">-- Select Season --</option>
+                {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+              <button onClick={clearAllMatches} style={{padding: '12px 30px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '25px', cursor: 'pointer', fontWeight: 'bold'}} onMouseOver={(e) => e.target.style.backgroundColor = '#c82333'} onMouseOut={(e) => e.target.style.backgroundColor = '#dc3545'}>Clear Matches</button>
+            </div>
+            {matches.length === 0 ? <p>No matches in this season</p> : (
+              <table style={{width: '100%', borderCollapse: 'collapse'}}>
+                <thead>
+                  <tr style={{backgroundColor: '#f0f0f0', borderBottom: '2px solid #333'}}>
+                    <th style={{padding: '10px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Match</th>
+                    <th style={{padding: '10px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Venue</th>
+                    <th style={{padding: '10px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Date/Time</th>
+                    <th style={{padding: '10px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Winner</th>
+                    <th style={{padding: '10px', textAlign: 'left'}}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {matches.map(m => (
+                    <tr key={m.id} style={{borderBottom: '1px solid #ddd'}}>
+                      <td style={{padding: '10px', borderRight: '1px solid #ddd'}}><strong>{m.home_team}</strong> vs <strong>{m.away_team}</strong></td>
+                      <td style={{padding: '10px', borderRight: '1px solid #ddd'}}>{m.venue || 'N/A'}</td>
+                      <td style={{padding: '10px', borderRight: '1px solid #ddd'}}>{m.scheduled_at || 'N/A'}</td>
+                      <td style={{padding: '10px', borderRight: '1px solid #ddd'}}>{m.winner || 'TBD'}</td>
+                      <td style={{padding: '10px'}}>
+                        <button onClick={() => editMatch(m)} style={{padding: '5px 10px', fontSize: '12px', marginRight: '5px'}}>Edit</button>
+                        <button onClick={() => setWinner(m.id, m.home_team, m.away_team)} style={{padding: '5px 10px', fontSize: '12px', marginRight: '5px'}}>Set Winner</button>
+                        <button onClick={() => clearMatchVotes(m.id, m.home_team, m.away_team)} style={{padding: '5px 10px', fontSize: '12px', backgroundColor: '#FFA500', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}} onMouseOver={(e) => e.target.style.backgroundColor = '#FF8C00'} onMouseOut={(e) => e.target.style.backgroundColor = '#FFA500'}>Clear Votes</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+        </>
+      )}
+
+      {winnerModal.show && (
+        <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000}}>
+          <div style={{backgroundColor: 'white', padding: '30px', borderRadius: '8px', maxWidth: '400px', width: '90%', boxShadow: '0 4px 20px rgba(0,0,0,0.3)'}}>
+            <h3 style={{marginTop: 0}}>Select Winning Team</h3>
+            <div style={{margin: '20px 0'}}>
+              <label style={{display: 'block', marginBottom: '15px', cursor: 'pointer'}}>
+                <input type="radio" name="winner" value={winnerModal.team1} checked={winnerModal.selectedTeam === winnerModal.team1} onChange={e => setWinnerModal({...winnerModal, selectedTeam: e.target.value})} style={{marginRight: '10px'}} />
+                <span style={{fontSize: '16px'}}>{winnerModal.team1}</span>
+              </label>
+              <label style={{display: 'block', marginBottom: '15px', cursor: 'pointer'}}>
+                <input type="radio" name="winner" value={winnerModal.team2} checked={winnerModal.selectedTeam === winnerModal.team2} onChange={e => setWinnerModal({...winnerModal, selectedTeam: e.target.value})} style={{marginRight: '10px'}} />
+                <span style={{fontSize: '16px'}}>{winnerModal.team2}</span>
+              </label>
+            </div>
+            <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px'}}>
+              <button onClick={() => setWinnerModal({show: false, matchId: null, team1: '', team2: '', selectedTeam: ''})} style={{padding: '8px 16px', backgroundColor: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Cancel</button>
+              <button
+                onClick={submitWinner}
+                style={{padding: '8px 16px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editModal.show && (
+        <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000}}>
+          <div style={{backgroundColor: 'white', padding: '30px', borderRadius: '8px', maxWidth: '500px', width: '90%', boxShadow: '0 4px 20px rgba(0,0,0,0.3)'}}>
+            <h3 style={{marginTop: 0}}>Edit Match</h3>
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Team 1:</label>
+              <input type="text" value={editModal.formData.home_team} onChange={e => setEditModal({...editModal, formData: {...editModal.formData, home_team: e.target.value}})} style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd'}} />
+            </div>
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Team 2:</label>
+              <input type="text" value={editModal.formData.away_team} onChange={e => setEditModal({...editModal, formData: {...editModal.formData, away_team: e.target.value}})} style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd'}} />
+            </div>
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Venue:</label>
+              <input type="text" value={editModal.formData.venue} onChange={e => setEditModal({...editModal, formData: {...editModal.formData, venue: e.target.value}})} style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd'}} />
+            </div>
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Date & Time:</label>
+              <input type="text" value={editModal.formData.scheduled_at} onChange={e => setEditModal({...editModal, formData: {...editModal.formData, scheduled_at: e.target.value}})} placeholder="YYYY-MM-DDTHH:MM" style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd'}} />
+            </div>
+            <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px'}}>
+              <button onClick={() => setEditModal({show: false, match: null, formData: {}})} style={{padding: '8px 16px', backgroundColor: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Cancel</button>
+              <button onClick={submitEditMatch} style={{padding: '8px 16px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editUserModal.show && (
+        <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000}}>
+          <div style={{backgroundColor: 'white', padding: '30px', borderRadius: '8px', maxWidth: '500px', width: '90%', boxShadow: '0 4px 20px rgba(0,0,0,0.3)', maxHeight: '80vh', overflow: 'auto'}}>
+            <h3 style={{marginTop: 0}}>Edit User</h3>
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Username:</label>
+              <input type="text" value={editUserModal.formData.username} disabled style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd', backgroundColor: '#f5f5f5'}} />
+            </div>
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Role:</label>
+              <select value={editUserModal.formData.role} onChange={e => setEditUserModal({...editUserModal, formData: {...editUserModal.formData, role: e.target.value}})} style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd'}}>
+                <option value="picker">Picker</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Balance:</label>
+              <input type="number" value={editUserModal.formData.balance} onChange={e => setEditUserModal({...editUserModal, formData: {...editUserModal.formData, balance: parseInt(e.target.value) || 0}})} style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd'}} />
+            </div>
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '10px', fontWeight: 'bold'}}>Assigned Seasons:</label>
+              <div style={{border: '1px solid #ddd', borderRadius: '4px', padding: '10px', maxHeight: '150px', overflow: 'auto'}}>
+                {seasons.length === 0 ? (
+                  <p style={{margin: 0, color: '#666'}}>No seasons available</p>
+                ) : (
+                  seasons.map(season => (
+                    <div key={season.id} style={{marginBottom: '8px', display: 'flex', alignItems: 'center'}}>
+                      <input
+                        type="checkbox"
+                        id={`season-${season.id}`}
+                        checked={editUserModal.assignedSeasons.includes(season.id)}
+                        onChange={e => {
+                          const isChecked = e.target.checked
+                          const newAssignedSeasons = isChecked
+                            ? [...editUserModal.assignedSeasons, season.id]
+                            : editUserModal.assignedSeasons.filter(sid => sid !== season.id)
+                          setEditUserModal({...editUserModal, assignedSeasons: newAssignedSeasons})
+                        }}
+                        style={{marginRight: '8px', cursor: 'pointer'}}
+                      />
+                      <label htmlFor={`season-${season.id}`} style={{cursor: 'pointer', margin: 0}}>{season.name}</label>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+            <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px'}}>
+              <button onClick={() => setEditUserModal({show: false, user: null, formData: {}, assignedSeasons: []})} style={{padding: '8px 16px', backgroundColor: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Cancel</button>
+              <button onClick={submitEditUser} style={{padding: '8px 16px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editSeasonModal.show && (
+        <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000}}>
+          <div style={{backgroundColor: 'white', padding: '30px', borderRadius: '8px', maxWidth: '400px', width: '90%', boxShadow: '0 4px 20px rgba(0,0,0,0.3)'}}>
+            <h3 style={{marginTop: 0}}>Edit Season</h3>
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Season Name:</label>
+              <input type="text" value={editSeasonModal.formData.name} onChange={e => setEditSeasonModal({...editSeasonModal, formData: {...editSeasonModal.formData, name: e.target.value}})} style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd'}} />
+            </div>
+            <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px'}}>
+              <button onClick={() => setEditSeasonModal({show: false, season: null, formData: {}})} style={{padding: '8px 16px', backgroundColor: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Cancel</button>
+              <button onClick={submitEditSeason} style={{padding: '8px 16px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+
+
+
+
+

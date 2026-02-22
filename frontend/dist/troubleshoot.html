@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Login Troubleshooting</title>
+  <style>
+    body { font-family: Arial; margin: 20px; background: #f5f5f5; }
+    .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+    h1 { color: #333; }
+    .section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 4px; }
+    .status { padding: 10px; margin: 10px 0; border-radius: 4px; }
+    .ok { background: #d4edda; color: #155724; }
+    .error { background: #f8d7da; color: #721c24; }
+    button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #0056b3; }
+    pre { background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔍 Login Troubleshooting Guide</h1>
+
+    <div class="section">
+      <h2>Step 1: Check Backend Health</h2>
+      <button onclick="checkHealth()">Check Backend Health</button>
+      <div id="healthStatus"></div>
+    </div>
+
+    <div class="section">
+      <h2>Step 2: Test Login - Admin</h2>
+      <button onclick="testLoginAdmin()">Test Admin Login</button>
+      <div id="adminStatus"></div>
+    </div>
+
+    <div class="section">
+      <h2>Step 3: Test Login - Senthil</h2>
+      <button onclick="testLoginSenthil()">Test Senthil Login</button>
+      <div id="senthilStatus"></div>
+    </div>
+
+    <div class="section">
+      <h2>Step 4: What to Check</h2>
+      <ul>
+        <li><strong>Backend Running?</strong> If Step 1 fails, backend is not running. Run: <code>npm start</code> in /backend folder</li>
+        <li><strong>Login Failing?</strong> If Step 2 or 3 fails, check credentials are correct: <code>username: admin/senthil, password: password</code></li>
+        <li><strong>Frontend Issue?</strong> If steps 1-3 pass but frontend still fails, try:
+          <ul>
+            <li>Clear browser cache (Ctrl+Shift+Delete or Cmd+Shift+Delete)</li>
+            <li>Check browser console (F12) for errors</li>
+            <li>Refresh the page (Ctrl+R or Cmd+R)</li>
+          </ul>
+        </li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h2>Quick Fixes</h2>
+      <h3>If Port 4000 is Already in Use</h3>
+      <pre>pkill -9 node
+cd /Users/senthilponnappan/IdeaProjects/Test/backend
+npm start</pre>
+
+      <h3>If Port 5173 is Already in Use</h3>
+      <pre>pkill -f vite
+cd /Users/senthilponnappan/IdeaProjects/Test/frontend
+npm run dev</pre>
+
+      <h3>Backend Commands</h3>
+      <pre>cd /Users/senthilponnappan/IdeaProjects/Test/backend
+npm install  # Install dependencies
+npm start    # Start the server</pre>
+
+      <h3>Frontend Commands</h3>
+      <pre>cd /Users/senthilponnappan/IdeaProjects/Test/frontend
+npm install  # Install dependencies
+npm run dev  # Start dev server</pre>
+    </div>
+  </div>
+
+  <script>
+    async function checkHealth() {
+      const div = document.getElementById('healthStatus');
+      try {
+        const response = await fetch('http://localhost:4000/api/health');
+        if (response.ok) {
+          const data = await response.json();
+          div.innerHTML = '<div class="status ok">✅ Backend is running! Response: ' + JSON.stringify(data) + '</div>';
+        } else {
+          div.innerHTML = '<div class="status error">❌ Backend returned error: ' + response.status + '</div>';
+        }
+      } catch (err) {
+        div.innerHTML = '<div class="status error">❌ Cannot connect to backend. Error: ' + err.message + '</div><p>Make sure backend is running on http://localhost:4000</p>';
+      }
+    }
+
+    async function testLoginAdmin() {
+      const div = document.getElementById('adminStatus');
+      try {
+        const response = await fetch('http://localhost:4000/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: 'admin', password: 'password' })
+        });
+        const data = await response.json();
+        if (response.ok) {
+          div.innerHTML = '<div class="status ok">✅ Login successful!<br><pre>' + JSON.stringify(data, null, 2) + '</pre></div>';
+        } else {
+          div.innerHTML = '<div class="status error">❌ Login failed: ' + data.error + '</div>';
+        }
+      } catch (err) {
+        div.innerHTML = '<div class="status error">❌ Error: ' + err.message + '</div>';
+      }
+    }
+
+    async function testLoginSenthil() {
+      const div = document.getElementById('senthilStatus');
+      try {
+        const response = await fetch('http://localhost:4000/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: 'senthil', password: 'password' })
+        });
+        const data = await response.json();
+        if (response.ok) {
+          div.innerHTML = '<div class="status ok">✅ Login successful!<br><pre>' + JSON.stringify(data, null, 2) + '</pre></div>';
+        } else {
+          div.innerHTML = '<div class="status error">❌ Login failed: ' + data.error + '</div>';
+        }
+      } catch (err) {
+        div.innerHTML = '<div class="status error">❌ Error: ' + err.message + '</div>';
+      }
+    }
+  </script>
+</body>
+</html>
+
