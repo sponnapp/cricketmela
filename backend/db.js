@@ -43,20 +43,13 @@ db.serialize(() => {
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
-      role TEXT NOT NULL
+      role TEXT NOT NULL,
+      password TEXT,
+      display_name TEXT,
+      approved INTEGER DEFAULT 1,
+      balance REAL DEFAULT 100
     )
   `);
-
-  // add balance column if missing
-  hasColumn('users', 'balance', (err, exists) => {
-    if (err) return console.error('Error checking users columns', err);
-    if (!exists) {
-      db.run('ALTER TABLE users ADD COLUMN balance REAL DEFAULT 100', (err2) => {
-        if (err2) console.error('Error adding balance column', err2);
-        else console.log('Added balance column to users');
-      });
-    }
-  });
 
   db.run(`
     CREATE TABLE IF NOT EXISTS settings (
@@ -102,19 +95,37 @@ db.serialize(() => {
     if (err) {
       console.error('Error counting users', err);
     } else if (row && row.cnt === 0) {
-      const stmt = db.prepare('INSERT INTO users (username, role, balance) VALUES (?, ?, ?)');
-      stmt.run('admin', 'admin', 1000);
-      stmt.run('senthil', 'picker', 500);
-      stmt.finalize(() => console.log('Inserted sample users'));
+      const stmt = db.prepare('INSERT INTO users (username, role, balance, password, display_name, approved) VALUES (?, ?, ?, ?, ?, ?)');
+      stmt.run('admin', 'admin', 1000, 'admin123', 'Admin', 1);
+      stmt.run('senthil', 'picker', 500, 'senthil123', 'Senthil', 1);
+      stmt.finalize(() => console.log('Inserted sample users with passwords'));
     } else {
-      // ensure admin and senthil exist (in case table exists but missing rows)
-      db.get("SELECT id FROM users WHERE username='admin'", (e,a)=>{
-        if (e) return; if (!a) db.run('INSERT INTO users (username, role, balance) VALUES (?,?,?)', ['admin','admin',1000]);
+      // ensure admin and senthil exist with passwords
+      db.get("SELECT id, password FROM users WHERE username='admin'", (e,a)=>{
+        if (e) return;
+        if (!a) {
+          db.run('INSERT INTO users (username, role, balance, password, display_name, approved) VALUES (?,?,?,?,?,?)',
+            ['admin','admin',1000,'admin123','Admin',1]);
+        } else if (!a.password) {
+          // User exists but has no password - set default
+          db.run('UPDATE users SET password = ?, display_name = ?, approved = 1 WHERE username = ?',
+            ['admin123', 'Admin', 'admin']);
+          console.log('Set default password for admin user');
+        }
       });
-      db.get("SELECT id FROM users WHERE username='senthil'", (e,b)=>{
-        if (e) return; if (!b) db.run('INSERT INTO users (username, role, balance) VALUES (?,?,?)', ['senthil','picker',500]);
+      db.get("SELECT id, password FROM users WHERE username='senthil'", (e,b)=>{
+        if (e) return;
+        if (!b) {
+          db.run('INSERT INTO users (username, role, balance, password, display_name, approved) VALUES (?,?,?,?,?,?)',
+            ['senthil','picker',500,'senthil123','Senthil',1]);
+        } else if (!b.password) {
+          // User exists but has no password - set default
+          db.run('UPDATE users SET password = ?, display_name = ?, approved = 1 WHERE username = ?',
+            ['senthil123', 'Senthil', 'senthil']);
+          console.log('Set default password for senthil user');
+        }
       });
-      console.log('Users present, ensured sample users');
+      console.log('Users present, ensured sample users with passwords');
     }
   });
 

@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const sqlite3 = require('sqlite3').verbose();
 const app = express();
 const port = process.env.PORT || 4000;
@@ -35,7 +36,20 @@ app.use(cors({
 
 app.use(express.json());
 
-const DB_PATH = path.join(__dirname, 'data.db');
+const DB_DIR = process.env.NODE_ENV === 'production' ? '/app/data' : __dirname;
+const DB_PATH = path.join(DB_DIR, 'data.db');
+
+// Ensure DB directory exists
+if (!fs.existsSync(DB_DIR)) {
+  fs.mkdirSync(DB_DIR, { recursive: true });
+}
+
+// One-time migration: if old DB exists in app dir, move it to the volume
+const legacyDbPath = path.join(__dirname, 'data.db');
+if (process.env.NODE_ENV === 'production' && fs.existsSync(legacyDbPath) && !fs.existsSync(DB_PATH)) {
+  fs.copyFileSync(legacyDbPath, DB_PATH);
+  // Keep legacy file in place; copy avoids startup failures if the volume is missing
+}
 
 function openDb() {
   return new sqlite3.Database(DB_PATH);
@@ -802,6 +816,72 @@ app.post('/api/signup', (req, res) => {
       if (err) return res.status(500).json({ error: 'User already exists or DB error' });
       res.status(201).json({ ok: true, message: 'Signup submitted for admin approval' });
     });
+});
+
+// EMERGENCY: Fix admin password endpoint (one-time use)
+app.post('/api/emergency-reset-admin', (req, res) => {
+  const { newPassword } = req.body;
+  if (!newPassword) return res.status(400).json({ error: 'newPassword required' });
+
+  const db = openDb();
+  db.run(`UPDATE users SET password = ?, approved = 1 WHERE username = 'admin'`, [newPassword], function(err) {
+    if (err) {
+      db.close();
+      return res.status(500).json({ error: 'DB error' });
+    }
+    db.close();
+    res.json({ ok: true, message: 'Admin password reset successfully', rowsAffected: this.changes });
+  });
+});
+
+// EMERGENCY: Create or reset admin (one-time use)
+app.post('/api/emergency-create-admin', (req, res) => {
+  const { newPassword } = req.body;
+  if (!newPassword) return res.status(400).json({ error: 'newPassword required' });
+
+  const db = openDb();
+  db.get("SELECT id FROM users WHERE username = 'admin'", (err, row) => {
+    if (err) {
+      db.close();
+      return res.status(500).json({ error: 'DB error' });
+    }
+
+    if (!row) {
+      db.run(
+        "INSERT INTO users (username, role, balance, password, display_name, approved) VALUES (?,?,?,?,?,?)",
+        ['admin', 'admin', 1000, newPassword, 'Admin', 1],
+        function(insertErr) {
+          if (insertErr) {
+            db.close();
+            return res.status(500).json({ error: 'DB error' });
+          }
+          db.close();
+          return res.json({ ok: true, message: 'Admin created', rowsAffected: this.changes });
+        }
+      );
+      return;
+    }
+
+    db.run(
+      "UPDATE users SET password = ?, approved = 1 WHERE username = 'admin'",
+      [newPassword],
+      function(updateErr) {
+        db.close();
+        if (updateErr) return res.status(500).json({ error: 'DB error' });
+        res.json({ ok: true, message: 'Admin password reset', rowsAffected: this.changes });
+      }
+    );
+  });
+});
+
+// EMERGENCY: Debug endpoint to check users
+app.get('/api/emergency-check-users', (req, res) => {
+  const db = openDb();
+  db.all('SELECT id, username, password, role, approved FROM users', (err, rows) => {
+    db.close();
+    if (err) return res.status(500).json({ error: 'DB error' });
+    res.json({ users: rows });
+  });
 });
 
 // Login endpoint: username + password auth
