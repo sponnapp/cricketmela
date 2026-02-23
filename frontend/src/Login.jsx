@@ -5,7 +5,6 @@ export default function Login({ onLogin }) {
   const [isSignup, setIsSignup] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [displayName, setDisplayName] = useState('')
   const [error, setError] = useState(null)
   const [message, setMessage] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -16,10 +15,10 @@ export default function Login({ onLogin }) {
     setMessage(null)
 
     if (isSignup) {
-      if (!username || !password || !displayName) return setError('Enter username, password, and display name')
+      if (!username || !password) return setError('Enter username and password')
       setLoading(true)
       try {
-        await axios.post('/api/signup', { username, password, display_name: displayName })
+        await axios.post('/api/signup', { username, password })
         setLoading(false)
         setMessage('Signup submitted. Wait for admin approval.')
         setIsSignup(false)
@@ -226,25 +225,6 @@ export default function Login({ onLogin }) {
               }}
             />
           </div>
-
-          {/* Display Name Input (Signup only) */}
-          {isSignup && (
-            <div style={styles.inputWrapper}>
-              <span style={styles.icon}>🏷️</span>
-              <input
-                type="text"
-                placeholder="Display name"
-                value={displayName}
-                onChange={e => setDisplayName(e.target.value)}
-                onFocus={() => setUsernameInputFocused(true)}
-                onBlur={() => setUsernameInputFocused(false)}
-                style={{
-                  ...styles.input,
-                  ...(usernameInputFocused ? styles.inputFocus : {})
-                }}
-              />
-            </div>
-          )}
 
           {/* Password Input */}
           <div style={styles.inputWrapper}>

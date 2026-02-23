@@ -3,6 +3,7 @@ import axios from 'axios'
 
 export default function Profile({ user, refreshUser }) {
   const [displayName, setDisplayName] = useState(user?.display_name || user?.displayName || user?.username || '')
+  const [currentPassword, setCurrentPassword] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [saving, setSaving] = useState(false)
@@ -19,6 +20,12 @@ export default function Profile({ user, refreshUser }) {
       return
     }
 
+    // If changing password, require current password
+    if (password && !currentPassword) {
+      setError('Current password is required to change password')
+      return
+    }
+
     if (password && password.length < 4) {
       setError('Password must be at least 4 characters')
       return
@@ -29,9 +36,19 @@ export default function Profile({ user, refreshUser }) {
       return
     }
 
+    // Check if new password is same as current
+    if (password && password === currentPassword) {
+      setError('New password must be different from current password')
+      return
+    }
+
     setSaving(true)
     try {
-      const payload = { display_name: displayName, password: password || null }
+      const payload = {
+        display_name: displayName,
+        password: password || null,
+        current_password: currentPassword || null
+      }
       const res = await axios.put(`/api/users/${user.id}/profile`,
         payload,
         { headers: { 'x-user': user.username } }
@@ -40,6 +57,7 @@ export default function Profile({ user, refreshUser }) {
       setMessage(res.data?.message || 'Profile updated')
       const me = await axios.get('/api/me', { headers: { 'x-user': user.username } })
       refreshUser(me.data)
+      setCurrentPassword('')
       setPassword('')
       setConfirmPassword('')
     } catch (err) {
@@ -73,6 +91,20 @@ export default function Profile({ user, refreshUser }) {
             onFocus={(e) => e.target.style.borderColor = '#667eea'}
             onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
           />
+        </div>
+
+        <div>
+          <label style={{fontWeight: '600', fontSize: '13px', color: '#4a5568', marginBottom: '8px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Current Password</label>
+          <input
+            type="password"
+            value={currentPassword}
+            onChange={e => setCurrentPassword(e.target.value)}
+            placeholder="Enter current password to change"
+            style={{padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: '10px', fontSize: '14px', width: '100%', boxSizing: 'border-box', fontFamily: 'Inter, sans-serif', transition: 'border-color 0.2s'}}
+            onFocus={(e) => e.target.style.borderColor = '#667eea'}
+            onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+          />
+          <small style={{fontSize: '11px', color: '#718096', marginTop: '4px', display: 'block'}}>Required only if changing password</small>
         </div>
 
         <div>

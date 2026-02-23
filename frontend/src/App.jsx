@@ -39,7 +39,7 @@ export default function App() {
 
   const navTabs = [
     { key: 'seasons', label: 'Seasons', visible: !!user },
-    { key: 'admin', label: 'Admin', visible: !!user && user.role === 'admin' },
+    { key: 'admin', label: 'Admin', visible: !!user && (user.role === 'admin' || user.role === 'superuser') },
     { key: 'history', label: 'Vote History', visible: !!user },
     { key: 'standings', label: 'Standings', visible: !!user },
     { key: 'profile', label: 'Profile', visible: !!user }

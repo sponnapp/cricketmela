@@ -11,12 +11,13 @@ export default function Seasons({ onSelect }) {
 
   const styles = {
     container: {
+      width: '100%',
       padding: '40px 20px',
-      maxWidth: '1200px',
-      margin: '0 auto'
+      margin: 0,
+      boxSizing: 'border-box'
     },
     title: {
-      fontSize: '32px',
+      fontSize: 'clamp(24px, 5vw, 32px)',
       fontWeight: 'bold',
       color: '#1a1a1a',
       marginBottom: '40px',

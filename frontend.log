@@ -3,43 +3,65 @@
 > vite
 
 
-  VITE v4.5.14  ready in 325 ms
+  VITE v4.5.14  ready in 263 ms
 
   ➜  Local:   http://localhost:5173/
   ➜  Network: http://192.168.68.58:5173/
-/Users/senthilponnappan/IdeaProjects/Test/frontend/src/Admin.jsx: Unexpected token, expected "," (112:2)
+/Users/senthilponnappan/IdeaProjects/Test/frontend/src/Admin.jsx: Unexpected token (791:22)
 
-  110 |   }
-  111 |
-> 112 |   async function submitEditUser() {
-      |   ^
-  113 |     try {
-  114 |       await axios.put(`/api/admin/users/${editUserModal.user.id}`,
-  115 |         editUserModal.formData,
-3:46:42 PM [vite] Internal server error: /Users/senthilponnappan/IdeaProjects/Test/frontend/src/Admin.jsx: Unexpected token, expected "," (112:2)
+  789 |                           onClick={() => setWinner(m.id, m.home_team, m.away_team)}
+  790 |                           style={{
+> 791 |                       </td>
+      |                       ^
+  792 |                     </tr>
+  793 |                   ))}
+  794 |                 </tbody>
+9:00:19 PM [vite] Internal server error: /Users/senthilponnappan/IdeaProjects/Test/frontend/src/Admin.jsx: Unexpected token (791:22)
 
-  110 |   }
-  111 |
-> 112 |   async function submitEditUser() {
-      |   ^
-  113 |     try {
-  114 |       await axios.put(`/api/admin/users/${editUserModal.user.id}`,
-  115 |         editUserModal.formData,
+  789 |                           onClick={() => setWinner(m.id, m.home_team, m.away_team)}
+  790 |                           style={{
+> 791 |                       </td>
+      |                       ^
+  792 |                     </tr>
+  793 |                   ))}
+  794 |                 </tbody>
   Plugin: vite:react-babel
-  File: /Users/senthilponnappan/IdeaProjects/Test/frontend/src/Admin.jsx:112:2
-  110|    }
-  111|  
-  112|    async function submitEditUser() {
-     |    ^
-  113|      try {
-  114|        await axios.put(`/api/admin/users/${editUserModal.user.id}`,
+  File: /Users/senthilponnappan/IdeaProjects/Test/frontend/src/Admin.jsx:791:22
+  789|                            onClick={() => setWinner(m.id, m.home_team, m.away_team)}
+  790|                            style={{
+  791|                        </td>
+     |                        ^
+  792|                      </tr>
+  793|                    ))}
       at constructor (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:365:19)
       at JSXParserMixin.raise (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:6599:19)
       at JSXParserMixin.unexpected (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:6619:16)
-      at JSXParserMixin.expect (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:6899:12)
-      at JSXParserMixin.parseObjectLike (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11822:14)
+      at JSXParserMixin.parsePropertyName (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:12024:18)
+      at JSXParserMixin.parsePropertyDefinition (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11889:10)
+      at JSXParserMixin.parseObjectLike (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11832:21)
       at JSXParserMixin.parseExprAtom (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11339:23)
       at JSXParserMixin.parseExprAtom (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4764:20)
+      at JSXParserMixin.parseExprSubscripts (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11081:23)
+      at JSXParserMixin.parseUpdate (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11066:21)
+      at JSXParserMixin.parseMaybeUnary (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11046:23)
+      at JSXParserMixin.parseMaybeUnaryOrPrivate (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10899:61)
+      at JSXParserMixin.parseExprOps (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10904:23)
+      at JSXParserMixin.parseMaybeConditional (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10881:23)
+      at JSXParserMixin.parseMaybeAssign (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10831:21)
+      at JSXParserMixin.parseExpressionBase (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10780:39
+      at JSXParserMixin.allowInAnd (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:12426:12)
+      at JSXParserMixin.parseExpression (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10780:17)
+      at JSXParserMixin.jsxParseExpressionContainer (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4632:31)
+      at JSXParserMixin.jsxParseAttributeValue (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4604:21)
+      at JSXParserMixin.jsxParseAttribute (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4653:38)
+      at JSXParserMixin.jsxParseOpeningElementAfterName (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4667:28)
+      at JSXParserMixin.jsxParseOpeningElementAt (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4662:17)
+      at JSXParserMixin.jsxParseElementAt (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4686:33)
+      at JSXParserMixin.jsxParseElementAt (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElementAt (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElement (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4749:17)
+      at JSXParserMixin.parseExprAtom (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4759:19)
       at JSXParserMixin.parseExprSubscripts (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11081:23)
       at JSXParserMixin.parseUpdate (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11066:21)
       at JSXParserMixin.parseMaybeUnary (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11046:23)
@@ -51,12 +73,42 @@
       at JSXParserMixin.allowInAnd (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:12426:12)
       at JSXParserMixin.parseMaybeAssignAllowIn (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10800:17)
       at JSXParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:12493:17)
-      at JSXParserMixin.parseExprListItem (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:12175:18)
-      at JSXParserMixin.parseCallExpressionArguments (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11252:22)
-      at JSXParserMixin.parseCoverCallAndAsyncArrowHead (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11186:29)
-      at JSXParserMixin.parseSubscript (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11120:19)
-      at JSXParserMixin.parseSubscripts (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11094:19)
-      at JSXParserMixin.parseExprSubscripts (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11085:17)
+      at JSXParserMixin.parseParenAndDistinguishExpression (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11675:28)
+      at JSXParserMixin.parseExprAtom (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11331:23)
+      at JSXParserMixin.parseExprAtom (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4764:20)
+      at JSXParserMixin.parseExprSubscripts (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11081:23)
+      at JSXParserMixin.parseUpdate (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11066:21)
+      at JSXParserMixin.parseMaybeUnary (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11046:23)
+      at JSXParserMixin.parseMaybeUnaryOrPrivate (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10899:61)
+      at JSXParserMixin.parseExprOps (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10904:23)
+      at JSXParserMixin.parseMaybeConditional (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10881:23)
+      at JSXParserMixin.parseMaybeAssign (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10831:21)
+9:00:33 PM [vite] Internal server error: /Users/senthilponnappan/IdeaProjects/Test/frontend/src/Admin.jsx: Unexpected token (791:22)
+
+  789 |                           onClick={() => setWinner(m.id, m.home_team, m.away_team)}
+  790 |                           style={{
+> 791 |                       </td>
+      |                       ^
+  792 |                     </tr>
+  793 |                   ))}
+  794 |                 </tbody>
+  Plugin: vite:react-babel
+  File: /Users/senthilponnappan/IdeaProjects/Test/frontend/src/Admin.jsx:791:22
+  789|                            onClick={() => setWinner(m.id, m.home_team, m.away_team)}
+  790|                            style={{
+  791|                        </td>
+     |                        ^
+  792|                      </tr>
+  793|                    ))}
+      at constructor (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:365:19)
+      at JSXParserMixin.raise (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:6599:19)
+      at JSXParserMixin.unexpected (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:6619:16)
+      at JSXParserMixin.parsePropertyName (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:12024:18)
+      at JSXParserMixin.parsePropertyDefinition (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11889:10)
+      at JSXParserMixin.parseObjectLike (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11832:21)
+      at JSXParserMixin.parseExprAtom (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11339:23)
+      at JSXParserMixin.parseExprAtom (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4764:20)
+      at JSXParserMixin.parseExprSubscripts (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11081:23)
       at JSXParserMixin.parseUpdate (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11066:21)
       at JSXParserMixin.parseMaybeUnary (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11046:23)
       at JSXParserMixin.parseMaybeUnaryOrPrivate (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10899:61)
@@ -65,30 +117,37 @@
       at JSXParserMixin.parseMaybeAssign (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10831:21)
       at JSXParserMixin.parseExpressionBase (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10784:23)
       at /Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10780:39
-      at JSXParserMixin.allowInAnd (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:12421:16)
+      at JSXParserMixin.allowInAnd (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:12426:12)
       at JSXParserMixin.parseExpression (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10780:17)
-      at JSXParserMixin.parseStatementContent (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:12895:23)
-      at JSXParserMixin.parseStatementLike (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:12767:17)
-      at JSXParserMixin.parseStatementListItem (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:12747:17)
-      at JSXParserMixin.parseBlockOrModuleBlockBody (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:13316:61)
-      at JSXParserMixin.parseBlockBody (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:13309:10)
-      at JSXParserMixin.parseBlock (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:13297:10)
-      at JSXParserMixin.parseTryStatement (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:13205:23)
-      at JSXParserMixin.parseStatementContent (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:12804:21)
-      at JSXParserMixin.parseStatementLike (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:12767:17)
-      at JSXParserMixin.parseStatementListItem (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:12747:17)
-      at JSXParserMixin.parseBlockOrModuleBlockBody (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:13316:61)
-      at JSXParserMixin.parseBlockBody (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:13309:10)
-      at JSXParserMixin.parseBlock (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:13297:10)
-      at JSXParserMixin.parseFunctionBody (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:12100:24)
-      at JSXParserMixin.parseFunctionBodyAndFinish (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:12086:10)
-      at /Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:13445:12
-4:00:09 PM [vite] hmr update /src/Admin.jsx
-4:18:06 PM [vite] hmr update /src/VoteHistory.jsx
-4:18:08 PM [vite] page reload dist/troubleshoot.html
-4:18:08 PM [vite] page reload dist/index.html
-4:22:22 PM [vite] hmr update /src/VoteHistory.jsx
-4:22:23 PM [vite] http proxy error at /api/users/3/votes:
-AggregateError
-    at internalConnectMultiple (node:net:1114:18)
-    at afterConnectMultiple (node:net:1667:5)
+      at JSXParserMixin.jsxParseExpressionContainer (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4632:31)
+      at JSXParserMixin.jsxParseAttributeValue (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4604:21)
+      at JSXParserMixin.jsxParseAttribute (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4653:38)
+      at JSXParserMixin.jsxParseOpeningElementAfterName (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4667:28)
+      at JSXParserMixin.jsxParseOpeningElementAt (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4662:17)
+      at JSXParserMixin.jsxParseElementAt (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4686:33)
+      at JSXParserMixin.jsxParseElementAt (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElementAt (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElement (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4749:17)
+      at JSXParserMixin.parseExprAtom (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4759:19)
+      at JSXParserMixin.parseExprSubscripts (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11081:23)
+      at JSXParserMixin.parseUpdate (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11066:21)
+      at JSXParserMixin.parseMaybeUnary (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11046:23)
+      at JSXParserMixin.parseMaybeUnaryOrPrivate (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10899:61)
+      at JSXParserMixin.parseExprOps (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10904:23)
+      at JSXParserMixin.parseMaybeConditional (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10881:23)
+      at JSXParserMixin.parseMaybeAssign (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10800:39
+      at JSXParserMixin.allowInAnd (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:12426:12)
+      at JSXParserMixin.parseMaybeAssignAllowIn (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10800:17)
+      at JSXParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:12493:17)
+      at JSXParserMixin.parseParenAndDistinguishExpression (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11675:28)
+      at JSXParserMixin.parseExprAtom (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11331:23)
+      at JSXParserMixin.parseExprAtom (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:4764:20)
+      at JSXParserMixin.parseExprSubscripts (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11081:23)
+      at JSXParserMixin.parseUpdate (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11066:21)
+      at JSXParserMixin.parseMaybeUnary (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:11046:23)
+      at JSXParserMixin.parseMaybeUnaryOrPrivate (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10899:61)
+      at JSXParserMixin.parseExprOps (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10904:23)
+      at JSXParserMixin.parseMaybeConditional (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10881:23)
+      at JSXParserMixin.parseMaybeAssign (/Users/senthilponnappan/IdeaProjects/Test/frontend/node_modules/@babel/parser/lib/index.js:10831:21)
+9:05:09 PM [vite] hmr update /src/Admin.jsx

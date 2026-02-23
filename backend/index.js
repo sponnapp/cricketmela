@@ -335,6 +335,23 @@ app.get('/api/seasons/:id/matches', (req, res) => {
   }
 });
 
+// Get all matches (admin only)
+app.get('/api/matches', (req, res) => {
+  const db = openDb();
+  // Admin can see all matches
+  if (req.user && req.user.role === 'admin') {
+    db.all('SELECT id, season_id, home_team, away_team, venue, scheduled_at, winner FROM matches', (err, rows) => {
+      db.close();
+      if (err) return res.status(500).json({ error: 'DB error' });
+      res.json(rows || []);
+    });
+    return;
+  }
+  // Non-admin users should not access this
+  db.close();
+  res.status(403).json({ error: 'Forbidden' });
+});
+
 // Voting endpoint: deduct user balance, insert/update vote (allow replacement before match starts)
 app.post('/api/matches/:id/vote', (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
@@ -591,16 +608,51 @@ app.get('/api/admin/pending-users', requireRole('admin'), (req, res) => {
 // Admin: approve pending user and set balance
 app.post('/api/admin/users/:id/approve', requireRole('admin'), (req, res) => {
   const id = Number(req.params.id);
-  const { balance } = req.body;
+  const { balance, season_ids } = req.body;
   if (balance === undefined || balance === null) {
     return res.status(400).json({ error: 'balance required' });
   }
   const db = openDb();
-  db.run('UPDATE users SET approved = 1, balance = ? WHERE id = ?', [balance, id], function(err) {
-    db.close();
-    if (err) return res.status(500).json({ error: 'DB error' });
-    if (this.changes === 0) return res.status(404).json({ error: 'User not found' });
-    res.json({ ok: true, message: 'User approved' });
+  db.serialize(() => {
+    // Update user as approved with balance
+    db.run('UPDATE users SET approved = 1, balance = ? WHERE id = ?', [balance, id], function(err) {
+      if (err) {
+        db.close();
+        return res.status(500).json({ error: 'DB error: ' + err.message });
+      }
+      if (this.changes === 0) {
+        db.close();
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      // If season_ids provided, assign them
+      if (season_ids && Array.isArray(season_ids) && season_ids.length > 0) {
+        // Delete existing season assignments for this user
+        db.run('DELETE FROM user_seasons WHERE user_id = ?', [id], function(delErr) {
+          if (delErr) {
+            console.log('Error deleting old user_seasons:', delErr);
+          }
+
+          // Insert new season assignments
+          let completed = 0;
+          season_ids.forEach(seasonId => {
+            db.run('INSERT OR IGNORE INTO user_seasons (user_id, season_id) VALUES (?, ?)', [id, seasonId], function(insErr) {
+              completed++;
+              if (insErr) {
+                console.log('Error assigning season:', insErr);
+              }
+              if (completed === season_ids.length) {
+                db.close();
+                res.json({ ok: true, message: 'User approved and seasons assigned' });
+              }
+            });
+          });
+        });
+      } else {
+        db.close();
+        res.json({ ok: true, message: 'User approved' });
+      }
+    });
   });
 });
 
@@ -643,6 +695,28 @@ app.put('/api/admin/users/:id', requireRole('admin'), (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
     res.json({ ok: true, message: 'User updated' });
+  });
+});
+
+// Admin: reset user password
+app.put('/api/admin/users/:id/password', requireRole('admin'), (req, res) => {
+  const id = Number(req.params.id);
+  const { newPassword } = req.body;
+
+  if (!newPassword) {
+    return res.status(400).json({ error: 'newPassword required' });
+  }
+
+  const db = openDb();
+  db.run('UPDATE users SET password = ? WHERE id = ?', [newPassword, id], function(err) {
+    db.close();
+    if (err) {
+      return res.status(500).json({ error: 'DB error: ' + err.message });
+    }
+    if (this.changes === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json({ ok: true, message: 'Password reset successfully' });
   });
 });
 
@@ -689,12 +763,14 @@ app.delete('/api/admin/users/:id', requireRole('admin'), (req, res) => {
 // Signup endpoint: create pending user
 app.post('/api/signup', (req, res) => {
   const { username, password, display_name } = req.body;
-  if (!username || !password || !display_name) {
-    return res.status(400).json({ error: 'username, password and display_name required' });
+  if (!username || !password) {
+    return res.status(400).json({ error: 'username and password required' });
   }
+  // Use username as default display_name if not provided
+  const finalDisplayName = display_name || username;
   const db = openDb();
   db.run('INSERT INTO users (username, password, display_name, role, balance, approved) VALUES (?, ?, ?, ?, ?, 0)',
-    [username, password, display_name, 'picker', 0], function(err) {
+    [username, password, finalDisplayName, 'picker', 0], function(err) {
       db.close();
       if (err) return res.status(500).json({ error: 'User already exists or DB error' });
       res.status(201).json({ ok: true, message: 'Signup submitted for admin approval' });
@@ -805,8 +881,58 @@ app.put('/api/admin/matches/:id', requireRole('admin'), (req, res) => {
   });
 });
 
+// Admin delete match
+app.delete('/api/admin/matches/:id', requireRole('admin'), (req, res) => {
+  const id = Number(req.params.id);
+  const db = openDb();
+  db.serialize(() => {
+    // First, refund all users who voted on this match
+    db.all('SELECT user_id, points FROM votes WHERE match_id = ?', [id], (err, votes) => {
+      if (err) {
+        db.close();
+        return res.status(500).json({ error: 'DB error: ' + err.message });
+      }
+
+      if (!votes || votes.length === 0) {
+        // No votes to refund, just delete the match
+        db.run('DELETE FROM matches WHERE id = ?', [id], function(err2) {
+          db.close();
+          if (err2) return res.status(500).json({ error: 'DB error: ' + err2.message });
+          if (this.changes === 0) return res.status(404).json({ error: 'Match not found' });
+          res.json({ ok: true, message: 'Match deleted successfully' });
+        });
+        return;
+      }
+
+      // Refund all users
+      let processed = 0;
+      votes.forEach(vote => {
+        db.run('UPDATE users SET balance = balance + ? WHERE id = ?', [vote.points, vote.user_id], function(err2) {
+          processed += 1;
+          if (processed === votes.length) {
+            // All refunds done, delete votes and then the match
+            db.run('DELETE FROM votes WHERE match_id = ?', [id], function(err3) {
+              if (err3) {
+                db.close();
+                return res.status(500).json({ error: 'Failed to delete votes: ' + err3.message });
+              }
+              // Finally, delete the match
+              db.run('DELETE FROM matches WHERE id = ?', [id], function(err4) {
+                db.close();
+                if (err4) return res.status(500).json({ error: 'Failed to delete match: ' + err4.message });
+                if (this.changes === 0) return res.status(404).json({ error: 'Match not found' });
+                res.json({ ok: true, message: 'Match deleted and balances refunded', votesRefunded: votes.length });
+              });
+            });
+          }
+        });
+      });
+    });
+  });
+});
+
 // Admin set match winner and distribute points
-app.post('/api/admin/matches/:id/winner', requireRole('admin'), (req, res) => {
+app.post('/api/admin/matches/:id/winner', requireRole(['admin', 'superuser']), (req, res) => {
   const id = Number(req.params.id);
   const { winner } = req.body;
   if (!winner) return res.status(400).json({ error: 'winner required' });
@@ -1029,30 +1155,74 @@ app.put('/api/users/:id/profile', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
-  const { display_name, password } = req.body;
+  const { display_name, password, current_password } = req.body;
   if (!display_name && !password) {
     return res.status(400).json({ error: 'display_name or password required' });
   }
 
-  const updates = [];
-  const values = [];
-  if (display_name) {
-    updates.push('display_name = ?');
-    values.push(display_name);
+  // If changing password, require current password
+  if (password && !current_password) {
+    return res.status(400).json({ error: 'Current password required to change password' });
   }
-  if (password) {
-    updates.push('password = ?');
-    values.push(password);
-  }
-  values.push(id);
 
   const db = openDb();
-  db.run(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, values, function(err) {
-    db.close();
-    if (err) return res.status(500).json({ error: 'DB error' });
-    if (this.changes === 0) return res.status(404).json({ error: 'User not found' });
-    res.json({ ok: true, message: 'Profile updated' });
-  });
+
+  // If password change requested, validate current password first
+  if (password) {
+    db.get('SELECT password FROM users WHERE id = ?', [id], (err, row) => {
+      if (err) {
+        db.close();
+        return res.status(500).json({ error: 'DB error' });
+      }
+      if (!row) {
+        db.close();
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      // Verify current password (handle null/empty passwords with default 'password')
+      const storedPassword = row.password || 'password';
+      if (storedPassword !== current_password) {
+        db.close();
+        return res.status(400).json({ error: 'Current password is incorrect' });
+      }
+
+      // Check if new password is different from current
+      if (password === storedPassword) {
+        db.close();
+        return res.status(400).json({ error: 'New password must be different from current password' });
+      }
+
+      // Proceed with update
+      const updates = [];
+      const values = [];
+      if (display_name) {
+        updates.push('display_name = ?');
+        values.push(display_name);
+      }
+      updates.push('password = ?');
+      values.push(password);
+      values.push(id);
+
+      db.run(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, values, function(err2) {
+        db.close();
+        if (err2) return res.status(500).json({ error: 'DB error' });
+        if (this.changes === 0) return res.status(404).json({ error: 'User not found' });
+        res.json({ ok: true, message: 'Profile updated' });
+      });
+    });
+  } else {
+    // Only updating display name, no password validation needed
+    if (!display_name) {
+      db.close();
+      return res.status(400).json({ error: 'display_name required' });
+    }
+    db.run('UPDATE users SET display_name = ? WHERE id = ?', [display_name, id], function(err) {
+      db.close();
+      if (err) return res.status(500).json({ error: 'DB error' });
+      if (this.changes === 0) return res.status(404).json({ error: 'User not found' });
+      res.json({ ok: true, message: 'Profile updated' });
+    });
+  }
 });
 
 // Admin: Get user's assigned seasons

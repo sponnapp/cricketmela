@@ -5,7 +5,9 @@ export default function Admin({ user }) {
   const [activeTab, setActiveTab] = useState('season')
   const [seasons, setSeasons] = useState([])
   const [matches, setMatches] = useState([])
+  const [allMatches, setAllMatches] = useState([])
   const [users, setUsers] = useState([])
+  const [pendingUsers, setPendingUsers] = useState([])
   const [newSeason, setNewSeason] = useState('')
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'picker', balance: 500, display_name: '', season_ids: [] })
   const [csvInput, setCsvInput] = useState('')
@@ -13,11 +15,15 @@ export default function Admin({ user }) {
   const [winnerModal, setWinnerModal] = useState({show: false, matchId: null, team1: '', team2: '', selectedTeam: ''})
   const [editModal, setEditModal] = useState({show: false, match: null, formData: {}})
   const [editUserModal, setEditUserModal] = useState({show: false, user: null, formData: {}, assignedSeasons: []})
+  const [passwordResetModal, setPasswordResetModal] = useState({show: false, userId: null, username: '', newPassword: ''})
+  const [approveUserModal, setApproveUserModal] = useState({show: false, user: null, formData: {balance: 1000}, selectedSeasons: []})
   const [editSeasonModal, setEditSeasonModal] = useState({show: false, season: null, formData: {}})
 
   useEffect(() => {
     fetchSeasons()
     fetchUsers()
+    fetchPendingUsers()
+    fetchAllMatches()
   }, [])
 
   async function fetchSeasons() {
@@ -37,10 +43,32 @@ export default function Admin({ user }) {
     }
   }
 
+  async function fetchPendingUsers() {
+    try {
+      const r = await axios.get('/api/admin/pending-users', {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      setPendingUsers(r.data || [])
+    } catch (e) {
+      console.log('Error fetching pending users:', e)
+    }
+  }
+
   async function fetchMatches(sId) {
     if (!sId) return
     const r = await axios.get(`/api/seasons/${sId}/matches`)
     setMatches(r.data)
+  }
+
+  async function fetchAllMatches() {
+    try {
+      const r = await axios.get('/api/matches', {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      setAllMatches(r.data || [])
+    } catch (e) {
+      console.log('Error fetching all matches:', e)
+    }
   }
 
   useEffect(() => { if (selectedSeason) fetchMatches(selectedSeason) }, [selectedSeason])
@@ -160,26 +188,53 @@ export default function Admin({ user }) {
     }
   }
 
-  async function editSeason(seasonObj) {
-    setEditSeasonModal({
-      show: true,
-      season: seasonObj,
-      formData: { name: seasonObj.name }
-    })
+  function openPasswordResetModal(userId, username) {
+    setPasswordResetModal({show: true, userId: userId, username: username, newPassword: ''})
   }
 
-  async function submitEditSeason() {
-    if (!editSeasonModal.formData.name) return alert('Enter season name')
+  async function submitPasswordReset() {
+    if (!passwordResetModal.newPassword) return alert('Enter new password')
     try {
-      await axios.put(`/api/admin/seasons/${editSeasonModal.season.id}`,
-        { name: editSeasonModal.formData.name },
+      await axios.put(`/api/admin/users/${passwordResetModal.userId}/password`,
+        { newPassword: passwordResetModal.newPassword },
         { headers: { 'x-user': user?.username || 'admin' } }
       )
-      alert('Season updated successfully')
-      setEditSeasonModal({show: false, season: null, formData: {}})
-      fetchSeasons()
+      alert('Password reset successfully. User can login with the new password.')
+      setPasswordResetModal({show: false, userId: null, username: '', newPassword: ''})
+      fetchUsers()
     } catch (e) {
-      alert(e.response?.data?.error || 'Failed to update season')
+      alert(e.response?.data?.error || 'Failed to reset password')
+    }
+  }
+
+  function openApproveUserModal(pendingUser) {
+    setApproveUserModal({show: true, user: pendingUser, formData: {balance: 1000}, selectedSeasons: []})
+  }
+
+  async function submitApproveUser() {
+    try {
+      const userId = approveUserModal.user.id
+      const balance = approveUserModal.formData.balance || 1000
+
+      // Approve the user with the specified balance
+      await axios.post(`/api/admin/users/${userId}/approve`, { balance }, {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+
+      // Assign seasons to the user
+      if (approveUserModal.selectedSeasons.length > 0) {
+        await axios.put(`/api/admin/users/${userId}/seasons`,
+          { season_ids: approveUserModal.selectedSeasons },
+          { headers: { 'x-user': user?.username || 'admin' } }
+        )
+      }
+
+      alert('User approved successfully')
+      setApproveUserModal({show: false, user: null, formData: {balance: 1000}, selectedSeasons: []})
+      fetchUsers()
+      fetchPendingUsers()
+    } catch (e) {
+      alert(e.response?.data?.error || 'Failed to approve user')
     }
   }
 
@@ -194,8 +249,37 @@ export default function Admin({ user }) {
       alert('Season deleted successfully')
       setSelectedSeason('')
       fetchSeasons()
+      fetchAllMatches()
     } catch (e) {
       alert(e.response?.data?.error || 'Failed to delete season')
+    }
+  }
+
+  function editSeason(season) {
+    setEditSeasonModal({
+      show: true,
+      season: season,
+      formData: {
+        name: season.name
+      }
+    })
+  }
+
+  async function submitEditSeason() {
+    if (!editSeasonModal.formData.name) {
+      alert('Season name is required')
+      return
+    }
+    try {
+      await axios.put(`/api/admin/seasons/${editSeasonModal.season.id}`,
+        { name: editSeasonModal.formData.name },
+        { headers: { 'x-user': user?.username || 'admin' } }
+      )
+      alert('Season updated successfully')
+      setEditSeasonModal({show: false, season: null, formData: {}})
+      fetchSeasons()
+    } catch (e) {
+      alert(e.response?.data?.error || 'Failed to update season')
     }
   }
 
@@ -208,6 +292,7 @@ export default function Admin({ user }) {
       alert(`Uploaded ${res.data.inserted} matches`)
       setCsvInput('')
       fetchMatches(selectedSeason)
+      fetchAllMatches()
     } catch (e) {
       alert(e.response?.data?.error || 'Upload failed')
     }
@@ -277,6 +362,7 @@ export default function Admin({ user }) {
       )
       alert('All matches for this season cleared successfully!')
       fetchMatches(selectedSeason)
+      fetchAllMatches()
     } catch (e) {
       alert(e.response?.data?.error || 'Failed to clear matches')
     }
@@ -295,6 +381,22 @@ export default function Admin({ user }) {
       fetchMatches(selectedSeason)
     } catch (e) {
       alert(e.response?.data?.error || 'Failed to clear match votes')
+    }
+  }
+
+  async function deleteMatch(matchId, homeTeam, awayTeam) {
+    if (!window.confirm(`Are you sure you want to DELETE this match?\n\n${homeTeam} vs ${awayTeam}\n\nThis will refund all votes and remove the match permanently. This action cannot be undone.`)) {
+      return
+    }
+    try {
+      const res = await axios.delete(`/api/admin/matches/${matchId}`, {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      alert(res.data.message || 'Match deleted successfully')
+      fetchMatches(selectedSeason)
+      fetchAllMatches()
+    } catch (e) {
+      alert(e.response?.data?.error || 'Failed to delete match')
     }
   }
 
@@ -322,6 +424,16 @@ export default function Admin({ user }) {
 
   const isActiveTab = (tabKey) => activeTab === tabKey
 
+  // For superusers, only allow access to Matches tab
+  const isSuperuser = user?.role === 'superuser'
+
+  // Set default tab based on role
+  useEffect(() => {
+    if (isSuperuser && activeTab !== 'matches') {
+      setActiveTab('matches')
+    }
+  }, [isSuperuser, activeTab])
+
   return (
     <div style={{padding: '20px', backgroundColor: '#f9f9f9', minHeight: '100vh'}}>
       <div style={{marginBottom: '40px'}}>
@@ -332,47 +444,51 @@ export default function Admin({ user }) {
           marginBottom: '20px',
           alignItems: 'center'
         }}>
-          {/* Step 1 - Season */}
-          <div style={{
-            flex: 1,
-            height: '50px',
-            backgroundColor: isActiveTab('season') ? '#2ecc71' : '#e0e0e0',
-            borderRadius: '8px 0 0 8px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: isActiveTab('season') ? 'white' : '#666',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            transition: 'all 0.3s ease',
-            fontSize: '14px'
-          }} onClick={() => setActiveTab('season')}>
-            🏆 Season
-          </div>
+          {/* Step 1 - Season (Only for Admin) */}
+          {!isSuperuser && (
+            <div style={{
+              flex: 1,
+              height: '50px',
+              backgroundColor: isActiveTab('season') ? '#2ecc71' : '#e0e0e0',
+              borderRadius: '8px 0 0 8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: isActiveTab('season') ? 'white' : '#666',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+              fontSize: '14px'
+            }} onClick={() => setActiveTab('season')}>
+              🏆 Season
+            </div>
+          )}
 
-          {/* Step 2 - Users */}
-          <div style={{
-            flex: 1,
-            height: '50px',
-            backgroundColor: isActiveTab('users') ? '#2ecc71' : '#e0e0e0',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: isActiveTab('users') ? 'white' : '#666',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            transition: 'all 0.3s ease',
-            fontSize: '14px'
-          }} onClick={() => setActiveTab('users')}>
-            👥 Users
-          </div>
+          {/* Step 2 - Users (Only for Admin) */}
+          {!isSuperuser && (
+            <div style={{
+              flex: 1,
+              height: '50px',
+              backgroundColor: isActiveTab('users') ? '#2ecc71' : '#e0e0e0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: isActiveTab('users') ? 'white' : '#666',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+              fontSize: '14px'
+            }} onClick={() => setActiveTab('users')}>
+              👥 Users
+            </div>
+          )}
 
-          {/* Step 3 - Matches */}
+          {/* Step 3 - Matches (For both Admin and Superuser) */}
           <div style={{
             flex: 1,
             height: '50px',
             backgroundColor: isActiveTab('matches') ? '#2ecc71' : '#e0e0e0',
-            borderRadius: '0 8px 8px 0',
+            borderRadius: !isSuperuser ? '0 8px 8px 0' : '8px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -433,7 +549,7 @@ export default function Admin({ user }) {
                   {seasons.map((s, idx) => (
                     <tr key={s.id} style={{borderBottom: '1px solid #ddd', backgroundColor: idx % 2 === 0 ? '#fafafa' : 'white'}}>
                       <td style={{padding: '12px', borderRight: '1px solid #ddd'}}><strong>{s.name}</strong></td>
-                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{matches.filter(m => m.season_id === s.id).length}</td>
+                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{allMatches.filter(m => m.season_id === s.id).length}</td>
                       <td style={{padding: '12px'}}>
                         <button onClick={() => editSeason(s)} style={{padding: '6px 12px', fontSize: '12px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Edit</button>
                         <button onClick={() => deleteSeason(s.id, s.name)} style={{padding: '6px 12px', fontSize: '12px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', marginLeft: '8px'}}>Delete</button>
@@ -470,7 +586,7 @@ export default function Admin({ user }) {
                       <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.role}</td>
                       <td style={{padding: '12px'}}>
                         <button
-                          onClick={() => approveUser(u.id)}
+                          onClick={() => openApproveUserModal(u)}
                           style={{padding: '6px 12px', fontSize: '12px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}
                         >
                           Approve
@@ -512,11 +628,12 @@ export default function Admin({ user }) {
                 onBlur={(e) => e.target.style.borderColor = '#ddd'}
               />
               <select
-                value={newUser.role}
+                          onClick={() => approveUser(u.id)}
                 onChange={e => setNewUser({...newUser, role: e.target.value})}
                 style={{padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none', cursor: 'pointer'}}
               >
                 <option value="picker">Picker</option>
+                <option value="superuser">Superuser</option>
                 <option value="admin">Admin</option>
               </select>
               <input
@@ -585,7 +702,7 @@ export default function Admin({ user }) {
                     <tr key={u.id} style={{borderBottom: '1px solid #ddd', backgroundColor: idx % 2 === 0 ? '#fafafa' : 'white'}}>
                       <td style={{padding: '12px', borderRight: '1px solid #ddd'}}><strong>{u.username}</strong></td>
                       <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.display_name || u.username}</td>
-                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}><span style={{backgroundColor: u.role === 'admin' ? '#dc3545' : '#28a745', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px'}}>{u.role}</span></td>
+                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}><span style={{backgroundColor: u.role === 'admin' ? '#dc3545' : u.role === 'superuser' ? '#ff9800' : '#28a745', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px'}}>{u.role}</span></td>
                       <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.balance}</td>
                       <td style={{padding: '12px'}}>
                         <button onClick={() => editUser(u)} style={{padding: '6px 12px', fontSize: '12px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Edit</button>
@@ -602,26 +719,28 @@ export default function Admin({ user }) {
 
       {activeTab === 'matches' && (
         <>
-          <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
-            <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Bulk Upload CSV Matches</h3>
-            <small style={{display: 'block', marginBottom: '10px', color: '#666'}}>Format: Date,Venue,Team 1,Team 2,Time</small>
-            <textarea
-              value={csvInput}
-              onChange={e => setCsvInput(e.target.value)}
-              placeholder="Date,Venue,Team 1,Team 2,Time"
-              style={{width: '100%', height: 120, fontFamily: 'monospace', padding: '12px 15px', marginBottom: '15px', border: '1px solid #ddd', borderRadius: '15px', fontSize: '13px', outline: 'none'}}
-              onFocus={(e) => e.target.style.borderColor = '#2ecc71'}
-              onBlur={(e) => e.target.style.borderColor = '#ddd'}
-            />
-            <button
-              onClick={uploadCsv}
-              style={{padding: '12px 30px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '25px', cursor: 'pointer', fontWeight: 'bold'}}
-              onMouseOver={(e) => e.target.style.backgroundColor = '#27ae60'}
-              onMouseOut={(e) => e.target.style.backgroundColor = '#2ecc71'}
-            >
-              Upload CSV
-            </button>
-          </section>
+          {!isSuperuser && (
+            <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
+              <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Bulk Upload CSV Matches</h3>
+              <small style={{display: 'block', marginBottom: '10px', color: '#666'}}>Format: Date,Venue,Team 1,Team 2,Time</small>
+              <textarea
+                value={csvInput}
+                onChange={e => setCsvInput(e.target.value)}
+                placeholder="Date,Venue,Team 1,Team 2,Time"
+                style={{width: '100%', height: 120, fontFamily: 'monospace', padding: '12px 15px', marginBottom: '15px', border: '1px solid #ddd', borderRadius: '15px', fontSize: '13px', outline: 'none'}}
+                onFocus={(e) => e.target.style.borderColor = '#2ecc71'}
+                onBlur={(e) => e.target.style.borderColor = '#ddd'}
+              />
+              <button
+                onClick={uploadCsv}
+                style={{padding: '12px 30px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '25px', cursor: 'pointer', fontWeight: 'bold'}}
+                onMouseOver={(e) => e.target.style.backgroundColor = '#27ae60'}
+                onMouseOut={(e) => e.target.style.backgroundColor = '#2ecc71'}
+              >
+                Upload CSV
+              </button>
+            </section>
+          )}
 
           <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
             <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Manage Matches</h3>
@@ -631,7 +750,9 @@ export default function Admin({ user }) {
                 <option value="">-- Select Season --</option>
                 {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
-              <button onClick={clearAllMatches} style={{padding: '12px 30px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '25px', cursor: 'pointer', fontWeight: 'bold'}} onMouseOver={(e) => e.target.style.backgroundColor = '#c82333'} onMouseOut={(e) => e.target.style.backgroundColor = '#dc3545'}>Clear Matches</button>
+              {!isSuperuser && (
+                <button onClick={clearAllMatches} style={{padding: '12px 30px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '25px', cursor: 'pointer', fontWeight: 'bold'}} onMouseOver={(e) => e.target.style.backgroundColor = '#c82333'} onMouseOut={(e) => e.target.style.backgroundColor = '#dc3545'}>Clear Matches</button>
+              )}
             </div>
             {matches.length === 0 ? <p>No matches in this season</p> : (
               <table style={{width: '100%', borderCollapse: 'collapse'}}>
@@ -652,9 +773,70 @@ export default function Admin({ user }) {
                       <td style={{padding: '10px', borderRight: '1px solid #ddd'}}>{m.scheduled_at || 'N/A'}</td>
                       <td style={{padding: '10px', borderRight: '1px solid #ddd'}}>{m.winner || 'TBD'}</td>
                       <td style={{padding: '10px'}}>
-                        <button onClick={() => editMatch(m)} style={{padding: '5px 10px', fontSize: '12px', marginRight: '5px'}}>Edit</button>
-                        <button onClick={() => setWinner(m.id, m.home_team, m.away_team)} style={{padding: '5px 10px', fontSize: '12px', marginRight: '5px'}}>Set Winner</button>
-                        <button onClick={() => clearMatchVotes(m.id, m.home_team, m.away_team)} style={{padding: '5px 10px', fontSize: '12px', backgroundColor: '#FFA500', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}} onMouseOver={(e) => e.target.style.backgroundColor = '#FF8C00'} onMouseOut={(e) => e.target.style.backgroundColor = '#FFA500'}>Clear Votes</button>
+                        {!isSuperuser && (
+                          <>
+                            <button
+                              onClick={() => editMatch(m)}
+                              style={{
+                                padding: '5px 10px',
+                                fontSize: '12px',
+                                marginRight: '5px'
+                              }}
+                            >
+                              Edit
+                            </button>
+                          </>
+                        )}
+                        {(isSuperuser || userRole === 'admin') && (
+                          <button
+                            onClick={() => setWinner(m.id, m.home_team, m.away_team)}
+                            style={{
+                              padding: '5px 10px',
+                              fontSize: '12px',
+                              backgroundColor: '#2ecc71',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              marginRight: '5px'
+                            }}
+                          >
+                            Set Winner
+                          </button>
+                        )}
+                        {!isSuperuser && (
+                          <>
+                            <button
+                              onClick={() => clearMatchVotes(m.id, m.home_team, m.away_team)}
+                              style={{
+                                padding: '5px 10px',
+                                fontSize: '12px',
+                                backgroundColor: '#FFA500',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                marginRight: '5px'
+                              }}
+                            >
+                              Clear Votes
+                            </button>
+                            <button
+                              onClick={() => deleteMatch(m.id)}
+                              style={{
+                                padding: '5px 10px',
+                                fontSize: '12px',
+                                backgroundColor: '#e74c3c',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -732,6 +914,7 @@ export default function Admin({ user }) {
               <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Role:</label>
               <select value={editUserModal.formData.role} onChange={e => setEditUserModal({...editUserModal, formData: {...editUserModal.formData, role: e.target.value}})} style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd'}}>
                 <option value="picker">Picker</option>
+                <option value="superuser">Superuser</option>
                 <option value="admin">Admin</option>
               </select>
             </div>
@@ -766,8 +949,9 @@ export default function Admin({ user }) {
                 )}
               </div>
             </div>
-            <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px'}}>
+            <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px', flexWrap: 'wrap'}}>
               <button onClick={() => setEditUserModal({show: false, user: null, formData: {}, assignedSeasons: []})} style={{padding: '8px 16px', backgroundColor: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Cancel</button>
+              <button onClick={() => openPasswordResetModal(editUserModal.user.id, editUserModal.user.username)} style={{padding: '8px 16px', backgroundColor: '#ff9800', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Reset Password</button>
               <button onClick={submitEditUser} style={{padding: '8px 16px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Save</button>
             </div>
           </div>
@@ -785,6 +969,65 @@ export default function Admin({ user }) {
             <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px'}}>
               <button onClick={() => setEditSeasonModal({show: false, season: null, formData: {}})} style={{padding: '8px 16px', backgroundColor: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Cancel</button>
               <button onClick={submitEditSeason} style={{padding: '8px 16px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {passwordResetModal.show && (
+        <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000}}>
+          <div style={{backgroundColor: 'white', padding: '30px', borderRadius: '8px', maxWidth: '400px', width: '90%', boxShadow: '0 4px 20px rgba(0,0,0,0.3)'}}>
+            <h3 style={{marginTop: 0}}>Reset Password for {passwordResetModal.username}</h3>
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>New Password:</label>
+              <input type="password" value={passwordResetModal.newPassword} onChange={e => setPasswordResetModal({...passwordResetModal, newPassword: e.target.value})} placeholder="Enter new password" style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd'}} />
+            </div>
+            <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px'}}>
+              <button onClick={() => setPasswordResetModal({show: false, userId: null, username: '', newPassword: ''})} style={{padding: '8px 16px', backgroundColor: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Cancel</button>
+              <button onClick={submitPasswordReset} style={{padding: '8px 16px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Reset</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {approveUserModal.show && (
+        <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000}}>
+          <div style={{backgroundColor: 'white', padding: '30px', borderRadius: '8px', maxWidth: '500px', width: '90%', boxShadow: '0 4px 20px rgba(0,0,0,0.3)', maxHeight: '80vh', overflow: 'auto'}}>
+            <h3 style={{marginTop: 0}}>Approve User: {approveUserModal.user?.display_name}</h3>
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Initial Balance:</label>
+              <input type="number" value={approveUserModal.formData.balance} onChange={e => setApproveUserModal({...approveUserModal, formData: {...approveUserModal.formData, balance: parseInt(e.target.value) || 0}})} style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd'}} />
+            </div>
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '10px', fontWeight: 'bold'}}>Assign Seasons:</label>
+              <div style={{border: '1px solid #ddd', borderRadius: '4px', padding: '10px', maxHeight: '150px', overflow: 'auto'}}>
+                {seasons.length === 0 ? (
+                  <p style={{margin: 0, color: '#666'}}>No seasons available</p>
+                ) : (
+                  seasons.map(season => (
+                    <div key={season.id} style={{marginBottom: '8px', display: 'flex', alignItems: 'center'}}>
+                      <input
+                        type="checkbox"
+                        id={`approve-season-${season.id}`}
+                        checked={approveUserModal.selectedSeasons.includes(season.id)}
+                        onChange={e => {
+                          const isChecked = e.target.checked
+                          const newSeasons = isChecked
+                            ? [...approveUserModal.selectedSeasons, season.id]
+                            : approveUserModal.selectedSeasons.filter(sid => sid !== season.id)
+                          setApproveUserModal({...approveUserModal, selectedSeasons: newSeasons})
+                        }}
+                        style={{marginRight: '8px', cursor: 'pointer'}}
+                      />
+                      <label htmlFor={`approve-season-${season.id}`} style={{cursor: 'pointer', margin: 0}}>{season.name}</label>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+            <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px'}}>
+              <button onClick={() => setApproveUserModal({show: false, user: null, formData: {balance: 1000}, selectedSeasons: []})} style={{padding: '8px 16px', backgroundColor: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Cancel</button>
+              <button onClick={submitApproveUser} style={{padding: '8px 16px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Approve</button>
             </div>
           </div>
         </div>
