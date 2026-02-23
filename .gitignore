@@ -4,6 +4,9 @@ package-lock.json
 
 # Database
 backend/data.db
+backend/data/
+*.db
+*.db-journal
 
 # Logs
 *.log
@@ -24,4 +27,12 @@ Thumbs.db
 # Environment
 .env
 .env.local
+.env.production
 
+# Backups
+backups/
+*.backup
+
+# Fly.io
+.fly/
+fly.toml.bak

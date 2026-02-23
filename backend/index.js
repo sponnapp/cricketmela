@@ -5,7 +5,34 @@ const sqlite3 = require('sqlite3').verbose();
 const app = express();
 const port = process.env.PORT || 4000;
 
-app.use(cors());
+// CORS configuration - allow localhost and production domains
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://cricketmela.pages.dev',
+  // Add your custom domain here when you set it up
+  // 'https://your-custom-domain.com'
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, Postman, etc.)
+    if (!origin) return callback(null, true);
+
+    // Allow any .pages.dev or .trycloudflare.com domains for development
+    if (origin.endsWith('.pages.dev') || origin.endsWith('.trycloudflare.com')) {
+      return callback(null, true);
+    }
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true
+}));
+
 app.use(express.json());
 
 const DB_PATH = path.join(__dirname, 'data.db');

@@ -2,10 +2,20 @@ const fs = require('fs');
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
 
-const DB_PATH = path.join(__dirname, 'data.db');
+// Use persistent volume in production (Fly.io) or local in development
+const DB_DIR = process.env.NODE_ENV === 'production' ? '/app/data' : __dirname;
+const DB_PATH = path.join(DB_DIR, 'data.db');
+
+// Ensure directory exists
+if (!fs.existsSync(DB_DIR)) {
+  fs.mkdirSync(DB_DIR, { recursive: true });
+}
+
+console.log(`Using database at: ${DB_PATH}`);
 
 const db = new sqlite3.Database(DB_PATH, (err) => {
   if (err) return console.error('Failed to open DB', err);
+  console.log('Database connected successfully');
 });
 
 function hasColumn(table, column, cb) {
