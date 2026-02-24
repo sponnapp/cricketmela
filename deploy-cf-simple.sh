@@ -18,6 +18,11 @@ fi
 echo ""
 echo "📦 Step 1: Building frontend..."
 cd frontend
+
+# Clean dist directory to avoid permission issues
+echo "🧹 Cleaning old build..."
+rm -rf dist
+
 npm install
 npm run build
 
@@ -57,4 +62,5 @@ echo "🎉 All done! Your Cricket Mela app is now updated in production!"
 echo "=========================================="
 
 cd ..
+
 
