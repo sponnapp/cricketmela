@@ -1,13 +1,17 @@
 import React, { useEffect, useState } from 'react'
 import axios from 'axios'
 
-export default function Seasons({ onSelect }) {
+export default function Seasons({ user, onSelect }) {
   const [seasons, setSeasons] = useState([])
   const [hoveredId, setHoveredId] = useState(null)
 
   useEffect(() => {
-    axios.get('/api/seasons').then(r => setSeasons(r.data)).catch(() => setSeasons([]))
-  }, [])
+    if (user) {
+      axios.get('/api/seasons', {
+        headers: { 'x-user': user.username }
+      }).then(r => setSeasons(r.data)).catch(() => setSeasons([]))
+    }
+  }, [user])
 
   const styles = {
     container: {

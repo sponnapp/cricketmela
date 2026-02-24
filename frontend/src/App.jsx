@@ -111,7 +111,7 @@ export default function App() {
         ) : (
           <>
             {page === 'seasons' && (
-              <Seasons onSelect={id => { setSeasonId(id); setPage('matches') }} />
+              <Seasons user={user} onSelect={id => { setSeasonId(id); setPage('matches') }} />
             )}
             {page === 'matches' && seasonId && (
               <Matches seasonId={seasonId} user={user} refreshUser={u => setUser(u)} />

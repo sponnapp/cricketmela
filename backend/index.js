@@ -393,6 +393,23 @@ app.get('/api/matches', (req, res) => {
   res.status(403).json({ error: 'Forbidden' });
 });
 
+// Get user's vote for a specific match
+app.get('/api/matches/:id/user-vote', (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+  const matchId = Number(req.params.id);
+
+  const db = openDb();
+  db.get('SELECT team, points FROM votes WHERE match_id = ? AND user_id = ?',
+    [matchId, req.user.id],
+    (err, vote) => {
+      db.close();
+      if (err) return res.status(500).json({ error: 'DB error' });
+      if (!vote) return res.status(404).json({ error: 'No vote found' });
+      return res.json(vote);
+    }
+  );
+});
+
 // Voting endpoint: deduct user balance, insert/update vote (allow replacement before match starts)
 app.post('/api/matches/:id/vote', (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Unauthorized' });

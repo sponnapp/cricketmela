@@ -787,7 +787,7 @@ export default function Admin({ user }) {
                             </button>
                           </>
                         )}
-                        {(isSuperuser || userRole === 'admin') && (
+                        {(isSuperuser || user?.role === 'admin') && (
                           <button
                             onClick={() => setWinner(m.id, m.home_team, m.away_team)}
                             style={{
