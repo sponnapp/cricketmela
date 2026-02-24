@@ -17,11 +17,14 @@ export default function Matches({ seasonId, user, refreshUser }) {
     setLoading(true)
     try {
       const r = await axios.get(`/api/seasons/${seasonId}/matches`)
-      setMatches(r.data)
+
+      // Sort matches by date and time
+      const sortedMatches = sortMatchesByDateTime(r.data)
+      setMatches(sortedMatches)
 
       // Fetch user's existing votes for all matches
       const userVotesData = {}
-      for (const match of r.data) {
+      for (const match of sortedMatches) {
         try {
           const voteRes = await axios.get(`/api/matches/${match.id}/user-vote`, {
             headers: { 'x-user': user?.username }
@@ -93,6 +96,20 @@ export default function Matches({ seasonId, user, refreshUser }) {
     }
 
     return new Date(year, monthIndex, day, hour, minute, 0, 0)
+  }
+
+  // Sort matches by date and time (earliest first)
+  function sortMatchesByDateTime(matches) {
+    return [...matches].sort((a, b) => {
+      const dateA = parseMatchDateTime(a.scheduled_at)
+      const dateB = parseMatchDateTime(b.scheduled_at)
+
+      if (!dateA && !dateB) return 0
+      if (!dateA) return 1
+      if (!dateB) return -1
+
+      return dateA.getTime() - dateB.getTime()
+    })
   }
 
   // Check if match has started
