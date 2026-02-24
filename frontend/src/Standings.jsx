@@ -60,7 +60,7 @@ export default function Standings() {
                     </span>
                   </td>
                   <td style={{padding: '14px 12px', textAlign: 'center', fontWeight: '700', fontSize: '20px', color: '#667eea'}}>
-                    {user.balance}
+                    {Math.round(user.balance)}
                   </td>
                 </tr>
               ))}

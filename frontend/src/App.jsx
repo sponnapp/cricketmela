@@ -45,7 +45,7 @@ export default function App() {
     { key: 'profile', label: 'Profile', visible: !!user }
   ].filter(tab => tab.visible)
 
-  const balanceDisplay = user?.role === 'admin' ? 'Unlimited' : (user?.balance ?? '—')
+  const balanceDisplay = user?.role === 'admin' ? 'Unlimited' : (Math.round(user?.balance ?? 0) || '—')
   const displayName = user?.display_name || user?.displayName || user?.username || ''
 
   return (

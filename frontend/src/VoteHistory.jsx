@@ -22,7 +22,7 @@ export default function VoteHistory({ user }) {
     <div style={{padding: '20px', fontFamily: 'Inter, sans-serif'}}>
       <h2 style={{fontFamily: 'Poppins, sans-serif', fontSize: '28px', fontWeight: '600', letterSpacing: '-0.5px', marginBottom: '25px'}}>📊 Your Vote History</h2>
       <div style={{marginBottom: '20px', fontSize: '14px'}}>
-        <strong style={{fontSize: '16px', color: '#667eea'}}>Current Balance: {user?.balance || 0} points</strong>
+        <strong style={{fontSize: '16px', color: '#667eea'}}>Current Balance: {Math.round(user?.balance ?? 0)} points</strong>
       </div>
       {user?.role === 'admin' ? (
         <p style={{fontSize: '14px', color: '#718096'}}>Admin accounts do not participate in voting.</p>
@@ -58,16 +58,16 @@ export default function VoteHistory({ user }) {
                     {v.total_payout === null || v.total_payout === undefined ? (
                       <span style={{color: '#a0aec0'}}>—</span>
                     ) : (
-                      <span style={{color: v.total_payout > 0 ? '#2d3748' : '#718096'}}>{v.total_payout}</span>
+                      <span style={{color: v.total_payout > 0 ? '#2d3748' : '#718096'}}>{Math.round(v.total_payout)}</span>
                     )}
                   </td>
                   <td style={{padding: '14px 12px', fontSize: '13px', fontWeight: '600'}}>
                     {v.net_points === null || v.net_points === undefined ? (
                       <span style={{color: '#a0aec0'}}>—</span>
                     ) : v.net_points >= 0 ? (
-                      <span style={{color: '#38a169'}}>+{v.net_points}</span>
+                      <span style={{color: '#38a169'}}>+{Math.round(v.net_points)}</span>
                     ) : (
-                      <span style={{color: '#e53e3e'}}>{v.net_points}</span>
+                      <span style={{color: '#e53e3e'}}>{Math.round(v.net_points)}</span>
                     )}
                   </td>
                 </tr>

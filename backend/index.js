@@ -1043,11 +1043,11 @@ app.post('/api/admin/matches/:id/winner', requireRole(['admin', 'superuser']), (
                   db.all('SELECT id, user_id, points FROM votes WHERE match_id = ? AND team = ?', [id, winner], (err4, winnerVotes) => {
                     if (err4) { db.close(); return res.status(500).json({ error: 'DB error' }); }
                     const payouts = winnerVotes.map(v => ({ user_id: v.user_id, stake: v.points, share: (v.points / totalWinner) * totalLoser }));
-                    // Apply payouts (add stake back + share)
+                    // Apply payouts (add stake back + share), rounded to whole numbers
                     const ops = payouts.length;
                     let done = 0;
                     payouts.forEach(p => {
-                      const amount = p.stake + p.share; // return stake + winnings
+                      const amount = Math.round(p.stake + p.share); // return stake + winnings, rounded to whole number
                       db.run('UPDATE users SET balance = balance + ? WHERE id = ?', [amount, p.user_id], function(err5) {
                         if (err5) console.error('Error updating user balance', err5);
                         done += 1;

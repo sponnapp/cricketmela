@@ -767,7 +767,7 @@ export default function Admin({ user }) {
                       <td style={{padding: '12px', borderRight: '1px solid #ddd'}}><strong>{u.username}</strong></td>
                       <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.display_name || u.username}</td>
                       <td style={{padding: '12px', borderRight: '1px solid #ddd'}}><span style={{backgroundColor: u.role === 'admin' ? '#dc3545' : u.role === 'superuser' ? '#ff9800' : '#28a745', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px'}}>{u.role}</span></td>
-                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.balance}</td>
+                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{Math.round(u.balance)}</td>
                       <td style={{padding: '12px'}}>
                         <button onClick={() => editUser(u)} style={{padding: '6px 12px', fontSize: '12px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Edit</button>
                         <button onClick={() => deleteUser(u.id, u.username)} style={{padding: '6px 12px', fontSize: '12px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', marginLeft: '8px'}}>Delete</button>
