@@ -7,8 +7,8 @@ Welcome to the Cricket Mela deployment documentation! This index helps you find 
 ## 🚀 Getting Started
 
 ### **I'm ready to deploy NOW!**
-1. Read: [START_DEPLOYMENT.md](./START_DEPLOYMENT.md) (5 min overview)
-2. Follow: [QUICK_DEPLOY.md](./QUICK_DEPLOY.md) (30 min deployment)
+1. Read: [START_DEPLOYMENT.md](../START_DEPLOYMENT.md) (5 min overview)
+2. Follow: [QUICK_DEPLOY.md](QUICK_DEPLOY.md) (30 min deployment)
 3. Use: `./deploy-backend.sh` (automated script)
 
 ---
@@ -18,21 +18,21 @@ Welcome to the Cricket Mela deployment documentation! This index helps you find 
 ### Overview Documents
 | Document | Purpose | Time Required |
 |----------|---------|---------------|
-| [START_DEPLOYMENT.md](./START_DEPLOYMENT.md) | Overview and quick start | 5 min read |
-| [DEPLOYMENT_README.md](./DEPLOYMENT_README.md) | Overview of all deployment files | 10 min read |
+| [START_DEPLOYMENT.md](../START_DEPLOYMENT.md) | Overview and quick start | 5 min read |
+| [DEPLOYMENT_README.md](DEPLOYMENT_README.md) | Overview of all deployment files | 10 min read |
 | **This file** | Navigation index | - |
 
 ### Deployment Guides
 | Document | Purpose | Best For |
 |----------|---------|----------|
-| [QUICK_DEPLOY.md](./QUICK_DEPLOY.md) | Fast track deployment | Quick deployment |
-| [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) | Comprehensive guide | Detailed instructions |
-| [DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md) | Step-by-step checklist | Systematic approach |
+| [QUICK_DEPLOY.md](QUICK_DEPLOY.md) | Fast track deployment | Quick deployment |
+| [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Comprehensive guide | Detailed instructions |
+| [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md) | Step-by-step checklist | Systematic approach |
 
 ### Technical Documentation
 | Document | Purpose | Best For |
 |----------|---------|----------|
-| [DEPLOYMENT_ARCHITECTURE.md](./DEPLOYMENT_ARCHITECTURE.md) | System architecture & flows | Understanding the system |
+| [DEPLOYMENT_ARCHITECTURE.md](DEPLOYMENT_ARCHITECTURE.md) | System architecture & flows | Understanding the system |
 
 ---
 
@@ -103,14 +103,14 @@ frontend/
 ## 🎯 Documentation by Task
 
 ### Task: Understanding the System
-→ Read: [DEPLOYMENT_ARCHITECTURE.md](./DEPLOYMENT_ARCHITECTURE.md)
+→ Read: [DEPLOYMENT_ARCHITECTURE.md](DEPLOYMENT_ARCHITECTURE.md)
 - System architecture diagrams
 - Data flow diagrams
 - Security layers
 - Performance optimization
 
 ### Task: First-Time Deployment
-→ Follow: [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)
+→ Follow: [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)
 - Prerequisites setup
 - Backend deployment (Fly.io)
 - Frontend deployment (Cloudflare Pages)
@@ -118,20 +118,20 @@ frontend/
 - Troubleshooting
 
 ### Task: Quick Deployment
-→ Follow: [QUICK_DEPLOY.md](./QUICK_DEPLOY.md)
+→ Follow: [QUICK_DEPLOY.md](QUICK_DEPLOY.md)
 - 3-step deployment process
 - Quick commands
 - Fast testing
 
 ### Task: Ensuring Complete Deployment
-→ Use: [DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md)
+→ Use: [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)
 - Pre-deployment checklist
 - Deployment steps
 - Post-deployment verification
 - Monitoring setup
 
 ### Task: Understanding Files
-→ Read: [DEPLOYMENT_README.md](./DEPLOYMENT_README.md)
+→ Read: [DEPLOYMENT_README.md](DEPLOYMENT_README.md)
 - File structure overview
 - Configuration explanation
 - Scripts documentation
@@ -213,7 +213,7 @@ Quick checklist before you start:
 - [ ] You've tested the app locally
 - [ ] You've read START_DEPLOYMENT.md
 
-**Ready?** → Open [QUICK_DEPLOY.md](./QUICK_DEPLOY.md) and let's go! 🚀
+**Ready?** → Open [QUICK_DEPLOY.md](QUICK_DEPLOY.md) and let's go! 🚀
 
 ---
 
@@ -303,9 +303,9 @@ You'll know deployment is successful when:
 
 ## 🚀 Ready to Deploy?
 
-1. **Read**: [START_DEPLOYMENT.md](./START_DEPLOYMENT.md)
-2. **Follow**: [QUICK_DEPLOY.md](./QUICK_DEPLOY.md)
-3. **Verify**: [DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md)
+1. **Read**: [START_DEPLOYMENT.md](../START_DEPLOYMENT.md)
+2. **Follow**: [QUICK_DEPLOY.md](QUICK_DEPLOY.md)
+3. **Verify**: [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)
 
 **Good luck!** 🎉
 

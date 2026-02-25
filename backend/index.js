@@ -1134,6 +1134,98 @@ app.post('/api/admin/matches/:id/clear-votes', requireRole('admin'), (req, res) 
   });
 });
 
+// Admin: Clear winner for a match (revert winner selection and payout calculations)
+app.post('/api/admin/matches/:id/clear-winner', requireRole(['admin', 'superuser']), (req, res) => {
+  const matchId = Number(req.params.id);
+  if (!matchId) return res.status(400).json({ error: 'matchId required' });
+
+  const db = openDb();
+  db.serialize(() => {
+    // First, get the match to check if it has a winner
+    db.get('SELECT id, winner FROM matches WHERE id = ?', [matchId], (err1, match) => {
+      if (err1) { db.close(); return res.status(500).json({ error: 'DB error' }); }
+      if (!match) { db.close(); return res.status(404).json({ error: 'Match not found' }); }
+      if (!match.winner) { db.close(); return res.json({ ok: true, message: 'No winner set for this match' }); }
+
+      const winner = match.winner;
+
+      // Get all votes for this match
+      db.all('SELECT user_id, team, points FROM votes WHERE match_id = ?', [matchId], (err2, votes) => {
+        if (err2) { db.close(); return res.status(500).json({ error: 'Failed to fetch votes' }); }
+
+        if (!votes || votes.length === 0) {
+          // No votes, just clear the winner
+          db.run('UPDATE matches SET winner = NULL WHERE id = ?', [matchId], function(err3) {
+            db.close();
+            if (err3) return res.status(500).json({ error: 'Failed to clear winner' });
+            res.json({ ok: true, message: 'Winner cleared (no votes to revert)' });
+          });
+          return;
+        }
+
+        // Calculate totals
+        const winnerVotes = votes.filter(v => v.team === winner);
+        const loserVotes = votes.filter(v => v.team !== winner);
+
+        const totalWinner = winnerVotes.reduce((sum, v) => sum + v.points, 0);
+        const totalLoser = loserVotes.reduce((sum, v) => sum + v.points, 0);
+
+        // Revert winner payouts (they received stake + share, we need to take back just the share)
+        let processed = 0;
+        const totalToRevert = winnerVotes.length + loserVotes.length;
+
+        if (totalToRevert === 0) {
+          // No votes to revert
+          db.run('UPDATE matches SET winner = NULL WHERE id = ?', [matchId], function(err3) {
+            db.close();
+            if (err3) return res.status(500).json({ error: 'Failed to clear winner' });
+            res.json({ ok: true, message: 'Winner cleared' });
+          });
+          return;
+        }
+
+        // For each winner, subtract the EXACT amount they received during set winner
+        // During set winner, they received: Math.round(stake + share)
+        // So we need to subtract: Math.round(stake + share), not just the share
+        winnerVotes.forEach(v => {
+          const share = totalWinner > 0 ? (v.points / totalWinner) * totalLoser : 0;
+          // Calculate the exact amount that was added: Math.round(stake + share)
+          const amountAdded = Math.round(v.points + share);
+          // Subtract the exact amount that was added
+          db.run('UPDATE users SET balance = balance - ? WHERE id = ?', [amountAdded, v.user_id], function(err4) {
+            processed += 1;
+            if (processed === totalToRevert) {
+              finishClearWinner();
+            }
+          });
+        });
+
+        // For losers, we don't need to do anything - they already lost their stake
+        loserVotes.forEach(v => {
+          processed += 1;
+          if (processed === totalToRevert) {
+            finishClearWinner();
+          }
+        });
+
+        function finishClearWinner() {
+          // Clear the winner field
+          db.run('UPDATE matches SET winner = NULL WHERE id = ?', [matchId], function(err5) {
+            db.close();
+            if (err5) return res.status(500).json({ error: 'Failed to clear winner' });
+            res.json({
+              ok: true,
+              message: 'Winner cleared and payouts reverted',
+              winnersReverted: winnerVotes.length,
+              totalReverted: totalLoser
+            });
+          });
+        }
+      });
+    });
+  });
+});
+
 // Admin: TEMPORARY - Clear matches for a specific season (for data cleanup only)
 app.post('/api/admin/clear-matches', requireRole('admin'), (req, res) => {
   const { seasonId } = req.body;

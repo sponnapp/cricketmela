@@ -71,15 +71,6 @@ export default function Admin({ user }) {
   }
 
   // Sort matches by date and time
-  function sortMatchesByDateTime(matches) {
-    return [...matches].sort((a, b) => {
-      const dateA = parseMatchDateTime(a.scheduled_at)
-      const dateB = parseMatchDateTime(b.scheduled_at)
-      if (!dateA && !dateB) return 0
-      if (!dateA) return 1
-      if (!dateB) return -1
-      return dateA.getTime() - dateB.getTime()
-    })
   }
 
   async function fetchAllMatches() {
@@ -406,23 +397,6 @@ export default function Admin({ user }) {
     }
   }
 
-  async function clearWinner(matchId, homeTeam, awayTeam) {
-    if (!window.confirm(`Are you sure? This will clear the winner for ${homeTeam} vs ${awayTeam} and revert all payout calculations.\n\nNote: Votes will remain, but winner payouts will be reversed.`)) {
-      return
-    }
-    try {
-      const res = await axios.post(`/api/admin/matches/${matchId}/clear-winner`,
-        {},
-        { headers: { 'x-user': user?.username || 'admin' } }
-      )
-      alert(`${res.data.message}\n\nWinners reverted: ${res.data.winnersReverted || 0}\nTotal reverted: ${res.data.totalReverted || 0} points`)
-      fetchMatches(selectedSeason)
-      fetchUsers() // Refresh user balances
-    } catch (e) {
-      alert(e.response?.data?.error || 'Failed to clear winner')
-    }
-  }
-
   async function deleteMatch(matchId, homeTeam, awayTeam) {
     if (!window.confirm(`Are you sure you want to DELETE this match?\n\n${homeTeam} vs ${awayTeam}\n\nThis will refund all votes and remove the match permanently. This action cannot be undone.`)) {
       return
@@ -667,7 +641,7 @@ export default function Admin({ user }) {
                 onBlur={(e) => e.target.style.borderColor = '#ddd'}
               />
               <select
-                          onClick={() => approveUser(u.id)}
+                value={newUser.role}
                 onChange={e => setNewUser({...newUser, role: e.target.value})}
                 style={{padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none', cursor: 'pointer'}}
               >
@@ -742,7 +716,7 @@ export default function Admin({ user }) {
                       <td style={{padding: '12px', borderRight: '1px solid #ddd'}}><strong>{u.username}</strong></td>
                       <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.display_name || u.username}</td>
                       <td style={{padding: '12px', borderRight: '1px solid #ddd'}}><span style={{backgroundColor: u.role === 'admin' ? '#dc3545' : u.role === 'superuser' ? '#ff9800' : '#28a745', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px'}}>{u.role}</span></td>
-                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.balance}</td>
+                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{Math.round(u.balance)}</td>
                       <td style={{padding: '12px'}}>
                         <button onClick={() => editUser(u)} style={{padding: '6px 12px', fontSize: '12px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Edit</button>
                         <button onClick={() => deleteUser(u.id, u.username)} style={{padding: '6px 12px', fontSize: '12px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', marginLeft: '8px'}}>Delete</button>
@@ -827,40 +801,21 @@ export default function Admin({ user }) {
                           </>
                         )}
                         {(isSuperuser || user?.role === 'admin') && (
-                          <>
-                            <button
-                              onClick={() => setWinner(m.id, m.home_team, m.away_team)}
-                              style={{
-                                padding: '5px 10px',
-                                fontSize: '12px',
-                                backgroundColor: '#2ecc71',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '4px',
-                                cursor: 'pointer',
-                                marginRight: '5px'
-                              }}
-                            >
-                              Set Winner
-                            </button>
-                            {m.winner && !isSuperuser && (
-                              <button
-                                onClick={() => clearWinner(m.id, m.home_team, m.away_team)}
-                                style={{
-                                  padding: '5px 10px',
-                                  fontSize: '12px',
-                                  backgroundColor: '#f39c12',
-                                  color: 'white',
-                                  border: 'none',
-                                  borderRadius: '4px',
-                                  cursor: 'pointer',
-                                  marginRight: '5px'
-                                }}
-                              >
-                                Clear Winner
-                              </button>
-                            )}
-                          </>
+                          <button
+                            onClick={() => setWinner(m.id, m.home_team, m.away_team)}
+                            style={{
+                              padding: '5px 10px',
+                              fontSize: '12px',
+                              backgroundColor: '#2ecc71',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              marginRight: '5px'
+                            }}
+                          >
+                            Set Winner
+                          </button>
                         )}
                         {!isSuperuser && (
                           <>
