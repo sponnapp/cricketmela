@@ -114,6 +114,7 @@ function initializeDatabase() {
       username TEXT UNIQUE,
       password TEXT,
       display_name TEXT,
+      email TEXT DEFAULT 'xyz@xyz.com',
       role TEXT DEFAULT 'picker',
       balance INTEGER DEFAULT 500,
       approved INTEGER DEFAULT 1
@@ -222,6 +223,18 @@ function initializeDatabase() {
             } else {
               console.log('✅ Successfully added approved column to users table');
               db.run(`UPDATE users SET approved = 1 WHERE approved IS NULL`);
+            }
+          });
+        }
+
+        const hasEmail = columns.some(col => col.name === 'email');
+        if (!hasEmail) {
+          db.run(`ALTER TABLE users ADD COLUMN email TEXT DEFAULT 'xyz@xyz.com'`, (alterErr) => {
+            if (alterErr) {
+              console.log('Note: Could not add email column (may already exist):', alterErr.message);
+            } else {
+              console.log('✅ Successfully added email column to users table');
+              db.run(`UPDATE users SET email = 'xyz@xyz.com' WHERE email IS NULL`);
             }
           });
         }
@@ -646,7 +659,7 @@ app.post('/api/admin/users', requireRole('admin'), (req, res) => {
 // Admin: list all users (including admin and pending)
 app.get('/api/admin/users', requireRole('admin'), (req, res) => {
   const db = openDb();
-  db.all('SELECT id, username, display_name, role, balance, approved FROM users ORDER BY id ASC', (err, rows) => {
+  db.all('SELECT id, username, display_name, role, balance, approved, email FROM users ORDER BY id ASC', (err, rows) => {
     db.close();
     if (err) return res.status(500).json({ error: 'DB error' });
     res.json(rows || []);
@@ -717,10 +730,10 @@ app.post('/api/admin/users/:id/approve', requireRole('admin'), (req, res) => {
 // Admin: update user role and balance
 app.put('/api/admin/users/:id', requireRole('admin'), (req, res) => {
   const id = Number(req.params.id);
-  const { role, balance, display_name } = req.body;
+  const { role, balance, display_name, email } = req.body;
 
-  if (!role && balance === undefined && !display_name) {
-    return res.status(400).json({ error: 'role, display_name or balance required' });
+  if (!role && balance === undefined && !display_name && !email) {
+    return res.status(400).json({ error: 'role, display_name, email or balance required' });
   }
 
   const db = openDb();
@@ -738,6 +751,10 @@ app.put('/api/admin/users/:id', requireRole('admin'), (req, res) => {
   if (display_name) {
     updates.push('display_name = ?');
     values.push(display_name);
+  }
+  if (email !== undefined) {
+    updates.push('email = ?');
+    values.push(email);
   }
 
   values.push(id);
@@ -820,15 +837,16 @@ app.delete('/api/admin/users/:id', requireRole('admin'), (req, res) => {
 
 // Signup endpoint: create pending user
 app.post('/api/signup', (req, res) => {
-  const { username, password, display_name } = req.body;
+  const { username, password, display_name, email } = req.body;
   if (!username || !password) {
     return res.status(400).json({ error: 'username and password required' });
   }
   // Use username as default display_name if not provided
   const finalDisplayName = display_name || username;
+  const finalEmail = email || 'xyz@xyz.com';
   const db = openDb();
-  db.run('INSERT INTO users (username, password, display_name, role, balance, approved) VALUES (?, ?, ?, ?, ?, 0)',
-    [username, password, finalDisplayName, 'picker', 0], function(err) {
+  db.run('INSERT INTO users (username, password, display_name, email, role, balance, approved) VALUES (?, ?, ?, ?, ?, ?, 0)',
+    [username, password, finalDisplayName, finalEmail, 'picker', 0], function(err) {
       db.close();
       if (err) return res.status(500).json({ error: 'User already exists or DB error' });
       res.status(201).json({ ok: true, message: 'Signup submitted for admin approval' });

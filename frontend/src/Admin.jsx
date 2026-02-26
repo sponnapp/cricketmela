@@ -9,7 +9,7 @@ export default function Admin({ user }) {
   const [users, setUsers] = useState([])
   const [pendingUsers, setPendingUsers] = useState([])
   const [newSeason, setNewSeason] = useState('')
-  const [newUser, setNewUser] = useState({ username: '', password: '', role: 'picker', balance: 500, display_name: '', season_ids: [] })
+  const [newUser, setNewUser] = useState({ username: '', password: '', role: 'picker', balance: 500, display_name: '', email: '', season_ids: [] })
   const [csvInput, setCsvInput] = useState('')
   const [selectedSeason, setSelectedSeason] = useState('')
   const [winnerModal, setWinnerModal] = useState({show: false, matchId: null, team1: '', team2: '', selectedTeam: ''})
@@ -136,7 +136,7 @@ export default function Admin({ user }) {
       await axios.post('/api/admin/users', newUser, {
         headers: { 'x-user': user?.username || 'admin' }
       })
-      setNewUser({ username: '', password: '', role: 'picker', balance: 500, display_name: '', season_ids: [] })
+      setNewUser({ username: '', password: '', role: 'picker', balance: 500, display_name: '', email: '', season_ids: [] })
       fetchUsers()
       alert('User created successfully')
     } catch (e) {
@@ -156,7 +156,8 @@ export default function Admin({ user }) {
         formData: {
           username: userObj.username,
           role: userObj.role,
-          balance: userObj.balance
+          balance: userObj.balance,
+          email: userObj.email || 'xyz@xyz.com'
         },
         assignedSeasons: seasonsRes.data || []
       })
@@ -168,7 +169,8 @@ export default function Admin({ user }) {
         formData: {
           username: userObj.username,
           role: userObj.role,
-          balance: userObj.balance
+          balance: userObj.balance,
+          email: userObj.email || 'xyz@xyz.com'
         },
         assignedSeasons: []
       })
@@ -731,6 +733,7 @@ export default function Admin({ user }) {
                   <tr style={{backgroundColor: '#f5f5f5', borderBottom: '2px solid #2ecc71'}}>
                     <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Username</th>
                     <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Display Name</th>
+                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Email</th>
                     <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Role</th>
                     <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Balance</th>
                     <th style={{padding: '12px', textAlign: 'left'}}>Action</th>
@@ -741,6 +744,7 @@ export default function Admin({ user }) {
                     <tr key={u.id} style={{borderBottom: '1px solid #ddd', backgroundColor: idx % 2 === 0 ? '#fafafa' : 'white'}}>
                       <td style={{padding: '12px', borderRight: '1px solid #ddd'}}><strong>{u.username}</strong></td>
                       <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.display_name || u.username}</td>
+                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.email || 'xyz@xyz.com'}</td>
                       <td style={{padding: '12px', borderRight: '1px solid #ddd'}}><span style={{backgroundColor: u.role === 'admin' ? '#dc3545' : u.role === 'superuser' ? '#ff9800' : '#28a745', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px'}}>{u.role}</span></td>
                       <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.balance}</td>
                       <td style={{padding: '12px'}}>
@@ -967,6 +971,10 @@ export default function Admin({ user }) {
             <div style={{margin: '15px 0'}}>
               <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Username:</label>
               <input type="text" value={editUserModal.formData.username} disabled style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd', backgroundColor: '#f5f5f5'}} />
+            </div>
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Email:</label>
+              <input type="email" value={editUserModal.formData.email || ''} onChange={e => setEditUserModal({...editUserModal, formData: {...editUserModal.formData, email: e.target.value}})} placeholder="xyz@xyz.com" style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd'}} />
             </div>
             <div style={{margin: '15px 0'}}>
               <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Role:</label>

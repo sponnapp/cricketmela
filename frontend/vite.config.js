@@ -18,12 +18,11 @@ export default defineConfig({
     // Or use this to allow all hosts:
     // allowedHosts: true,
     strictPort: false,
-    hmr: {
-      clientPort: 443,
-      protocol: 'wss'
-    },
     proxy: {
-      '/api': 'http://localhost:4000'
+      '/api': {
+        target: 'http://localhost:4000',
+        changeOrigin: true
+      }
     }
   }
 })

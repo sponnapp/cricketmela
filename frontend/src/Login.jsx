@@ -5,6 +5,7 @@ export default function Login({ onLogin }) {
   const [isSignup, setIsSignup] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [email, setEmail] = useState('')
   const [error, setError] = useState(null)
   const [message, setMessage] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -16,13 +17,17 @@ export default function Login({ onLogin }) {
 
     if (isSignup) {
       if (!username || !password) return setError('Enter username and password')
+      if (!email) return setError('Enter email address')
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+      if (!emailRegex.test(email)) return setError('Enter a valid email address')
       setLoading(true)
       try {
-        await axios.post('/api/signup', { username, password })
+        await axios.post('/api/signup', { username, password, email })
         setLoading(false)
         setMessage('Signup submitted. Wait for admin approval.')
         setIsSignup(false)
         setPassword('')
+        setEmail('')
       } catch (err) {
         setLoading(false)
         setError(err.response?.data?.error || 'Signup failed')
@@ -198,6 +203,7 @@ export default function Login({ onLogin }) {
 
   const [usernameInputFocused, setUsernameInputFocused] = useState(false)
   const [passwordInputFocused, setPasswordInputFocused] = useState(false)
+  const [emailInputFocused, setEmailInputFocused] = useState(false)
   const [buttonHovered, setButtonHovered] = useState(false)
   const [facebookHovered, setFacebookHovered] = useState(false)
   const [googleHovered, setGoogleHovered] = useState(false)
@@ -242,6 +248,25 @@ export default function Login({ onLogin }) {
               }}
             />
           </div>
+
+          {/* Email Input (Signup only) */}
+          {isSignup && (
+            <div style={styles.inputWrapper}>
+              <span style={styles.icon}>✉️</span>
+              <input
+                type="email"
+                placeholder="Email address"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                onFocus={() => setEmailInputFocused(true)}
+                onBlur={() => setEmailInputFocused(false)}
+                style={{
+                  ...styles.input,
+                  ...(emailInputFocused ? styles.inputFocus : {})
+                }}
+              />
+            </div>
+          )}
 
           {/* Remember Me */}
           {!isSignup && (
@@ -311,7 +336,7 @@ export default function Login({ onLogin }) {
         {/* Footer Text */}
         <div style={styles.footerText}>
           {isSignup ? (
-            <>Already have an account? <span style={styles.link} onClick={() => { setIsSignup(false); setError(null); setMessage(null) }}>Back to login</span></>
+            <>Already have an account? <span style={styles.link} onClick={() => { setIsSignup(false); setError(null); setMessage(null); setEmail('') }}>Back to login</span></>
           ) : (
             <>Not a member? <span style={styles.link} onClick={() => { setIsSignup(true); setError(null); setMessage(null) }}>Sign up now</span></>
           )}
