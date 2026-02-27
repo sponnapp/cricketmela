@@ -800,112 +800,156 @@ export default function Admin({ user }) {
               )}
             </div>
             {matches.length === 0 ? <p>No matches in this season</p> : (
-              <table style={{width: '100%', borderCollapse: 'collapse'}}>
-                <thead>
-                  <tr style={{backgroundColor: '#f0f0f0', borderBottom: '2px solid #333'}}>
-                    <th style={{padding: '10px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Match</th>
-                    <th style={{padding: '10px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Venue</th>
-                    <th style={{padding: '10px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Date/Time</th>
-                    <th style={{padding: '10px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Winner</th>
-                    <th style={{padding: '10px', textAlign: 'left'}}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {matches.map(m => (
-                    <tr key={m.id} style={{borderBottom: '1px solid #ddd'}}>
-                      <td style={{padding: '10px', borderRight: '1px solid #ddd'}}><strong>{m.home_team}</strong> vs <strong>{m.away_team}</strong></td>
-                      <td style={{padding: '10px', borderRight: '1px solid #ddd'}}>{m.venue || 'N/A'}</td>
-                      <td style={{padding: '10px', borderRight: '1px solid #ddd'}}>{m.scheduled_at || 'N/A'}</td>
-                      <td style={{padding: '10px', borderRight: '1px solid #ddd'}}>{m.winner || 'TBD'}</td>
-                      <td style={{padding: '10px'}}>
-                        {!isSuperuser && (
-                          <>
-                            <button
-                              onClick={() => editMatch(m)}
-                              style={{
-                                padding: '5px 10px',
-                                fontSize: '12px',
-                                marginRight: '5px'
-                              }}
-                            >
-                              Edit
-                            </button>
-                          </>
-                        )}
-                        {(isSuperuser || user?.role === 'admin') && (
-                          <>
-                            <button
-                              onClick={() => setWinner(m.id, m.home_team, m.away_team)}
-                              style={{
-                                padding: '5px 10px',
-                                fontSize: '12px',
-                                backgroundColor: '#2ecc71',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '4px',
-                                cursor: 'pointer',
-                                marginRight: '5px'
-                              }}
-                            >
-                              Set Winner
-                            </button>
-                            {m.winner && !isSuperuser && (
+              <div style={{
+                overflowX: 'auto',
+                backgroundColor: 'white',
+                borderRadius: '16px',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+                padding: '0',
+                border: '1px solid #e8e8e8'
+              }}>
+                <table style={{
+                  width: '100%',
+                  borderCollapse: 'collapse',
+                  fontFamily: 'Inter, sans-serif'
+                }}>
+                  <thead>
+                    <tr style={{
+                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                      color: 'white'
+                    }}>
+                      <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Match</th>
+                      <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Venue</th>
+                      <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Date/Time</th>
+                      <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Winner</th>
+                      <th style={{padding: '14px 12px', textAlign: 'center', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {matches.map((m, idx) => (
+                      <tr key={m.id} style={{
+                        borderBottom: '1px solid #f0f0f0',
+                        backgroundColor: idx % 2 === 0 ? '#fafbfc' : 'white',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f7fa'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#fafbfc' : 'white'}
+                      >
+                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '13px', fontWeight: '500'}}><strong>{m.home_team}</strong> vs <strong>{m.away_team}</strong></td>
+                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{m.venue || 'N/A'}</td>
+                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{m.scheduled_at || 'N/A'}</td>
+                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px'}}>
+                          {m.winner ? <span style={{backgroundColor: '#2ecc71', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600'}}>{m.winner}</span> : <span style={{color: '#a0aec0', fontSize: '12px', fontWeight: '600'}}>TBD</span>}
+                        </td>
+                        <td style={{padding: '14px 12px', textAlign: 'center'}}>
+                          <div style={{display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap'}}>
+                            {!isSuperuser && (
                               <button
-                                onClick={() => clearWinner(m.id, m.home_team, m.away_team)}
+                                onClick={() => editMatch(m)}
                                 style={{
-                                  padding: '5px 10px',
-                                  fontSize: '12px',
+                                  padding: '6px 12px',
+                                  fontSize: '11px',
+                                  backgroundColor: '#667eea',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  fontWeight: '600',
+                                  transition: 'all 0.2s ease'
+                                }}
+                                onMouseOver={(e) => e.target.style.backgroundColor = '#5568d3'}
+                                onMouseOut={(e) => e.target.style.backgroundColor = '#667eea'}
+                              >
+                                Edit
+                              </button>
+                            )}
+                            {(isSuperuser || user?.role === 'admin') && (
+                              <button
+                                onClick={() => setWinner(m.id, m.home_team, m.away_team)}
+                                style={{
+                                  padding: '6px 12px',
+                                  fontSize: '11px',
+                                  backgroundColor: '#2ecc71',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  fontWeight: '600',
+                                  transition: 'all 0.2s ease'
+                                }}
+                                onMouseOver={(e) => e.target.style.backgroundColor = '#27ae60'}
+                                onMouseOut={(e) => e.target.style.backgroundColor = '#2ecc71'}
+                              >
+                                Set Winner
+                              </button>
+                            )}
+                            {!isSuperuser && m.winner && (
+                              <button
+                                onClick={() => clearWinner(m.id)}
+                                style={{
+                                  padding: '6px 12px',
+                                  fontSize: '11px',
                                   backgroundColor: '#f39c12',
                                   color: 'white',
                                   border: 'none',
-                                  borderRadius: '4px',
+                                  borderRadius: '6px',
                                   cursor: 'pointer',
-                                  marginRight: '5px'
+                                  fontWeight: '600',
+                                  transition: 'all 0.2s ease'
                                 }}
+                                onMouseOver={(e) => e.target.style.backgroundColor = '#e67e22'}
+                                onMouseOut={(e) => e.target.style.backgroundColor = '#f39c12'}
                               >
                                 Clear Winner
                               </button>
                             )}
-                          </>
-                        )}
-                        {!isSuperuser && (
-                          <>
-                            <button
-                              onClick={() => clearMatchVotes(m.id, m.home_team, m.away_team)}
-                              style={{
-                                padding: '5px 10px',
-                                fontSize: '12px',
-                                backgroundColor: '#FFA500',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '4px',
-                                cursor: 'pointer',
-                                marginRight: '5px'
-                              }}
-                            >
-                              Clear Votes
-                            </button>
-                            <button
-                              onClick={() => deleteMatch(m.id)}
-                              style={{
-                                padding: '5px 10px',
-                                fontSize: '12px',
-                                backgroundColor: '#e74c3c',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '4px',
-                                cursor: 'pointer'
-                              }}
-                            >
-                              Delete
-                            </button>
-                          </>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                            {!isSuperuser && (
+                              <button
+                                onClick={() => clearMatchVotes(m.id, m.home_team, m.away_team)}
+                                style={{
+                                  padding: '6px 12px',
+                                  fontSize: '11px',
+                                  backgroundColor: '#FFA500',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  fontWeight: '600',
+                                  transition: 'all 0.2s ease'
+                                }}
+                                onMouseOver={(e) => e.target.style.backgroundColor = '#FF8C00'}
+                                onMouseOut={(e) => e.target.style.backgroundColor = '#FFA500'}
+                              >
+                                Clear Votes
+                              </button>
+                            )}
+                            {!isSuperuser && (
+                              <button
+                                onClick={() => deleteMatch(m.id)}
+                                style={{
+                                  padding: '6px 12px',
+                                  fontSize: '11px',
+                                  backgroundColor: '#e74c3c',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  fontWeight: '600',
+                                  transition: 'all 0.2s ease'
+                                }}
+                                onMouseOver={(e) => e.target.style.backgroundColor = '#c0392b'}
+                                onMouseOut={(e) => e.target.style.backgroundColor = '#e74c3c'}
+                              >
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </section>
         </>
@@ -1103,6 +1147,8 @@ export default function Admin({ user }) {
     </div>
   )
 }
+
+
 
 
 

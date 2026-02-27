@@ -1,0 +1,111 @@
+╔══════════════════════════════════════════════════════════════════════╗
+║                   CRICKET MELA - QUICK REFERENCE                     ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+📋 PRODUCTION URLS
+──────────────────────────────────────────────────────────────────────
+  Frontend:  https://cricketmela.pages.dev
+  Backend:   https://cricketmela-api.fly.dev
+  GitHub:    https://github.com/sponnapp/cricketmela.git
+
+🚀 DEPLOYMENT COMMANDS
+──────────────────────────────────────────────────────────────────────
+  Deploy frontend + verify:     ./quick-deploy.sh
+  Deploy frontend only:         ./deploy-cf-simple.sh
+  Deploy backend only:          ./deploy-backend.sh
+  Verify production:            ./verify-production.sh
+  Start local dev:              ./restart-all.sh
+
+🔧 TROUBLESHOOTING
+──────────────────────────────────────────────────────────────────────
+  ⚠️  MOST COMMON ISSUE: Browser/CDN cache
+
+  1. Hard refresh browser:
+     Mac:            Cmd + Shift + R
+     Windows/Linux:  Ctrl + Shift + R
+
+  2. Try incognito/private mode
+
+  3. Wait 10-15 minutes for CDN propagation
+
+  4. Read detailed guide:
+     cat PRODUCTION-TROUBLESHOOTING.md
+
+📊 TABLE SORTING (ALL FIXED)
+──────────────────────────────────────────────────────────────────────
+  ✅ Admin > Manage Matches     - Sorted by date/time
+  ✅ Matches & Voting            - Sorted by date/time
+  ✅ Vote History                - Sorted by date/time (NEW!)
+
+  Sort order: Oldest match first → Newest match last
+  Invalid dates (TBD) appear at the end
+
+🧪 TESTING CHECKLIST (AFTER DEPLOY)
+──────────────────────────────────────────────────────────────────────
+  [ ] Run ./quick-deploy.sh
+  [ ] Hard refresh browser (Cmd+Shift+R)
+  [ ] Login to production site
+  [ ] Check Matches & Voting is sorted
+  [ ] Vote on a match
+  [ ] Check Vote History is sorted
+  [ ] Check Admin > Manage Matches is sorted (admin only)
+  [ ] Verify points calculation works
+
+🔍 VERIFY DEPLOYMENT SUCCESS
+──────────────────────────────────────────────────────────────────────
+  Check new JS bundle hash in browser:
+  1. Open https://cricketmela.pages.dev
+  2. DevTools (F12) → Network tab
+  3. Refresh page
+  4. Look for: index-5350528b.js
+
+  If different hash = deployment succeeded
+  If same hash as before = cache issue
+
+⚡ COMMON ISSUES & FIXES
+──────────────────────────────────────────────────────────────────────
+  Issue: Login fails (404/405)
+  Fix:   _redirects file missing → ./deploy-cf-simple.sh
+
+  Issue: Old features still showing
+  Fix:   Browser cache → Cmd+Shift+R
+
+  Issue: Tables not sorted
+  Fix:   CDN cache → wait 10 mins or use incognito
+
+  Issue: Blank page in production
+  Fix:   Check browser console, verify API is up
+
+📱 DEFAULT CREDENTIALS
+──────────────────────────────────────────────────────────────────────
+  Admin:  admin / admin123
+  User:   senthil / senthil123
+
+🎯 QUICK DEPLOY WORKFLOW
+──────────────────────────────────────────────────────────────────────
+  1. Make changes in code
+  2. Test locally: ./restart-all.sh → http://localhost:5173
+  3. Deploy: ./quick-deploy.sh
+  4. Hard refresh browser: Cmd+Shift+R
+  5. Test production: https://cricketmela.pages.dev
+
+📚 DOCUMENTATION
+──────────────────────────────────────────────────────────────────────
+  README.md                      - Main documentation
+  PRODUCTION-TROUBLESHOOTING.md  - Detailed troubleshooting
+  .github/copilot-instructions.md - Copilot context
+
+💡 PRO TIP
+──────────────────────────────────────────────────────────────────────
+  Always hard refresh (Cmd+Shift+R) after deploying!
+
+  If it doesn't work after hard refresh:
+  1. Wait 10 minutes for CDN
+  2. Try incognito mode
+  3. Run ./verify-production.sh
+
+╔══════════════════════════════════════════════════════════════════════╗
+║  Need help? Run: ./verify-production.sh or read                     ║
+║  PRODUCTION-TROUBLESHOOTING.md for detailed steps                   ║
+╚══════════════════════════════════════════════════════════════════════╝
+

@@ -5,6 +5,40 @@ export default function VoteHistory({ user }) {
   const [votes, setVotes] = useState([])
   const [loading, setLoading] = useState(true)
 
+  // Helper function to parse match date/time for sorting
+  function parseMatchDateTime(value) {
+    if (!value) return null
+    try {
+      let date;
+      // Handle format like "16-Feb-26T5:30 AM" from CSV upload
+      if (value.includes('T') && !value.match(/^\d{4}-/)) {
+        const [datePart, timePart] = value.split('T')
+        const dateStr = datePart.includes('-20') ? datePart : datePart.replace(/-(\d{2})$/, '-20$1')
+        const fullDateStr = `${dateStr} ${timePart}`
+        date = new Date(fullDateStr)
+      } else if (value.includes('T')) {
+        date = new Date(value)
+      } else {
+        date = new Date(value)
+      }
+      return (!date || isNaN(date.getTime())) ? null : date
+    } catch {
+      return null
+    }
+  }
+
+  // Helper function to sort votes by date/time
+  function sortVotesByDateTime(votesArray) {
+    return votesArray.sort((a, b) => {
+      const dateA = parseMatchDateTime(a.scheduled_at)
+      const dateB = parseMatchDateTime(b.scheduled_at)
+      if (!dateA && !dateB) return 0
+      if (!dateA) return 1
+      if (!dateB) return -1
+      return dateA - dateB
+    })
+  }
+
   // Helper function to format match date/time
   function formatMatchDateTime(scheduledAt) {
     if (!scheduledAt) return 'TBD'
@@ -57,7 +91,11 @@ export default function VoteHistory({ user }) {
     }
     setLoading(true)
     axios.get(`/api/users/${user.id}/votes`)
-      .then(r => { setVotes(r.data); setLoading(false) })
+      .then(r => {
+        const sortedVotes = sortVotesByDateTime(r.data || [])
+        setVotes(sortedVotes)
+        setLoading(false)
+      })
       .catch(() => { setVotes([]); setLoading(false) })
   }, [user])
 

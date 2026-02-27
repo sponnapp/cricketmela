@@ -142,6 +142,44 @@ Or use the script:
 ./deploy-backend.sh
 ```
 
+### Quick Deploy & Verify (Recommended)
+Deploy frontend and automatically verify production:
+```bash
+./quick-deploy.sh
+```
+
+### Verify Production Only
+Test production without deploying:
+```bash
+./verify-production.sh
+```
+
+---
+
+## 🔍 Troubleshooting
+
+### Production Issues
+
+If features work locally but not in production:
+
+1. **Hard refresh your browser** (Cmd+Shift+R on Mac, Ctrl+Shift+R on Windows)
+2. **Try incognito/private mode** to bypass cache
+3. **Wait 5-10 minutes** for Cloudflare CDN propagation
+4. **Check JavaScript bundle hash** changed in browser DevTools → Network tab
+
+### Common Issues
+
+| Issue | Solution |
+|-------|----------|
+| Login returns 404/405 | `_redirects` file missing → re-run `./deploy-cf-simple.sh` |
+| Old features still showing | Browser cache → hard refresh (Cmd+Shift+R) |
+| Tables not sorted | CDN cache → wait 10 mins or try incognito mode |
+| Blank page in production | Check browser console for errors, verify API is up |
+
+### Detailed Troubleshooting Guide
+
+See [PRODUCTION-TROUBLESHOOTING.md](./PRODUCTION-TROUBLESHOOTING.md) for comprehensive troubleshooting steps.
+
 ---
 
 ## 📊 Key API Endpoints

@@ -1,347 +1,371 @@
 import React, { useState } from 'react'
 import axios from 'axios'
 
+// ── IPL Team Logos - Load from /public/logos/ directory ───────────────────────
+// Place PNG files in frontend/public/logos/ with these names:
+// csk.png, dc.png, gt.png, kkr.png, lsg.png, mi.png, pbks.png, rr.png, rcb.png, srh.png
+const IPL_SVG = {
+  CSK: '/logos/csk.png',
+  DC: '/logos/dc.png',
+  GT: '/logos/gt.png',
+  KKR: '/logos/kkr.png',
+  LSG: '/logos/lsg.png',
+  MI: '/logos/mi.png',
+  PBKS: '/logos/pbks.png',
+  RR: '/logos/rr.png',
+  RCB: '/logos/rcb.png',
+  SRH: '/logos/srh.png',
+}
+
+const IPL_TEAMS = [
+  { abbr: 'CSK',  name: 'Chennai Super Kings',   ring: '#D4AF37' },
+  { abbr: 'DC',   name: 'Delhi Capitals',         ring: '#EF1C25' },
+  { abbr: 'GT',   name: 'Gujarat Titans',         ring: '#C8A951' },
+  { abbr: 'KKR',  name: 'Kolkata Knight Riders',  ring: '#F2C75C' },
+  { abbr: 'LSG',  name: 'Lucknow Super Giants',   ring: '#A0C4E8' },
+  { abbr: 'MI',   name: 'Mumbai Indians',         ring: '#D1AB3E' },
+  { abbr: 'PBKS', name: 'Punjab Kings',           ring: '#A7A9AC' },
+  { abbr: 'RR',   name: 'Rajasthan Royals',       ring: '#EA1A85' },
+  { abbr: 'RCB',  name: 'Royal Challengers',      ring: '#FFD700' },
+  { abbr: 'SRH',  name: 'Sunrisers Hyderabad',    ring: '#FF8C00' },
+]
+
+// White-circle IPL badge with image logo inside
+function IplBadge({ team, size = 72 }) {
+  return (
+    <div title={team.name} style={{
+      width: `${size}px`, height: `${size}px`, borderRadius: '50%',
+      background: '#fff',
+      border: `3px solid ${team.ring}`,
+      boxShadow: `0 4px 18px rgba(0,0,0,0.55), 0 0 10px ${team.ring}88`,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      overflow: 'hidden', flexShrink: 0, cursor: 'default',
+      transition: 'transform 0.22s, box-shadow 0.22s',
+    }}
+    onMouseEnter={e => { e.currentTarget.style.transform='scale(1.18)'; e.currentTarget.style.boxShadow=`0 8px 28px rgba(0,0,0,0.65), 0 0 18px ${team.ring}` }}
+    onMouseLeave={e => { e.currentTarget.style.transform='scale(1)';    e.currentTarget.style.boxShadow=`0 4px 18px rgba(0,0,0,0.55), 0 0 10px ${team.ring}88` }}
+    >
+      <img
+        src={IPL_SVG[team.abbr]}
+        alt={team.name}
+        style={{
+          width: '100%', height: '100%',
+          objectFit: 'cover',
+          borderRadius: '50%',
+        }}
+        onError={(e) => {
+          // Fallback: display team name if image fails to load
+          e.target.style.display = 'none'
+        }}
+      />
+    </div>
+  )
+}
+
+// Coloured circle badge for international teams (flag colours)
+function IntlBadge({ team }) {
+  return (
+    <div title={team.name} style={{
+      width: '62px', height: '62px', borderRadius: '50%',
+      background: `radial-gradient(circle at 38% 35%, ${team.bg}ee 0%, ${team.bg} 100%)`,
+      border: `2.5px solid ${team.ring}`,
+      boxShadow: `0 3px 14px rgba(0,0,0,0.45), 0 0 8px ${team.ring}55`,
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      cursor: 'default', flexShrink: 0,
+      transition: 'transform 0.2s, box-shadow 0.2s',
+    }}
+    onMouseEnter={e => { e.currentTarget.style.transform='scale(1.15)'; e.currentTarget.style.boxShadow=`0 6px 20px rgba(0,0,0,0.55), 0 0 14px ${team.ring}` }}
+    onMouseLeave={e => { e.currentTarget.style.transform='scale(1)';    e.currentTarget.style.boxShadow=`0 3px 14px rgba(0,0,0,0.45), 0 0 8px ${team.ring}55` }}
+    >
+      <span style={{ fontSize: team.abbr.length > 3 ? '8px' : '11px', fontWeight:'900',
+        color: team.fg, textShadow:'0 1px 3px rgba(0,0,0,0.8)',
+        fontFamily:"'Poppins',sans-serif", lineHeight:1, textAlign:'center' }}>
+        {team.abbr}
+      </span>
+      <span style={{ fontSize:'5px', color:team.fg, opacity:0.85, marginTop:'2px',
+        fontFamily:"'Inter',sans-serif", letterSpacing:'0.3px', textAlign:'center', padding:'0 4px' }}>
+        {team.name.toUpperCase()}
+      </span>
+    </div>
+  )
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
 export default function Login({ onLogin }) {
   const [isSignup, setIsSignup] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [email, setEmail] = useState('')
-  const [error, setError] = useState(null)
-  const [message, setMessage] = useState(null)
-  const [loading, setLoading] = useState(false)
+  const [email,    setEmail]    = useState('')
+  const [error,    setError]    = useState(null)
+  const [message,  setMessage]  = useState(null)
+  const [loading,  setLoading]  = useState(false)
 
   async function submit(e) {
     e.preventDefault()
-    setError(null)
-    setMessage(null)
-
+    setError(null); setMessage(null)
     if (isSignup) {
       if (!username || !password) return setError('Enter username and password')
       if (!email) return setError('Enter email address')
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-      if (!emailRegex.test(email)) return setError('Enter a valid email address')
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setError('Enter a valid email address')
       setLoading(true)
       try {
         await axios.post('/api/signup', { username, password, email })
         setLoading(false)
-        setMessage('Signup submitted. Wait for admin approval.')
-        setIsSignup(false)
-        setPassword('')
-        setEmail('')
+        setMessage('Signup submitted! Wait for admin approval.')
+        setIsSignup(false); setPassword(''); setEmail('')
       } catch (err) {
         setLoading(false)
         setError(err.response?.data?.error || 'Signup failed')
       }
       return
     }
-
     if (!username || !password) return setError('Enter username and password')
     setLoading(true)
     try {
       const res = await axios.post('/api/login', { username, password })
-      setLoading(false)
-      onLogin(res.data)
+      setLoading(false); onLogin(res.data)
     } catch (err) {
       setLoading(false)
       setError(err.response?.data?.error || 'Login failed')
     }
   }
 
-  const styles = {
-    container: {
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, #E91E8C 0%, #9B59B6 50%, #3498DB 100%)',
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      fontFamily: 'Arial, sans-serif',
-      padding: '20px'
-    },
-    card: {
-      background: 'white',
-      borderRadius: '12px',
-      padding: '50px 40px',
-      maxWidth: '400px',
-      width: '100%',
-      boxShadow: '0 10px 40px rgba(0, 0, 0, 0.2)',
-      textAlign: 'center'
-    },
-    logo: {
-      width: '80px',
-      height: '80px',
-      margin: '0 auto 30px',
-      display: 'block'
-    },
-    title: {
-      fontSize: '28px',
-      fontWeight: 'bold',
-      color: '#1a1a1a',
-      marginBottom: '30px',
-      letterSpacing: '1px'
-    },
-    form: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '15px'
-    },
-    inputWrapper: {
-      position: 'relative',
-      display: 'flex',
-      alignItems: 'center'
-    },
-    icon: {
-      position: 'absolute',
-      left: '15px',
-      fontSize: '18px',
-      color: '#999',
-      zIndex: 1
-    },
-    input: {
-      width: '100%',
-      padding: '12px 12px 12px 45px',
-      border: '1px solid #ddd',
-      borderRadius: '6px',
-      fontSize: '14px',
-      backgroundColor: '#f5f5f5',
-      transition: 'all 0.3s ease',
-      boxSizing: 'border-box',
-      outline: 'none'
-    },
-    inputFocus: {
-      backgroundColor: '#fff',
-      borderColor: '#E91E8C',
-      boxShadow: '0 0 0 3px rgba(233, 30, 140, 0.1)'
-    },
-    button: {
-      padding: '12px',
-      backgroundColor: '#E91E8C',
-      color: 'white',
-      border: 'none',
-      borderRadius: '6px',
-      fontSize: '16px',
-      fontWeight: 'bold',
-      cursor: 'pointer',
-      transition: 'all 0.3s ease',
-      marginTop: '10px',
-      textTransform: 'uppercase',
-      letterSpacing: '1px'
-    },
-    buttonHover: {
-      backgroundColor: '#C71A70',
-      transform: 'translateY(-2px)',
-      boxShadow: '0 5px 20px rgba(233, 30, 140, 0.4)'
-    },
-    buttonDisabled: {
-      opacity: 0.7,
-      cursor: 'not-allowed'
-    },
-    divider: {
-      display: 'flex',
-      alignItems: 'center',
-      margin: '20px 0',
-      color: '#999',
-      fontSize: '14px'
-    },
-    dividerLine: {
-      flex: 1,
-      height: '1px',
-      backgroundColor: '#ddd'
-    },
-    socialContainer: {
-      display: 'flex',
-      gap: '10px',
-      justifyContent: 'center',
-      marginTop: '15px'
-    },
-    socialButton: {
-      flex: 1,
-      padding: '10px',
-      border: '1px solid #ddd',
-      backgroundColor: '#fff',
-      borderRadius: '6px',
-      fontSize: '14px',
-      fontWeight: 'bold',
-      cursor: 'pointer',
-      transition: 'all 0.3s ease',
-      color: '#333'
-    },
-    socialButtonHover: {
-      backgroundColor: '#f5f5f5',
-      borderColor: '#E91E8C'
-    },
-    error: {
-      color: '#E74C3C',
-      fontSize: '13px',
-      marginTop: '-10px',
-      textAlign: 'left'
-    },
-    checkbox: {
-      display: 'flex',
-      alignItems: 'center',
-      fontSize: '13px',
-      color: '#666',
-      marginTop: '5px',
-      marginBottom: '10px'
-    },
-    checkboxInput: {
-      marginRight: '8px',
-      cursor: 'pointer',
-      accentColor: '#E91E8C'
-    },
-    link: {
-      color: '#E91E8C',
-      textDecoration: 'none',
-      cursor: 'pointer',
-      fontWeight: 'bold'
-    },
-    footerText: {
-      marginTop: '20px',
-      fontSize: '13px',
-      color: '#666'
-    }
-  }
-
-  const [usernameInputFocused, setUsernameInputFocused] = useState(false)
-  const [passwordInputFocused, setPasswordInputFocused] = useState(false)
-  const [emailInputFocused, setEmailInputFocused] = useState(false)
-  const [buttonHovered, setButtonHovered] = useState(false)
-  const [facebookHovered, setFacebookHovered] = useState(false)
-  const [googleHovered, setGoogleHovered] = useState(false)
-
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        <img src="/cricket-mela-logo.svg" alt="Cricket Mela" style={styles.logo} />
-        <h1 style={styles.title}>{isSignup ? 'SIGN UP' : 'LOGIN'}</h1>
+    <div style={{
+      minHeight: '100vh', width: '100%', boxSizing: 'border-box',
+      padding: '24px 16px 70px',
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      fontFamily: "'Inter', sans-serif",
+      background: 'linear-gradient(170deg, #0a0a1a 0%, #0d2137 30%, #0a3320 60%, #1a0a08 100%)',
+      position: 'relative', overflow: 'hidden',
+    }}>
+      {/* Stadium spotlight glows */}
+      <div style={{ position:'absolute', top:'-80px', left:'50%', transform:'translateX(-50%)',
+        width:'700px', height:'400px',
+        background:'radial-gradient(ellipse, rgba(255,200,50,0.1) 0%, transparent 70%)',
+        pointerEvents:'none', zIndex:0 }} />
+      <div style={{ position:'absolute', bottom:0, left:0, right:0, height:'220px',
+        background:'radial-gradient(ellipse at 50% 100%, rgba(0,180,80,0.12) 0%, transparent 70%)',
+        pointerEvents:'none', zIndex:0 }} />
 
-        <form onSubmit={submit} style={styles.form}>
-          {/* Username Input */}
-          <div style={styles.inputWrapper}>
-            <span style={styles.icon}>👤</span>
-            <input
-              type="text"
-              placeholder="Username"
-              value={username}
-              onChange={e => setUsername(e.target.value)}
-              onFocus={() => setUsernameInputFocused(true)}
-              onBlur={() => setUsernameInputFocused(false)}
-              style={{
-                ...styles.input,
-                ...(usernameInputFocused ? styles.inputFocus : {})
-              }}
-            />
+      {/* ── TITLE ── */}
+      <div style={{ textAlign:'center', marginBottom:'40px', position:'relative', zIndex:1 }}>
+        <h1 style={{
+          fontFamily:"'Poppins', sans-serif", margin:0,
+          fontSize:'clamp(28px, 5vw, 46px)', fontWeight:'900', letterSpacing:'3px', lineHeight:1.1,
+          background:'linear-gradient(180deg, #FFD700 0%, #FF8C00 50%, #FF4500 100%)',
+          WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent',
+          filter:'drop-shadow(0 2px 10px rgba(255,160,0,0.6))',
+        }}>🏏 CRICKET MELA</h1>
+        <div style={{ fontSize:'clamp(11px, 2vw, 13px)', color:'#acd8ff',
+          letterSpacing:'4px', textTransform:'uppercase', marginTop:'5px', fontWeight:'600' }}>
+          IPL &amp; International Prediction Game
+        </div>
+        <div style={{ margin:'10px auto 0', width:'140px', height:'2px',
+          background:'linear-gradient(90deg, transparent, #FFD700, transparent)' }} />
+      </div>
+
+      {/* ── MAIN CONTAINER: Logos Left + Login Card Right ── */}
+      <div style={{
+        position:'relative', zIndex:1,
+        width:'100%', maxWidth:'1100px',
+        display:'flex', alignItems:'center', justifyContent:'space-between',
+        gap:'40px', flexWrap:'wrap',
+      }}>
+
+        {/* ── LEFT SIDE: GRID LOGO ARRANGEMENT ── */}
+        <div style={{
+          position:'relative', width:'480px',
+          minWidth:'480px',
+        }}>
+          {/* Title for logos section */}
+          <div style={{
+            fontSize:'13px', color:'rgba(255,200,50,0.75)', textAlign:'center',
+            letterSpacing:'2px', textTransform:'uppercase', marginBottom:'20px', fontWeight:'700',
+            position:'relative', zIndex:2,
+          }}>
           </div>
 
-          {/* Password Input */}
-          <div style={styles.inputWrapper}>
-            <span style={styles.icon}>🔒</span>
-            <input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              onFocus={() => setPasswordInputFocused(true)}
-              onBlur={() => setPasswordInputFocused(false)}
-              style={{
-                ...styles.input,
-                ...(passwordInputFocused ? styles.inputFocus : {})
-              }}
-            />
-          </div>
-
-          {/* Email Input (Signup only) */}
-          {isSignup && (
-            <div style={styles.inputWrapper}>
-              <span style={styles.icon}>✉️</span>
-              <input
-                type="email"
-                placeholder="Email address"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                onFocus={() => setEmailInputFocused(true)}
-                onBlur={() => setEmailInputFocused(false)}
-                style={{
-                  ...styles.input,
-                  ...(emailInputFocused ? styles.inputFocus : {})
-                }}
-              />
+          {/* Grid layout container */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(5, 80px)',
+            gridTemplateRows: 'repeat(4, 100px)',
+            gap: '30px 0px',
+            justifyContent: 'center',
+            alignItems: 'center',
+            position: 'relative',
+          }}>
+            {/* Row 1: 3 logos (SRH, DC, GT) - columns 1, 3, 5 */}
+            <div style={{ gridColumn: '1', gridRow: '1', justifySelf: 'center' }}>
+              <IplBadge team={IPL_TEAMS[9]} size={100} />
             </div>
-          )}
+            <div style={{ gridColumn: '3', gridRow: '1', justifySelf: 'center' }}>
+              <IplBadge team={IPL_TEAMS[1]} size={100} />
+            </div>
+            <div style={{ gridColumn: '5', gridRow: '1', justifySelf: 'center' }}>
+              <IplBadge team={IPL_TEAMS[2]} size={100} />
+            </div>
 
-          {/* Remember Me */}
-          {!isSignup && (
-            <label style={styles.checkbox}>
-              <input type="checkbox" style={styles.checkboxInput} />
-              Remember me
-            </label>
-          )}
+            {/* Row 2: 2 logos (RR, PBKS) - columns 2, 4 (between Row 1) */}
+            <div style={{ gridColumn: '2', gridRow: '2', justifySelf: 'center' }}>
+              <IplBadge team={IPL_TEAMS[7]} size={100} />
+            </div>
+            <div style={{ gridColumn: '4', gridRow: '2', justifySelf: 'center' }}>
+              <IplBadge team={IPL_TEAMS[6]} size={100} />
+            </div>
 
-          {/* Error/Message */}
-          {error && <div style={styles.error}>✗ {error}</div>}
-          {message && <div style={{color: '#27ae60', fontSize: '13px', textAlign: 'left'}}>{message}</div>}
+            {/* Row 3: 3 logos (MI, CSK, KKR) - columns 1, 3, 5 (same as Row 1) */}
+            <div style={{ gridColumn: '1', gridRow: '3', justifySelf: 'center' }}>
+              <IplBadge team={IPL_TEAMS[5]} size={100} />
+            </div>
+            <div style={{ gridColumn: '3', gridRow: '3', justifySelf: 'center' }}>
+              <IplBadge team={IPL_TEAMS[0]} size={100} />
+            </div>
+            <div style={{ gridColumn: '5', gridRow: '3', justifySelf: 'center' }}>
+              <IplBadge team={IPL_TEAMS[3]} size={100} />
+            </div>
 
-          {/* Login/Signup Button */}
-          <button
-            type="submit"
-            disabled={loading}
-            onMouseEnter={() => setButtonHovered(true)}
-            onMouseLeave={() => setButtonHovered(false)}
-            style={{
-              ...styles.button,
-              ...(buttonHovered && !loading ? styles.buttonHover : {}),
-              ...(loading ? styles.buttonDisabled : {})
-            }}
-          >
-            {loading ? (isSignup ? 'SIGNING UP...' : 'LOGGING IN...') : (isSignup ? 'SIGN UP' : 'LOGIN')}
+            {/* Row 4: 2 logos (LSG, RCB) - columns 2, 4 (between Row 3, same as Row 2) */}
+            <div style={{ gridColumn: '2', gridRow: '4', justifySelf: 'center' }}>
+              <IplBadge team={IPL_TEAMS[4]} size={100} />
+            </div>
+            <div style={{ gridColumn: '4', gridRow: '4', justifySelf: 'center' }}>
+              <IplBadge team={IPL_TEAMS[8]} size={100} />
+            </div>
+          </div>
+        </div>
+
+      {/* ── RIGHT SIDE: LOGIN CARD ── */}
+      <div style={{
+        position:'relative', zIndex:1,
+        width:'100%', maxWidth:'380px',
+        background:'rgba(255,255,255,0.07)',
+        backdropFilter:'blur(20px)', WebkitBackdropFilter:'blur(20px)',
+        borderRadius:'20px',
+        border:'1px solid rgba(255,220,80,0.3)',
+        boxShadow:'0 8px 40px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08)',
+        padding:'28px 28px 22px',
+        margin:'12px 0',
+      }}>
+        {/* Card icon — fancy cricket bat SVG, no external image */}
+        <div style={{ textAlign:'center', marginBottom:'20px' }}>
+          <div style={{
+            width:'60px', height:'60px', margin:'0 auto 10px', borderRadius:'50%',
+            background:'linear-gradient(135deg, #1a3a2a 0%, #0d2137 100%)',
+            border:'2px solid rgba(255,200,50,0.55)',
+            boxShadow:'0 0 18px rgba(255,160,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)',
+            display:'flex', alignItems:'center', justifyContent:'center',
+          }}>
+            <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+              {/* Cricket bat */}
+              <rect x="14" y="3" width="5" height="18" rx="2.5" fill="#D4A847" transform="rotate(15 14 3)"/>
+              <rect x="13" y="19" width="6" height="4" rx="1" fill="#8B5E1A" transform="rotate(15 13 19)"/>
+              {/* Cricket ball */}
+              <circle cx="8" cy="25" r="5" fill="#C8102E"/>
+              <path d="M5 22 Q8 26 11 22" stroke="#fff" strokeWidth="1" fill="none"/>
+              <path d="M5 28 Q8 24 11 28" stroke="#fff" strokeWidth="1" fill="none"/>
+            </svg>
+          </div>
+          <div style={{ fontFamily:"'Poppins',sans-serif", fontSize:'17px', fontWeight:'800', color:'#fff', letterSpacing:'1px' }}>
+            {isSignup ? '📝 SIGN UP' : '🔐 LOGIN'}
+          </div>
+          <div style={{ fontSize:'12px', color:'rgba(255,255,255,0.5)', marginTop:'2px' }}>
+            {isSignup ? 'Create your account' : 'Welcome back, champion!'}
+          </div>
+        </div>
+
+        <form onSubmit={submit} style={{ display:'flex', flexDirection:'column', gap:'11px' }}>
+          <Field icon="👤" type="text"     placeholder="Username"     value={username} onChange={e => setUsername(e.target.value)} />
+          <Field icon="🔒" type="password" placeholder="Password"     value={password} onChange={e => setPassword(e.target.value)} />
+          {isSignup && <Field icon="✉️" type="email" placeholder="Email address" value={email} onChange={e => setEmail(e.target.value)} />}
+
+          {error   && <Alert type="error">{error}</Alert>}
+          {message && <Alert type="success">{message}</Alert>}
+
+          <button type="submit" disabled={loading} style={{
+            marginTop:'4px', padding:'12px',
+            background: loading ? 'rgba(120,120,120,0.4)' : 'linear-gradient(90deg, #e65c00 0%, #f9d423 50%, #e65c00 100%)',
+            color: loading ? '#aaa' : '#1a0a00',
+            border:'none', borderRadius:'10px',
+            fontSize:'15px', fontWeight:'900',
+            cursor: loading ? 'not-allowed' : 'pointer',
+            letterSpacing:'1.5px',
+            boxShadow: loading ? 'none' : '0 4px 20px rgba(230,92,0,0.5)',
+            fontFamily:"'Poppins', sans-serif",
+          }}>
+            {loading ? '⏳ Please wait…' : isSignup ? '🚀 CREATE ACCOUNT' : "🏏 LET'S PLAY!"}
           </button>
         </form>
 
-        {/* Social Login Divider */}
-        {!isSignup && (
-          <>
-            <div style={styles.divider}>
-              <div style={styles.dividerLine}></div>
-              <span style={{padding: '0 10px'}}>Or login with</span>
-              <div style={styles.dividerLine}></div>
-            </div>
-
-            {/* Social Login Buttons */}
-            <div style={styles.socialContainer}>
-              <button
-                type="button"
-                onMouseEnter={() => setFacebookHovered(true)}
-                onMouseLeave={() => setFacebookHovered(false)}
-                style={{
-                  ...styles.socialButton,
-                  ...(facebookHovered ? styles.socialButtonHover : {})
-                }}
-              >
-                👥 Facebook
-              </button>
-              <button
-                type="button"
-                onMouseEnter={() => setGoogleHovered(true)}
-                onMouseLeave={() => setGoogleHovered(false)}
-                style={{
-                  ...styles.socialButton,
-                  ...(googleHovered ? styles.socialButtonHover : {})
-                }}
-              >
-                🔍 Google
-              </button>
-            </div>
-          </>
-        )}
-
-        {/* Footer Text */}
-        <div style={styles.footerText}>
+        <div style={{ marginTop:'14px', textAlign:'center', fontSize:'13px', color:'rgba(255,255,255,0.6)' }}>
           {isSignup ? (
-            <>Already have an account? <span style={styles.link} onClick={() => { setIsSignup(false); setError(null); setMessage(null); setEmail('') }}>Back to login</span></>
+            <>Already have an account?{' '}
+              <span onClick={() => { setIsSignup(false); setError(null); setMessage(null); setEmail('') }}
+                style={{ color:'#f9d423', fontWeight:'700', cursor:'pointer', textDecoration:'underline' }}>
+                Back to Login
+              </span>
+            </>
           ) : (
-            <>Not a member? <span style={styles.link} onClick={() => { setIsSignup(true); setError(null); setMessage(null) }}>Sign up now</span></>
+            <>Not a member?{' '}
+              <span onClick={() => { setIsSignup(true); setError(null); setMessage(null) }}
+                style={{ color:'#f9d423', fontWeight:'700', cursor:'pointer', textDecoration:'underline' }}>
+                Sign up now
+              </span>
+            </>
           )}
         </div>
+
+        {/* Disclaimer */}
+        <div style={{
+          marginTop:'16px', padding:'9px 12px',
+          background:'rgba(0,0,0,0.38)', borderRadius:'8px',
+          border:'1px solid rgba(255,200,50,0.22)',
+          fontSize:'10.5px', color:'rgba(255,240,180,0.8)', lineHeight:'1.6', textAlign:'center',
+        }}>
+          ⚠️ <strong style={{ color:'#f9d423' }}>Disclaimer:</strong> Cricket Mela is a{' '}
+          <strong>fun prediction game only</strong>. No real money involved.
+          Points are virtual with no monetary value. Must{' '}
+          <strong style={{ color:'#ff7070' }}>not</strong> be used for real-money gambling.
+        </div>
       </div>
+      </div>
+
+      {/* Green pitch line at bottom */}
+      <div style={{ position:'absolute', bottom:'48px', left:0, right:0, height:'3px',
+        background:'linear-gradient(90deg, transparent 0%, rgba(0,160,50,0.4) 20%, rgba(0,220,70,0.8) 50%, rgba(0,160,50,0.4) 80%, transparent 100%)',
+        pointerEvents:'none' }} />
+    </div>
+  )
+}
+
+// ── Reusable field ─────────────────────────────────────────────────────────────
+function Field({ icon, type, placeholder, value, onChange }) {
+  return (
+    <div style={{ position:'relative' }}>
+      <span style={{ position:'absolute', left:'13px', top:'50%', transform:'translateY(-50%)', fontSize:'15px', lineHeight:1 }}>{icon}</span>
+      <input type={type} placeholder={placeholder} value={value} onChange={onChange} style={{
+        width:'100%', padding:'11px 13px 11px 42px', boxSizing:'border-box',
+        background:'rgba(255,255,255,0.1)', border:'1px solid rgba(255,255,255,0.22)',
+        borderRadius:'9px', fontSize:'14px', color:'#fff', outline:'none',
+        fontFamily:"'Inter', sans-serif",
+      }} />
+    </div>
+  )
+}
+
+// ── Reusable alert ─────────────────────────────────────────────────────────────
+function Alert({ type, children }) {
+  const isErr = type === 'error'
+  return (
+    <div style={{
+      background: isErr ? 'rgba(220,50,50,0.22)' : 'rgba(40,180,80,0.22)',
+      border:`1px solid ${isErr ? 'rgba(255,100,100,0.5)' : 'rgba(80,200,80,0.5)'}`,
+      borderRadius:'8px', padding:'8px 12px',
+      fontSize:'12.5px', color: isErr ? '#ffaaaa' : '#aaffbb', textAlign:'center',
+    }}>
+      {isErr ? '⚠️' : '✅'} {children}
     </div>
   )
 }

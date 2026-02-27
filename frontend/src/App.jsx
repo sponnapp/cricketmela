@@ -26,6 +26,19 @@ export default function App() {
     }
   }, [user])
 
+  // Add cricket background to body when user is logged in
+  useEffect(() => {
+    if (user) {
+      document.body.classList.add('with-cricket-bg')
+    } else {
+      document.body.classList.remove('with-cricket-bg')
+    }
+    // Cleanup on unmount
+    return () => {
+      document.body.classList.remove('with-cricket-bg')
+    }
+  }, [user])
+
   function onLogout() {
     setUser(null)
     setPage('seasons')
@@ -50,7 +63,7 @@ export default function App() {
 
   return (
     <div className="container">
-      <header>
+      {user && <header>
         <h1 style={{fontFamily: 'Poppins, sans-serif', fontSize: '36px', fontWeight: '700', letterSpacing: '-1px', marginBottom: '20px'}}>🏏 Cricket Mela</h1>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap: '16px'}}>
           {user && (
@@ -103,7 +116,7 @@ export default function App() {
             ) : null}
           </div>
         </div>
-      </header>
+      </header>}
 
       <main>
         {!user ? (
@@ -132,8 +145,12 @@ export default function App() {
         )}
       </main>
 
-      <footer>
-        <small>Local demo - not for production</small>
+      <footer className="disclaimer-ribbon">
+        <span style={{ color: '#ffe082', fontWeight: 'bold' }}>⚠️ Disclaimer:</span>{' '}
+        Cricket Mela is a <strong style={{ color: '#fff' }}>fun prediction game only</strong> — no real money involved.
+        Virtual points have no monetary value and cannot be exchanged for cash.
+        This platform must <strong style={{ color: '#ff6b6b' }}>not</strong> be used for real-money gambling.
+        &nbsp;|&nbsp; 🏏 Play responsibly &amp; enjoy the game!
       </footer>
     </div>
   )

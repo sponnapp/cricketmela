@@ -21,6 +21,28 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Cricket action background for all pages except login */
+body.with-cricket-bg {
+  background-image: url('/cricket-action-bg.jpg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+/* Semi-transparent overlay for better readability */
+body.with-cricket-bg::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.45);
+  z-index: -1;
+  pointer-events: none;
+}
+
 h1, h2, h3, h4, h5, h6 {
   font-family: 'Poppins', sans-serif;
   font-weight: 600;
@@ -34,18 +56,16 @@ h1, h2, h3, h4, h5, h6 {
   padding: 16px;
   margin: 0;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
 }
 
 @media (min-width: 768px) {
-  .container {
-    padding: 24px;
-  }
+  .container { padding: 24px; }
 }
 
 @media (min-width: 1024px) {
-  .container {
-    padding: 32px;
-  }
+  .container { padding: 32px; }
 }
 
 header {
@@ -60,15 +80,11 @@ header {
 }
 
 @media (min-width: 640px) {
-  .grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
+  .grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (min-width: 1024px) {
-  .grid {
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  }
+  .grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 }
 
 .card {
@@ -76,6 +92,8 @@ header {
   border-radius: 8px;
   padding: 12px;
   font-family: 'Inter', sans-serif;
+  background: rgba(255, 255, 255, 0.50);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .img {
@@ -88,26 +106,190 @@ header {
   margin-bottom: 8px;
 }
 
-button {
-  background: #0070f3;
+/* Table styling for better visibility */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: rgba(255, 255, 255, 0.45);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin: 16px 0;
+}
+
+thead {
+  background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
   color: white;
-  border: none;
-  padding: 8px 12px;
+  font-weight: 600;
+}
+
+th {
+  padding: 12px 16px;
+  text-align: left;
+  color: white;
+  font-weight: 600;
+  border-bottom: 2px solid #27ae60;
+}
+
+td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #e5e5e5;
+  color: #1a1a1a;
+}
+
+tbody tr {
+  transition: background-color 0.2s ease;
+}
+
+tbody tr:hover {
+  background: rgba(46, 204, 113, 0.08);
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Form elements styling */
+input, select, textarea {
+  background: rgba(255, 255, 255, 0.60);
+  border: 1px solid #ddd;
   border-radius: 6px;
+  padding: 8px 12px;
+  font-family: 'Inter', sans-serif;
+  color: #1a1a1a;
+  transition: border-color 0.3s ease;
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: #2ecc71;
+  box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.1);
+}
+
+/* Section headings */
+section h2, section h3 {
+  color: #1a1a1a;
+  background: rgba(255, 255, 255, 0.50);
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Generic sections and containers */
+section {
+  background: rgba(255, 255, 255, 0.40);
+  padding: 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Modal/Dialog styling */
+.modal, [role="dialog"] {
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  border-radius: 12px;
+}
+
+button {
+  background: rgba(46, 204, 113, 0.95);
+  color: white;
+  border: 1px solid rgba(46, 204, 113, 1);
+  padding: 10px 20px;
+  border-radius: 8px;
   cursor: pointer;
   font-family: 'Inter', sans-serif;
-  font-weight: 500;
-  font-size: 13px;
+  font-weight: 600;
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: all 0.3s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 button:hover {
-  opacity: 0.9;
+  background: rgba(39, 174, 96, 0.95);
+  border-color: rgba(39, 174, 96, 1);
+  box-shadow: 0 4px 12px rgba(46, 204, 113, 0.3);
+  transform: translateY(-1px);
+}
+
+button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+button:disabled {
+  background: rgba(189, 189, 189, 0.6);
+  border-color: rgba(189, 189, 189, 0.8);
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Secondary/Cancel buttons */
+button.secondary, button[type="button"] {
+  background: rgba(108, 117, 125, 0.90);
+  border-color: rgba(108, 117, 125, 1);
+}
+
+button.secondary:hover, button[type="button"]:hover {
+  background: rgba(73, 80, 87, 0.95);
+  border-color: rgba(73, 80, 87, 1);
+}
+
+/* Danger/Delete buttons */
+button.danger {
+  background: rgba(231, 76, 60, 0.95);
+  border-color: rgba(231, 76, 60, 1);
+}
+
+button.danger:hover {
+  background: rgba(192, 57, 43, 0.95);
+  border-color: rgba(192, 57, 43, 1);
+  box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3);
+}
+
+/* Warning buttons */
+button.warning {
+  background: rgba(255, 165, 0, 0.95);
+  border-color: rgba(255, 165, 0, 1);
+}
+
+button.warning:hover {
+  background: rgba(255, 140, 0, 0.95);
+  border-color: rgba(255, 140, 0, 1);
+  box-shadow: 0 4px 12px rgba(255, 165, 0, 0.3);
+}
+
+/* Floating disclaimer ribbon — fixed at bottom, overlays the page */
+.disclaimer-ribbon {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  padding: 7px 20px;
+  background: rgba(20, 20, 40, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-top: 2px solid #E91E8C;
+  text-align: center;
+  font-size: 11.5px;
+  color: #ccc;
+  line-height: 1.5;
+  box-shadow: 0 -3px 16px rgba(233, 30, 140, 0.18);
+}
+
+/* push main content so ribbon doesn't overlap the last bit */
+main {
+  padding-bottom: 48px;
 }
 
 footer {
-  margin-top: 32px;
+  margin-top: auto;
   text-align: center;
   color: #666;
   font-size: 13px;
 }
-
