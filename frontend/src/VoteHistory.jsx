@@ -103,7 +103,7 @@ export default function VoteHistory({ user }) {
     <div style={{padding: '20px', fontFamily: 'Inter, sans-serif'}}>
       <h2 style={{fontFamily: 'Poppins, sans-serif', fontSize: '28px', fontWeight: '600', letterSpacing: '-0.5px', marginBottom: '25px'}}>📊 Your Vote History</h2>
       <div style={{marginBottom: '20px', fontSize: '14px'}}>
-        <strong style={{fontSize: '16px', color: '#667eea'}}>Current Balance: {Math.round(user?.balance ?? 0)} points</strong>
+        <strong style={{fontSize: '16px'}}>Current Balance: {Math.round(user?.balance ?? 0)} points</strong>
       </div>
       {user?.role === 'admin' ? (
         <p style={{fontSize: '14px', color: '#718096'}}>Admin accounts do not participate in voting.</p>
