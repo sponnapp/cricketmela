@@ -67,7 +67,49 @@ export default function Admin({ user }) {
     if (!value) return null
     const direct = new Date(value)
     if (!Number.isNaN(direct.getTime())) return direct
-    return null
+
+    const monthMap = {
+      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+    }
+
+    const parts = String(value).split('T')
+    if (parts.length < 2) return null
+    const [datePart, timePartRaw] = parts
+
+    let year
+    let monthIndex
+    let day
+
+    const isoDate = datePart.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (isoDate) {
+      year = parseInt(isoDate[1], 10)
+      monthIndex = parseInt(isoDate[2], 10) - 1
+      day = parseInt(isoDate[3], 10)
+    } else {
+      const dmy = datePart.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2}|\d{4})$/)
+      if (!dmy) return null
+      day = parseInt(dmy[1], 10)
+      const monthKey = dmy[2].toLowerCase()
+      if (monthMap[monthKey] === undefined) return null
+      monthIndex = monthMap[monthKey]
+      const yearRaw = dmy[3]
+      year = yearRaw.length === 2 ? 2000 + parseInt(yearRaw, 10) : parseInt(yearRaw, 10)
+    }
+
+    const timePart = timePartRaw.trim()
+    const timeMatch = timePart.match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i)
+    if (!timeMatch) return null
+    let hour = parseInt(timeMatch[1], 10)
+    const minute = parseInt(timeMatch[2], 10)
+    const ampm = timeMatch[3] ? timeMatch[3].toUpperCase() : null
+
+    if (ampm) {
+      if (hour === 12) hour = 0
+      if (ampm === 'PM') hour += 12
+    }
+
+    return new Date(year, monthIndex, day, hour, minute, 0, 0)
   }
 
   // Sort matches by date and time
