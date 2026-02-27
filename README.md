@@ -1,43 +1,188 @@
-IPL T20 Betting - Local Dev
+# 🏏 Cricket Mela - IPL T20 Betting App
 
-This repository is a minimal starter for an IPL-themed betting e-commerce site.
+A real-time IPL T20 cricket betting application where users can vote on match winners and earn/lose points based on outcomes.
 
-Structure:
-- backend/: Express API serving product data
-- frontend/: Vite + React single-page app
+---
 
-User personas (for local dev)
-- admin: full control (role = admin). Use header `x-user: admin` to authenticate as admin.
-- senthil: limited control (role = picker). Use header `x-user: senthil` to authenticate as senthil.
+## 🌐 Production URLs
 
-Winner selection
-- GET /api/winner -> returns current winner
-- POST /api/winner -> set winner (allowed for admin and picker)
-  - body: { "winner": "Team Name" }
-  - requires header `x-user: admin` or `x-user: senthil`
+| Service | URL |
+|---------|-----|
+| **Frontend** | https://cricketmela.pages.dev |
+| **Backend API** | https://cricketmela-api.fly.dev |
+| **GitHub Repo** | https://github.com/sponnapp/cricketmela.git |
 
-Admin-only endpoints
-- POST /api/admin/products -> create a product (admin only)
-  - body: { name, price, colors, sizes, image }
-  - requires header `x-user: admin`
+---
 
-Quick start (macOS, zsh):
+## 🏗️ Architecture
 
-1. Install backend deps:
-   cd backend
-   npm install
+```
+Frontend (React + Vite)          Backend (Node.js + Express)
+Cloudflare Pages              →  Fly.io + SQLite
+_redirects → /api/*              /api/* endpoints
+```
 
-2. Initialize database and seed:
-   npm run migrate
+- **Frontend**: React, Vite, Axios — deployed on Cloudflare Pages
+- **Backend**: Express.js, SQLite3 — deployed on Fly.io
+- **API Proxy**: Cloudflare Pages `_redirects` proxies `/api/*` to Fly.io
 
-3. Start backend (in one terminal):
-   npm start
+---
 
-4. Install frontend deps and start frontend (another terminal):
-   cd ../frontend
-   npm install
-   npm run dev
+## 👥 User Roles
 
-Frontend will run on http://localhost:5173 and proxy/fetch data from the backend at http://localhost:4000.
+| Role | Access |
+|------|--------|
+| `admin` | Full control: seasons, matches, users, set winner, upload CSV |
+| `superuser` | Set match winners only |
+| `picker` | Vote on matches within assigned seasons |
 
-Next steps: customize catalog, add cart/checkout, integrate Stripe, add CI and security scans.
+**Default credentials:**
+- Admin: `admin` / `admin123`
+- User: `senthil` / `senthil123`
+
+---
+
+## ✨ Features
+
+### User Features
+- Login / Sign-up (with admin approval)
+- Browse assigned seasons & matches
+- Vote for winning team (radio buttons, 1 vote per match)
+- Select betting points (10, 20, 50)
+- Voting locked 30 mins before match start & after winner is set
+- View vote history with match Date/Time, result, payout, net
+- User standings (leaderboard)
+- Profile page (update display name, change password)
+
+### Admin Features
+- Create / edit / delete seasons
+- Bulk upload matches via CSV (`Date,Venue,Team 1,Team 2,Time`)
+- Edit / delete individual matches
+- Set match winner → auto-distributes points to winners (1:1 ratio)
+- Clear match winner (reverts point distribution)
+- Clear all votes for a specific match
+- Create / edit / delete users (assign role, balance, seasons)
+- Reset user password
+- Approve sign-up requests (assign role, seasons, starting balance)
+- View all user transactions
+
+---
+
+## 📁 Project Structure
+
+```
+cricketmela/
+├── frontend/               # React + Vite app
+│   ├── src/
+│   │   ├── App.jsx         # Root app, routing, auth state
+│   │   ├── Login.jsx       # Login & sign-up page
+│   │   ├── Seasons.jsx     # Season selection page
+│   │   ├── Matches.jsx     # Matches & voting page
+│   │   ├── Admin.jsx       # Admin panel (all admin features)
+│   │   ├── VoteHistory.jsx # User vote history
+│   │   ├── Standings.jsx   # User leaderboard
+│   │   └── Profile.jsx     # User profile page
+│   ├── functions/
+│   │   ├── _middleware.js  # SPA routing fallback
+│   │   └── api/[[path]].js # API proxy to Fly.io
+│   ├── _redirects          # Cloudflare Pages API routing
+│   └── vite.config.js
+├── backend/                # Express.js API
+│   ├── index.js            # All API routes
+│   ├── db.js               # SQLite schema + initialization
+│   ├── data.db             # SQLite database (local only)
+│   ├── Dockerfile          # For Fly.io deployment
+│   └── fly.toml            # Fly.io config
+├── deploy-cf-simple.sh     # Deploy frontend to Cloudflare
+├── deploy-backend.sh       # Deploy backend to Fly.io
+├── restart-all.sh          # Start both servers locally
+└── .github/
+    └── copilot-instructions.md  # Copilot AI context
+```
+
+---
+
+## 🚀 Local Development
+
+### Prerequisites
+- Node.js 18+
+- npm
+
+### Start Both Servers
+```bash
+./restart-all.sh
+```
+Or manually:
+```bash
+# Terminal 1 - Backend
+cd backend && npm install && node index.js
+
+# Terminal 2 - Frontend
+cd frontend && npm install && npm run dev
+```
+
+- **Frontend**: http://localhost:5173
+- **Backend**: http://localhost:4000
+
+---
+
+## 📦 Deployment
+
+### Deploy Frontend to Cloudflare Pages
+```bash
+./deploy-cf-simple.sh
+```
+
+### Deploy Backend to Fly.io
+```bash
+cd backend && flyctl deploy --remote-only
+```
+Or use the script:
+```bash
+./deploy-backend.sh
+```
+
+---
+
+## 📊 Key API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/login` | Login |
+| POST | `/api/signup` | Sign-up request |
+| GET | `/api/seasons` | List seasons |
+| GET | `/api/seasons/:id/matches` | Matches in a season |
+| POST | `/api/votes` | Cast/update vote |
+| GET | `/api/users/:id/votes` | User vote history |
+| GET | `/api/standings` | Leaderboard |
+| POST | `/api/admin/seasons` | Create season |
+| POST | `/api/admin/matches` | Create match |
+| PUT | `/api/admin/matches/:id` | Update match |
+| POST | `/api/admin/matches/:id/winner` | Set winner |
+| POST | `/api/admin/matches/:id/clear-winner` | Clear winner |
+| POST | `/api/admin/upload-matches` | Bulk CSV upload |
+| GET | `/api/admin/users` | List all users |
+| POST | `/api/admin/users` | Create user |
+| PUT | `/api/admin/users/:id` | Update user |
+| DELETE | `/api/admin/users/:id` | Delete user |
+
+---
+
+## 🗃️ CSV Upload Format
+
+```
+Date,Venue,Team 1,Team 2,Time
+01-Mar-2026,Delhi,India,Pakistan,2:30 PM
+01-Mar-2026,Mumbai,Australia,England,6:30 PM
+```
+
+---
+
+## 💡 Betting Logic
+
+1. User selects a team + points (10/20/50) before match starts
+2. Voting closes 30 mins before match start time
+3. Admin sets the winner after the match
+4. Points from losers are distributed proportionally to winners (1:1 ratio)
+5. Unvoted users in assigned seasons are auto-assigned as losers with minimum points (10)
+6. Admin accounts are excluded from all betting/standings

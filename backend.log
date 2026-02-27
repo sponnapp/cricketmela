@@ -1,7 +1,0 @@
-
-> ipl-betting-backend@0.1.0 start
-> node index.js
-
-Server running on port 4000
-✅ Venue column already exists in matches table
-✅ Password column already exists in users table
