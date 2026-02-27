@@ -884,11 +884,11 @@ app.get('/api/users/:userId/votes', (req, res) => {
   const userId = Number(req.params.userId);
   const db = openDb();
   db.all(`
-    SELECT v.id, v.match_id, v.team, v.points, v.created_at, m.home_team, m.away_team, m.winner
+    SELECT v.id, v.match_id, v.team, v.points, v.created_at, m.home_team, m.away_team, m.winner, m.scheduled_at
     FROM votes v
     JOIN matches m ON v.match_id = m.id
     WHERE v.user_id = ?
-    ORDER BY v.created_at DESC
+    ORDER BY m.scheduled_at ASC
   `, [userId], (err, rows) => {
     if (err) { db.close(); return res.status(500).json({ error: 'DB error' }); }
     if (!rows || rows.length === 0) { db.close(); return res.json([]); }

@@ -87,7 +87,9 @@ export default function Admin({ user }) {
       const r = await axios.get('/api/matches', {
         headers: { 'x-user': user?.username || 'admin' }
       })
-      setAllMatches(r.data || [])
+      // Sort matches by date and time
+      const sortedMatches = sortMatchesByDateTime(r.data || [])
+      setAllMatches(sortedMatches)
     } catch (e) {
       console.log('Error fetching all matches:', e)
     }

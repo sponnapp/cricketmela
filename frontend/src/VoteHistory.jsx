@@ -5,6 +5,49 @@ export default function VoteHistory({ user }) {
   const [votes, setVotes] = useState([])
   const [loading, setLoading] = useState(true)
 
+  // Helper function to format match date/time
+  function formatMatchDateTime(scheduledAt) {
+    if (!scheduledAt) return 'TBD'
+    try {
+      let date;
+
+      // Handle format like "16-Feb-26T5:30 AM" from CSV upload
+      if (scheduledAt.includes('T') && !scheduledAt.match(/^\d{4}-/)) {
+        // Split by T to get date and time parts
+        const [datePart, timePart] = scheduledAt.split('T')
+
+        // Parse date part (e.g., "16-Feb-26" or "01-Mar-2026")
+        const dateStr = datePart.includes('-20') ? datePart : datePart.replace(/-(\d{2})$/, '-20$1')
+
+        // Combine with time for parsing
+        const fullDateStr = `${dateStr} ${timePart}`
+        date = new Date(fullDateStr)
+      } else if (scheduledAt.includes('T')) {
+        // ISO format like "2026-03-01T14:30"
+        date = new Date(scheduledAt)
+      } else {
+        // Try direct parsing
+        date = new Date(scheduledAt)
+      }
+
+      if (!date || isNaN(date.getTime())) {
+        console.log('Failed to parse date:', scheduledAt)
+        return scheduledAt // Return raw value for debugging
+      }
+
+      // Format: "01-Mar-2026 | 2:30 AM"
+      const day = String(date.getDate()).padStart(2, '0')
+      const month = date.toLocaleString('en-US', { month: 'short' })
+      const year = date.getFullYear()
+      const time = date.toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+
+      return `${day}-${month}-${year} | ${time}`
+    } catch (e) {
+      console.log('Error formatting date:', scheduledAt, e)
+      return scheduledAt // Return raw value for debugging
+    }
+  }
+
   useEffect(() => {
     if (!user) return
     if (user.role === 'admin') {
@@ -36,6 +79,7 @@ export default function VoteHistory({ user }) {
             <thead>
               <tr style={{background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white'}}>
                 <th style={{padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Match</th>
+                <th style={{padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Date/Time</th>
                 <th style={{padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Your Vote</th>
                 <th style={{padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Points Voted</th>
                 <th style={{padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Winner</th>
@@ -48,6 +92,7 @@ export default function VoteHistory({ user }) {
               {votes.map((v, idx) => (
                 <tr key={v.id} style={{borderBottom: '1px solid #f0f0f0', backgroundColor: idx % 2 === 0 ? '#fafbfc' : 'white'}}>
                   <td style={{padding: '14px 12px', fontSize: '13px', color: '#2d3748'}}>{v.home_team} vs {v.away_team}</td>
+                  <td style={{padding: '14px 12px', fontSize: '13px', color: '#4a5568'}}>{formatMatchDateTime(v.scheduled_at)}</td>
                   <td style={{padding: '14px 12px', fontSize: '13px', fontWeight: '600', color: '#667eea'}}>{v.team}</td>
                   <td style={{padding: '14px 12px', fontSize: '13px', fontWeight: '600', color: '#4a5568'}}>{v.points}</td>
                   <td style={{padding: '14px 12px', fontSize: '13px', color: '#2d3748'}}>{v.winner || 'TBD'}</td>
