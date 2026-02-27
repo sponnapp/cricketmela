@@ -34,6 +34,16 @@ fi
 
 echo "✅ Build completed successfully!"
 
+# Step 1.5: Copy _redirects to dist for API routing
+echo ""
+echo "📋 Step 1.5: Copying _redirects configuration..."
+if [ -f "_redirects" ]; then
+    cp _redirects dist/
+    echo "✅ _redirects copied to dist/"
+else
+    echo "⚠️  Warning: _redirects file not found"
+fi
+
 # Step 2: Deploy to Cloudflare Pages
 echo ""
 echo "☁️  Step 2: Deploying to Cloudflare Pages..."
