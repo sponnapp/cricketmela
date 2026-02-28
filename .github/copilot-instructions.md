@@ -240,6 +240,49 @@ Vite proxies `/api/*` to `http://localhost:4000` in dev (see `vite.config.js`).
 
 ---
 
+
+## Email Integration
+
+### Overview
+The application now supports email notifications via Gmail SMTP:
+- **Signup Notification**: Admin receives email when user signs up
+- **Approval Notification**: User receives email when account is approved
+
+### Configuration
+- Email settings configured in Admin Panel → Email tab
+- Requires Gmail account with 2-Step Verification enabled
+- Uses 16-character app password (from myaccount.google.com/apppasswords)
+- Settings stored in database `settings` table with key `email_config`
+
+### Implementation Details
+- **Module**: `backend/email.js` - Handles email sending logic
+- **Backend**: `backend/index.js` - Integrated with signup and approval endpoints
+- **Frontend**: `frontend/src/Admin.jsx` - Email settings configuration UI
+- **Dependency**: `nodemailer@^6.9.4` for SMTP functionality
+
+### Email Endpoints
+```
+GET  /api/admin/email-settings  – Get current configuration
+POST /api/admin/email-settings  – Save and test configuration
+```
+
+### Email Events
+1. User signup → Admin receives notification email
+2. User approval → User receives approval confirmation email
+
+### Testing
+1. Configure email in Admin Panel → Email tab
+2. Click "Save & Test Configuration"
+3. Sign up as new user
+4. Admin should receive notification email
+5. Approve user - user should receive approval email
+
+### Documentation
+- `/EMAIL-INTEGRATION-GUIDE.md` - Detailed setup guide
+- `/EMAIL-IMPLEMENTATION-SUMMARY.md` - Technical implementation details
+
+---
+
 ## Test Credentials
 
 | Username | Password | Role |
@@ -257,4 +300,5 @@ Vite proxies `/api/*` to `http://localhost:4000` in dev (see `vite.config.js`).
 4. **New API route** → add to `backend/index.js`, update this file's API table, update README
 5. **Always test locally** before deploying to production
 6. **After deploying** → hard refresh browser (`Cmd+Shift+R`) to clear cached JS
+7. **Email feature** → configure in Admin Panel after deploying backend/email.js
 

@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import axios from 'axios'
 
-export default function Admin({ user }) {
-  const [activeTab, setActiveTab] = useState('season')
+export default function Admin({ user, initialTab }) {
+  const [activeTab, setActiveTab] = useState(initialTab || 'season')
   const [seasons, setSeasons] = useState([])
   const [matches, setMatches] = useState([])
   const [allMatches, setAllMatches] = useState([])
@@ -18,12 +18,15 @@ export default function Admin({ user }) {
   const [passwordResetModal, setPasswordResetModal] = useState({show: false, userId: null, username: '', newPassword: ''})
   const [approveUserModal, setApproveUserModal] = useState({show: false, user: null, formData: {balance: 1000}, selectedSeasons: []})
   const [editSeasonModal, setEditSeasonModal] = useState({show: false, season: null, formData: {}})
+  const [emailSettings, setEmailSettings] = useState({ user: '', password: '', from: '' })
+  const [emailMessage, setEmailMessage] = useState('')
 
   useEffect(() => {
     fetchSeasons()
     fetchUsers()
     fetchPendingUsers()
     fetchAllMatches()
+    fetchEmailSettings()
   }, [])
 
   async function fetchSeasons() {
@@ -134,6 +137,35 @@ export default function Admin({ user }) {
       setAllMatches(sortedMatches)
     } catch (e) {
       console.log('Error fetching all matches:', e)
+    }
+  }
+
+  async function fetchEmailSettings() {
+    try {
+      const r = await axios.get('/api/admin/email-settings', {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      setEmailSettings(r.data)
+    } catch (e) {
+      console.log('Error fetching email settings:', e)
+    }
+  }
+
+  async function saveEmailSettings() {
+    if (!emailSettings.user || !emailSettings.password) {
+      return setEmailMessage('Email user and password are required')
+    }
+    try {
+      setEmailMessage('Saving and testing email configuration...')
+      const r = await axios.post('/api/admin/email-settings', emailSettings, {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      // The backend endpoint already tests the configuration
+      setEmailMessage('✅ ' + r.data.message)
+      // Clear message after 5 seconds
+      setTimeout(() => setEmailMessage(''), 5000)
+    } catch (e) {
+      setEmailMessage(`❌ ${e.response?.data?.message || e.response?.data?.error || e.message}`)
     }
   }
 
@@ -504,6 +536,7 @@ export default function Admin({ user }) {
     if (activeTab === 'season') return 0
     if (activeTab === 'users') return 1
     if (activeTab === 'matches') return 2
+    if (activeTab === 'email') return 3
     return 0
   }
 
@@ -573,7 +606,6 @@ export default function Admin({ user }) {
             flex: 1,
             height: '50px',
             backgroundColor: isActiveTab('matches') ? '#2ecc71' : '#e0e0e0',
-            borderRadius: !isSuperuser ? '0 8px 8px 0' : '8px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -585,6 +617,26 @@ export default function Admin({ user }) {
           }} onClick={() => setActiveTab('matches')}>
             🎮 Matches
           </div>
+
+          {/* Step 4 - Email Settings (Only for Admin) */}
+          {!isSuperuser && (
+            <div style={{
+              flex: 1,
+              height: '50px',
+              backgroundColor: isActiveTab('email') ? '#2ecc71' : '#e0e0e0',
+              borderRadius: '0 8px 8px 0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: isActiveTab('email') ? 'white' : '#666',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+              fontSize: '14px'
+            }} onClick={() => setActiveTab('email')}>
+              📧 Email
+            </div>
+          )}
         </div>
 
         {/* Admin Panel Title */}
@@ -622,27 +674,86 @@ export default function Admin({ user }) {
           <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
             <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Manage Seasons</h3>
             {seasons.length === 0 ? <p>No seasons found</p> : (
-              <table style={{width: '100%', borderCollapse: 'collapse'}}>
-                <thead>
-                  <tr style={{backgroundColor: '#f5f5f5', borderBottom: '2px solid #2ecc71'}}>
-                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Season Name</th>
-                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Matches Count</th>
-                    <th style={{padding: '12px', textAlign: 'left'}}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {seasons.map((s, idx) => (
-                    <tr key={s.id} style={{borderBottom: '1px solid #ddd', backgroundColor: idx % 2 === 0 ? '#fafafa' : 'white'}}>
-                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}><strong>{s.name}</strong></td>
-                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{allMatches.filter(m => m.season_id === s.id).length}</td>
-                      <td style={{padding: '12px'}}>
-                        <button onClick={() => editSeason(s)} style={{padding: '6px 12px', fontSize: '12px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Edit</button>
-                        <button onClick={() => deleteSeason(s.id, s.name)} style={{padding: '6px 12px', fontSize: '12px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', marginLeft: '8px'}}>Delete</button>
-                      </td>
+              <div style={{
+                overflowX: 'auto',
+                backgroundColor: 'white',
+                borderRadius: '16px',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+                padding: '0',
+                border: '1px solid #e8e8e8'
+              }}>
+                <table style={{
+                  width: '100%',
+                  borderCollapse: 'collapse',
+                  fontFamily: 'Inter, sans-serif'
+                }}>
+                  <thead>
+                    <tr style={{
+                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                      color: 'white'
+                    }}>
+                      <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Season Name</th>
+                      <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Matches Count</th>
+                      <th style={{padding: '14px 12px', textAlign: 'center', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Action</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {seasons.map((s, idx) => (
+                      <tr key={s.id} style={{
+                        borderBottom: '1px solid #f0f0f0',
+                        backgroundColor: idx % 2 === 0 ? '#fafbfc' : 'white',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f7fa'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#fafbfc' : 'white'}
+                      >
+                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '13px', fontWeight: '500'}}><strong>{s.name}</strong></td>
+                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{allMatches.filter(m => m.season_id === s.id).length}</td>
+                        <td style={{padding: '14px 12px', textAlign: 'center'}}>
+                          <div style={{display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap'}}>
+                            <button
+                              onClick={() => editSeason(s)}
+                              style={{
+                                padding: '6px 12px',
+                                fontSize: '11px',
+                                backgroundColor: '#667eea',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontWeight: '600',
+                                transition: 'all 0.2s ease'
+                              }}
+                              onMouseOver={(e) => e.target.style.backgroundColor = '#5568d3'}
+                              onMouseOut={(e) => e.target.style.backgroundColor = '#667eea'}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => deleteSeason(s.id, s.name)}
+                              style={{
+                                padding: '6px 12px',
+                                fontSize: '11px',
+                                backgroundColor: '#e74c3c',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontWeight: '600',
+                                transition: 'all 0.2s ease'
+                              }}
+                              onMouseOver={(e) => e.target.style.backgroundColor = '#c0392b'}
+                              onMouseOut={(e) => e.target.style.backgroundColor = '#e74c3c'}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </section>
         </>
@@ -654,33 +765,68 @@ export default function Admin({ user }) {
           {users.some(u => u.approved === 0) && (
             <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
               <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Pending Approvals</h3>
-              <table style={{width: '100%', borderCollapse: 'collapse'}}>
-                <thead>
-                  <tr style={{backgroundColor: '#f5f5f5', borderBottom: '2px solid #2ecc71'}}>
-                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Username</th>
-                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Display Name</th>
-                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Role</th>
-                    <th style={{padding: '12px', textAlign: 'left'}}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.filter(u => u.approved === 0).map(u => (
-                    <tr key={u.id} style={{borderBottom: '1px solid #ddd'}}>
-                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.username}</td>
-                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.display_name || u.username}</td>
-                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.role}</td>
-                      <td style={{padding: '12px'}}>
-                        <button
-                          onClick={() => openApproveUserModal(u)}
-                          style={{padding: '6px 12px', fontSize: '12px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}
-                        >
-                          Approve
-                        </button>
-                      </td>
+              <div style={{
+                overflowX: 'auto',
+                backgroundColor: 'white',
+                borderRadius: '16px',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+                padding: '0',
+                border: '1px solid #e8e8e8'
+              }}>
+                <table style={{
+                  width: '100%',
+                  borderCollapse: 'collapse',
+                  fontFamily: 'Inter, sans-serif'
+                }}>
+                  <thead>
+                    <tr style={{
+                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                      color: 'white'
+                    }}>
+                      <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Username</th>
+                      <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Display Name</th>
+                      <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Email</th>
+                      <th style={{padding: '14px 12px', textAlign: 'center', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Action</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {users.filter(u => u.approved === 0).map((u, idx) => (
+                      <tr key={u.id} style={{
+                        borderBottom: '1px solid #f0f0f0',
+                        backgroundColor: idx % 2 === 0 ? '#fafbfc' : 'white',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f7fa'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#fafbfc' : 'white'}
+                      >
+                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '13px', fontWeight: '500'}}><strong>{u.username}</strong></td>
+                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{u.display_name || u.username}</td>
+                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{u.email || 'xyz@xyz.com'}</td>
+                        <td style={{padding: '14px 12px', textAlign: 'center'}}>
+                          <button
+                            onClick={() => openApproveUserModal(u)}
+                            style={{
+                              padding: '6px 16px',
+                              fontSize: '11px',
+                              backgroundColor: '#2ecc71',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              fontWeight: '600',
+                              transition: 'all 0.2s ease'
+                            }}
+                            onMouseOver={(e) => e.target.style.backgroundColor = '#27ae60'}
+                            onMouseOut={(e) => e.target.style.backgroundColor = '#2ecc71'}
+                          >
+                            Approve
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </section>
           )}
 
@@ -772,33 +918,94 @@ export default function Admin({ user }) {
           <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
             <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>All Users</h3>
             {users.length === 0 ? <p>No users found</p> : (
-              <table style={{width: '100%', borderCollapse: 'collapse'}}>
-                <thead>
-                  <tr style={{backgroundColor: '#f5f5f5', borderBottom: '2px solid #2ecc71'}}>
-                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Username</th>
-                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Display Name</th>
-                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Email</th>
-                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Role</th>
-                    <th style={{padding: '12px', textAlign: 'left', borderRight: '1px solid #ddd'}}>Balance</th>
-                    <th style={{padding: '12px', textAlign: 'left'}}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map((u, idx) => (
-                    <tr key={u.id} style={{borderBottom: '1px solid #ddd', backgroundColor: idx % 2 === 0 ? '#fafafa' : 'white'}}>
-                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}><strong>{u.username}</strong></td>
-                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.display_name || u.username}</td>
-                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.email || 'xyz@xyz.com'}</td>
-                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}><span style={{backgroundColor: u.role === 'admin' ? '#dc3545' : u.role === 'superuser' ? '#ff9800' : '#28a745', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px'}}>{u.role}</span></td>
-                      <td style={{padding: '12px', borderRight: '1px solid #ddd'}}>{u.balance}</td>
-                      <td style={{padding: '12px'}}>
-                        <button onClick={() => editUser(u)} style={{padding: '6px 12px', fontSize: '12px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Edit</button>
-                        <button onClick={() => deleteUser(u.id, u.username)} style={{padding: '6px 12px', fontSize: '12px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', marginLeft: '8px'}}>Delete</button>
-                      </td>
+              <div style={{
+                overflowX: 'auto',
+                backgroundColor: 'white',
+                borderRadius: '16px',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+                padding: '0',
+                border: '1px solid #e8e8e8'
+              }}>
+                <table style={{
+                  width: '100%',
+                  borderCollapse: 'collapse',
+                  fontFamily: 'Inter, sans-serif'
+                }}>
+                  <thead>
+                    <tr style={{
+                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                      color: 'white'
+                    }}>
+                      <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Username</th>
+                      <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Display Name</th>
+                      <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Email</th>
+                      <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Role</th>
+                      <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Balance</th>
+                      <th style={{padding: '14px 12px', textAlign: 'center', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Action</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {users.map((u, idx) => (
+                      <tr key={u.id} style={{
+                        borderBottom: '1px solid #f0f0f0',
+                        backgroundColor: idx % 2 === 0 ? '#fafbfc' : 'white',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f7fa'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#fafbfc' : 'white'}
+                      >
+                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '13px', fontWeight: '500'}}><strong>{u.username}</strong></td>
+                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{u.display_name || u.username}</td>
+                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{u.email || 'xyz@xyz.com'}</td>
+                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px'}}>
+                          <span style={{backgroundColor: u.role === 'admin' ? '#dc3545' : u.role === 'superuser' ? '#ff9800' : '#28a745', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600'}}>{u.role}</span>
+                        </td>
+                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', fontWeight: '500'}}>{Math.round(u.balance)}</td>
+                        <td style={{padding: '14px 12px', textAlign: 'center'}}>
+                          <div style={{display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap'}}>
+                            <button
+                              onClick={() => editUser(u)}
+                              style={{
+                                padding: '6px 12px',
+                                fontSize: '11px',
+                                backgroundColor: '#667eea',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontWeight: '600',
+                                transition: 'all 0.2s ease'
+                              }}
+                              onMouseOver={(e) => e.target.style.backgroundColor = '#5568d3'}
+                              onMouseOut={(e) => e.target.style.backgroundColor = '#667eea'}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => deleteUser(u.id, u.username)}
+                              style={{
+                                padding: '6px 12px',
+                                fontSize: '11px',
+                                backgroundColor: '#e74c3c',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontWeight: '600',
+                                transition: 'all 0.2s ease'
+                              }}
+                              onMouseOver={(e) => e.target.style.backgroundColor = '#c0392b'}
+                              onMouseOut={(e) => e.target.style.backgroundColor = '#e74c3c'}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </section>
         </>
@@ -997,6 +1204,92 @@ export default function Admin({ user }) {
         </>
       )}
 
+      {activeTab === 'email' && (
+        <>
+          <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
+            <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Email Settings</h3>
+            <p style={{color: '#666', fontSize: '14px', marginBottom: '20px'}}>Configure Gmail SMTP for sending signup notifications and approval emails to users.</p>
+
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px'}}>
+              <div>
+                <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold', color: '#333', fontSize: '14px'}}>Gmail Address:</label>
+                <input
+                  type="email"
+                  value={emailSettings.user}
+                  onChange={e => setEmailSettings({...emailSettings, user: e.target.value})}
+                  placeholder="your-email@gmail.com"
+                  style={{width: '100%', padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none', boxSizing: 'border-box'}}
+                  onFocus={(e) => e.target.style.borderColor = '#2ecc71'}
+                  onBlur={(e) => e.target.style.borderColor = '#ddd'}
+                />
+              </div>
+
+              <div>
+                <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold', color: '#333', fontSize: '14px'}}>App Password:</label>
+                <input
+                  type="password"
+                  value={emailSettings.password}
+                  onChange={e => setEmailSettings({...emailSettings, password: e.target.value})}
+                  placeholder="16-character app password"
+                  style={{width: '100%', padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none', boxSizing: 'border-box'}}
+                  onFocus={(e) => e.target.style.borderColor = '#2ecc71'}
+                  onBlur={(e) => e.target.style.borderColor = '#ddd'}
+                />
+              </div>
+
+              <div style={{gridColumn: '1 / -1'}}>
+                <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold', color: '#333', fontSize: '14px'}}>From Email Address:</label>
+                <input
+                  type="email"
+                  value={emailSettings.from}
+                  onChange={e => setEmailSettings({...emailSettings, from: e.target.value})}
+                  placeholder="noreply@cricketmela.com (leave empty to use Gmail address)"
+                  style={{width: '100%', padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none', boxSizing: 'border-box'}}
+                  onFocus={(e) => e.target.style.borderColor = '#2ecc71'}
+                  onBlur={(e) => e.target.style.borderColor = '#ddd'}
+                />
+              </div>
+            </div>
+
+            {emailMessage && (
+              <div style={{
+                padding: '12px 15px',
+                borderRadius: '8px',
+                marginBottom: '15px',
+                backgroundColor: emailMessage.includes('❌') ? '#ffebee' : '#e8f5e9',
+                color: emailMessage.includes('❌') ? '#c62828' : '#2e7d32',
+                border: `1px solid ${emailMessage.includes('❌') ? '#ef5350' : '#66bb6a'}`,
+                fontSize: '14px'
+              }}>
+                {emailMessage}
+              </div>
+            )}
+
+            <div style={{display: 'flex', gap: '10px'}}>
+              <button
+                onClick={saveEmailSettings}
+                style={{padding: '12px 30px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '25px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px'}}
+                onMouseOver={(e) => e.target.style.backgroundColor = '#27ae60'}
+                onMouseOut={(e) => e.target.style.backgroundColor = '#2ecc71'}
+              >
+                Save & Test Configuration
+              </button>
+            </div>
+
+            <div style={{marginTop: '20px', padding: '15px', backgroundColor: '#f9f9f9', borderRadius: '8px', borderLeft: '4px solid #2ecc71'}}>
+              <p style={{margin: '0 0 10px 0', fontWeight: 'bold', color: '#333', fontSize: '14px'}}>📝 How to set up Gmail:</p>
+              <ul style={{margin: '0', paddingLeft: '20px', color: '#666', fontSize: '13px'}}>
+                <li>Enable 2-Step Verification on your Google Account</li>
+                <li>Go to <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" style={{color: '#2ecc71', textDecoration: 'none'}}>myaccount.google.com/apppasswords</a></li>
+                <li>Select "Mail" and "Windows Computer" (or your device type)</li>
+                <li>Google will generate a 16-character password - copy and paste it above</li>
+                <li>Click "Save & Test Configuration" to verify it works</li>
+              </ul>
+            </div>
+          </section>
+        </>
+      )}
+
       {winnerModal.show && (
         <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000}}>
           <div style={{backgroundColor: 'white', padding: '30px', borderRadius: '8px', maxWidth: '400px', width: '90%', boxShadow: '0 4px 20px rgba(0,0,0,0.3)'}}>
@@ -1189,6 +1482,9 @@ export default function Admin({ user }) {
     </div>
   )
 }
+
+
+
 
 
 

@@ -170,14 +170,19 @@ export default function Login({ onLogin }) {
       <div style={{
         position:'relative', zIndex:1,
         width:'100%', maxWidth:'1100px',
-        display:'flex', alignItems:'center', justifyContent:'space-between',
-        gap:'40px', flexWrap:'wrap',
+        display:'flex',
+        alignItems:'flex-start',
+        justifyContent:'space-around',
+        gap:'20px',
+        flexWrap: window.innerWidth > 768 ? 'nowrap' : 'wrap',
       }}>
 
         {/* ── LEFT SIDE: GRID LOGO ARRANGEMENT ── */}
         <div style={{
-          position:'relative', width:'480px',
-          minWidth:'480px',
+          position:'relative',
+          flex: window.innerWidth > 768 ? '0 0 auto' : '1 1 100%',
+          minWidth: '300px',
+          maxWidth:'480px',
         }}>
           {/* Title for logos section */}
           <div style={{
@@ -240,14 +245,15 @@ export default function Login({ onLogin }) {
       {/* ── RIGHT SIDE: LOGIN CARD ── */}
       <div style={{
         position:'relative', zIndex:1,
-        width:'100%', maxWidth:'380px',
+        flex: window.innerWidth > 768 ? '0 0 auto' : '1 1 100%',
+        minWidth: '280px',
+        maxWidth:'380px',
         background:'rgba(255,255,255,0.07)',
         backdropFilter:'blur(20px)', WebkitBackdropFilter:'blur(20px)',
         borderRadius:'20px',
         border:'1px solid rgba(255,220,80,0.3)',
         boxShadow:'0 8px 40px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08)',
         padding:'28px 28px 22px',
-        margin:'12px 0',
       }}>
         {/* Card icon — fancy cricket bat SVG, no external image */}
         <div style={{ textAlign:'center', marginBottom:'20px' }}>

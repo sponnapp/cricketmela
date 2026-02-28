@@ -1501,21 +1501,35 @@ app.put('/api/admin/users/:id/seasons', requireRole('admin'), (req, res) => {
 // Get email settings
 app.get('/api/admin/email-settings', requireRole('admin'), (req, res) => {
   const db = openDb();
-  db.get("SELECT value FROM settings WHERE key = 'email_config'", (err, row) => {
-    db.close();
-    if (err) return res.status(500).json({ error: 'DB error' });
 
-    let config = null;
-    if (row) {
-      try {
-        config = JSON.parse(row.value);
-        // Don't send password back to frontend for security
-        if (config.password) config.password = '***';
-      } catch (e) {
-        config = null;
-      }
+  // Ensure settings table exists
+  db.run(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    )
+  `, (createErr) => {
+    if (createErr) {
+      db.close();
+      return res.status(500).json({ error: 'DB error: ' + createErr.message });
     }
-    res.json({ ok: true, config: config });
+
+    db.get("SELECT value FROM settings WHERE key = 'email_config'", (err, row) => {
+      db.close();
+      if (err) return res.status(500).json({ error: 'DB error: ' + err.message });
+
+      let config = null;
+      if (row) {
+        try {
+          config = JSON.parse(row.value);
+          // Don't send password back to frontend for security
+          if (config.password) config.password = '***';
+        } catch (e) {
+          config = null;
+        }
+      }
+      res.json({ ok: true, config: config });
+    });
   });
 });
 
@@ -1534,24 +1548,38 @@ app.post('/api/admin/email-settings', requireRole('admin'), (req, res) => {
   };
 
   const db = openDb();
-  db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('email_config', ?)",
-    [JSON.stringify(config)],
-    function(err) {
-      if (err) {
-        db.close();
-        return res.status(500).json({ error: 'DB error: ' + err.message });
-      }
 
-      // Test the email configuration
-      emailService.testEmailConfig(config, (testErr) => {
-        db.close();
-        if (testErr) {
-          return res.status(500).json({ ok: false, message: 'Email configuration saved but test failed: ' + testErr.message });
-        }
-        res.json({ ok: true, message: 'Email settings saved and tested successfully' });
-      });
+  // Ensure settings table exists
+  db.run(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    )
+  `, (createErr) => {
+    if (createErr) {
+      db.close();
+      return res.status(500).json({ error: 'DB error: ' + createErr.message });
     }
-  );
+
+    db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('email_config', ?)",
+      [JSON.stringify(config)],
+      function(err) {
+        if (err) {
+          db.close();
+          return res.status(500).json({ error: 'DB error: ' + err.message });
+        }
+
+        // Test the email configuration
+        emailService.testEmailConfig(config, (testErr) => {
+          db.close();
+          if (testErr) {
+            return res.status(500).json({ ok: false, message: 'Email configuration saved but test failed: ' + testErr.message });
+          }
+          res.json({ ok: true, message: 'Email settings saved and tested successfully' });
+        });
+      }
+    );
+  });
 });
 
 // Diagnostic endpoint to check admin emails

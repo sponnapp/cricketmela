@@ -14,8 +14,23 @@ export default function App() {
     const u = localStorage.getItem('user')
     return u ? JSON.parse(u) : null
   })
-  const [page, setPage] = useState('seasons')
+
+  // Check URL for page parameter (from email links)
+  const getInitialPage = () => {
+    const params = new URLSearchParams(window.location.search)
+    const pageParam = params.get('page')
+    return pageParam || 'seasons'
+  }
+
+  // Check URL for adminTab parameter (which tab in admin to show)
+  const getInitialAdminTab = () => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('adminTab') || null
+  }
+
+  const [page, setPage] = useState(getInitialPage)
   const [seasonId, setSeasonId] = useState(null)
+  const [initialAdminTab, setInitialAdminTab] = useState(getInitialAdminTab)
 
   useEffect(() => {
     if (user) {
@@ -130,7 +145,7 @@ export default function App() {
               <Matches seasonId={seasonId} user={user} refreshUser={u => setUser(u)} />
             )}
             {page === 'admin' && (
-              <Admin user={user} />
+              <Admin user={user} initialTab={initialAdminTab} />
             )}
             {page === 'history' && user && (
               <VoteHistory user={user} />

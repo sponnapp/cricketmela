@@ -9,17 +9,31 @@ const DB_PATH = path.join(DB_DIR, 'data.db');
 // Get email settings from database
 function getEmailSettings(callback) {
   const db = new sqlite3.Database(DB_PATH);
-  db.get("SELECT value FROM settings WHERE key = 'email_config'", (err, row) => {
-    db.close();
-    if (err || !row) {
-      return callback(null, null);
+
+  // Ensure settings table exists
+  db.run(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    )
+  `, (createErr) => {
+    if (createErr) {
+      db.close();
+      return callback(createErr, null);
     }
-    try {
-      const config = JSON.parse(row.value);
-      callback(null, config);
-    } catch (e) {
-      callback(null, null);
-    }
+
+    db.get("SELECT value FROM settings WHERE key = 'email_config'", (err, row) => {
+      db.close();
+      if (err || !row) {
+        return callback(null, null);
+      }
+      try {
+        const config = JSON.parse(row.value);
+        callback(null, config);
+      } catch (e) {
+        callback(null, null);
+      }
+    });
   });
 }
 
