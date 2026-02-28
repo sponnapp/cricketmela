@@ -313,30 +313,38 @@ export default function Matches({ seasonId, user, refreshUser }) {
                       )}
                     </td>
                     <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', textAlign: 'center'}}>
-                      <span style={{
-                        fontWeight: '700',
-                        fontSize: '15px',
-                        color: '#667eea',
-                        backgroundColor: '#edf2f7',
-                        padding: '4px 12px',
-                        borderRadius: '8px',
-                        display: 'inline-block'
-                      }}>
-                        {m.vote_totals && m.vote_totals[m.home_team] ? m.vote_totals[m.home_team] : 0}
-                      </span>
+                      {votingDisabled ? (
+                        <span style={{
+                          fontWeight: '700',
+                          fontSize: '15px',
+                          color: '#667eea',
+                          backgroundColor: '#edf2f7',
+                          padding: '4px 12px',
+                          borderRadius: '8px',
+                          display: 'inline-block'
+                        }}>
+                          {m.vote_totals && m.vote_totals[m.home_team] ? m.vote_totals[m.home_team] : 0}
+                        </span>
+                      ) : (
+                        <span style={{color: '#a0aec0', fontSize: '12px'}}>-</span>
+                      )}
                     </td>
                     <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', textAlign: 'center'}}>
-                      <span style={{
-                        fontWeight: '700',
-                        fontSize: '15px',
-                        color: '#667eea',
-                        backgroundColor: '#edf2f7',
-                        padding: '4px 12px',
-                        borderRadius: '8px',
-                        display: 'inline-block'
-                      }}>
-                        {m.vote_totals && m.vote_totals[m.away_team] ? m.vote_totals[m.away_team] : 0}
-                      </span>
+                      {votingDisabled ? (
+                        <span style={{
+                          fontWeight: '700',
+                          fontSize: '15px',
+                          color: '#667eea',
+                          backgroundColor: '#edf2f7',
+                          padding: '4px 12px',
+                          borderRadius: '8px',
+                          display: 'inline-block'
+                        }}>
+                          {m.vote_totals && m.vote_totals[m.away_team] ? m.vote_totals[m.away_team] : 0}
+                        </span>
+                      ) : (
+                        <span style={{color: '#a0aec0', fontSize: '12px'}}>-</span>
+                      )}
                     </td>
                     <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', textAlign: 'center'}}>
                       {m.winner ? (
