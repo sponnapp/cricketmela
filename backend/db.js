@@ -46,6 +46,7 @@ db.serialize(() => {
       role TEXT NOT NULL,
       password TEXT,
       display_name TEXT,
+      email TEXT DEFAULT 'xyz@xyz.com',
       approved INTEGER DEFAULT 1,
       balance REAL DEFAULT 100
     )

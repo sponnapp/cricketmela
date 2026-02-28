@@ -3,6 +3,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const sqlite3 = require('sqlite3').verbose();
+const emailService = require('./email');
 const app = express();
 const port = process.env.PORT || 4000;
 
@@ -685,44 +686,74 @@ app.post('/api/admin/users/:id/approve', requireRole('admin'), (req, res) => {
   }
   const db = openDb();
   db.serialize(() => {
-    // Update user as approved with balance
-    db.run('UPDATE users SET approved = 1, balance = ? WHERE id = ?', [balance, id], function(err) {
-      if (err) {
-        db.close();
-        return res.status(500).json({ error: 'DB error: ' + err.message });
-      }
-      if (this.changes === 0) {
+    // Get user details for email
+    db.get('SELECT username, email, display_name FROM users WHERE id = ?', [id], (getErr, user) => {
+      if (getErr || !user) {
         db.close();
         return res.status(404).json({ error: 'User not found' });
       }
 
-      // If season_ids provided, assign them
-      if (season_ids && Array.isArray(season_ids) && season_ids.length > 0) {
-        // Delete existing season assignments for this user
-        db.run('DELETE FROM user_seasons WHERE user_id = ?', [id], function(delErr) {
-          if (delErr) {
-            console.log('Error deleting old user_seasons:', delErr);
-          }
+      // Update user as approved with balance
+      db.run('UPDATE users SET approved = 1, balance = ? WHERE id = ?', [balance, id], function(err) {
+        if (err) {
+          db.close();
+          return res.status(500).json({ error: 'DB error: ' + err.message });
+        }
+        if (this.changes === 0) {
+          db.close();
+          return res.status(404).json({ error: 'User not found' });
+        }
 
-          // Insert new season assignments
-          let completed = 0;
-          season_ids.forEach(seasonId => {
-            db.run('INSERT OR IGNORE INTO user_seasons (user_id, season_id) VALUES (?, ?)', [id, seasonId], function(insErr) {
-              completed++;
-              if (insErr) {
-                console.log('Error assigning season:', insErr);
-              }
-              if (completed === season_ids.length) {
-                db.close();
-                res.json({ ok: true, message: 'User approved and seasons assigned' });
-              }
+        // If season_ids provided, assign them
+        if (season_ids && Array.isArray(season_ids) && season_ids.length > 0) {
+          // Delete existing season assignments for this user
+          db.run('DELETE FROM user_seasons WHERE user_id = ?', [id], function(delErr) {
+            if (delErr) {
+              console.log('Error deleting old user_seasons:', delErr);
+            }
+
+            // Insert new season assignments
+            let completed = 0;
+            season_ids.forEach(seasonId => {
+              db.run('INSERT OR IGNORE INTO user_seasons (user_id, season_id) VALUES (?, ?)', [id, seasonId], function(insErr) {
+                completed++;
+                if (insErr) {
+                  console.log('Error assigning season:', insErr);
+                }
+                if (completed === season_ids.length) {
+                  db.close();
+
+                  // Send approval email to user (only if email is valid)
+                  if (user.email && user.email !== 'xyz@xyz.com' && user.email.includes('@')) {
+                    emailService.sendApprovalEmail(user.username, user.email, user.display_name, (emailErr) => {
+                      if (emailErr) {
+                        console.log('Warning: Could not send approval email:', emailErr.message);
+                      }
+                      res.json({ ok: true, message: 'User approved and seasons assigned' });
+                    });
+                  } else {
+                    res.json({ ok: true, message: 'User approved and seasons assigned (no email sent - invalid email)' });
+                  }
+                }
+              });
             });
           });
-        });
-      } else {
-        db.close();
-        res.json({ ok: true, message: 'User approved' });
-      }
+        } else {
+          db.close();
+
+          // Send approval email to user (only if email is valid)
+          if (user.email && user.email !== 'xyz@xyz.com' && user.email.includes('@')) {
+            emailService.sendApprovalEmail(user.username, user.email, user.display_name, (emailErr) => {
+              if (emailErr) {
+                console.log('Warning: Could not send approval email:', emailErr.message);
+              }
+              res.json({ ok: true, message: 'User approved' });
+            });
+          } else {
+            res.json({ ok: true, message: 'User approved (no email sent - invalid email)' });
+          }
+        }
+      });
     });
   });
 });
@@ -837,19 +868,38 @@ app.delete('/api/admin/users/:id', requireRole('admin'), (req, res) => {
 
 // Signup endpoint: create pending user
 app.post('/api/signup', (req, res) => {
-  const { username, password, display_name, email } = req.body;
+  const { username, password, email } = req.body;
   if (!username || !password) {
     return res.status(400).json({ error: 'username and password required' });
   }
-  // Use username as default display_name if not provided
-  const finalDisplayName = display_name || username;
-  const finalEmail = email || 'xyz@xyz.com';
+  if (!email || email.trim() === '') {
+    return res.status(400).json({ error: 'email is required' });
+  }
+  // Validate email format (basic validation)
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ error: 'invalid email format' });
+  }
+
+  // Use username as default display_name
+  const finalDisplayName = username;
   const db = openDb();
   db.run('INSERT INTO users (username, password, display_name, email, role, balance, approved) VALUES (?, ?, ?, ?, ?, ?, 0)',
-    [username, password, finalDisplayName, finalEmail, 'picker', 0], function(err) {
-      db.close();
-      if (err) return res.status(500).json({ error: 'User already exists or DB error' });
-      res.status(201).json({ ok: true, message: 'Signup submitted for admin approval' });
+    [username, password, finalDisplayName, email, 'picker', 0], function(err) {
+      if (err) {
+        db.close();
+        return res.status(500).json({ error: 'User already exists or DB error' });
+      }
+
+      // Send admin notification email
+      emailService.sendAdminSignupNotification(username, email, finalDisplayName, (emailErr) => {
+        if (emailErr) {
+          console.log('Warning: Could not send admin notification email:', emailErr.message);
+          // Still return success - email is optional
+        }
+        db.close();
+        res.status(201).json({ ok: true, message: 'Signup submitted for admin approval' });
+      });
     });
 });
 
@@ -1442,6 +1492,80 @@ app.put('/api/admin/users/:id/seasons', requireRole('admin'), (req, res) => {
           }
         });
       });
+    });
+  });
+});
+
+// ========== Email Settings Management ==========
+
+// Get email settings
+app.get('/api/admin/email-settings', requireRole('admin'), (req, res) => {
+  const db = openDb();
+  db.get("SELECT value FROM settings WHERE key = 'email_config'", (err, row) => {
+    db.close();
+    if (err) return res.status(500).json({ error: 'DB error' });
+
+    let config = null;
+    if (row) {
+      try {
+        config = JSON.parse(row.value);
+        // Don't send password back to frontend for security
+        if (config.password) config.password = '***';
+      } catch (e) {
+        config = null;
+      }
+    }
+    res.json({ ok: true, config: config });
+  });
+});
+
+// Save email settings
+app.post('/api/admin/email-settings', requireRole('admin'), (req, res) => {
+  const { user, password, from } = req.body;
+
+  if (!user || !password) {
+    return res.status(400).json({ error: 'Email user and password are required' });
+  }
+
+  const config = {
+    user: user,
+    password: password,
+    from: from || user
+  };
+
+  const db = openDb();
+  db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('email_config', ?)",
+    [JSON.stringify(config)],
+    function(err) {
+      if (err) {
+        db.close();
+        return res.status(500).json({ error: 'DB error: ' + err.message });
+      }
+
+      // Test the email configuration
+      emailService.testEmailConfig(config, (testErr) => {
+        db.close();
+        if (testErr) {
+          return res.status(500).json({ ok: false, message: 'Email configuration saved but test failed: ' + testErr.message });
+        }
+        res.json({ ok: true, message: 'Email settings saved and tested successfully' });
+      });
+    }
+  );
+});
+
+// Diagnostic endpoint to check admin emails
+app.get('/api/admin/check-emails', (req, res) => {
+  const db = openDb();
+  db.all("SELECT id, username, role, email FROM users WHERE role = 'admin'", (err, rows) => {
+    db.close();
+    if (err) {
+      return res.status(500).json({ error: 'DB error: ' + err.message });
+    }
+    res.json({
+      adminUsers: rows,
+      totalAdmins: rows ? rows.length : 0,
+      adminEmailsWithValidValues: rows ? rows.filter(r => r.email && r.email !== 'xyz@xyz.com').length : 0
     });
   });
 });
