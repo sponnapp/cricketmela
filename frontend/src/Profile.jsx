@@ -22,6 +22,9 @@ export default function Profile({ user, refreshUser }) {
         setAuthMethod(res.data)
       } catch (err) {
         console.error('Error checking auth method:', err)
+        // Fallback: assume regular password user if API fails (production proxy/CORS issues)
+        // Backend still enforces Google-only restrictions server-side
+        setAuthMethod({ authMethod: 'password', canChangePassword: true })
       } finally {
         setLoading(false)
       }
@@ -141,7 +144,7 @@ export default function Profile({ user, refreshUser }) {
         </div>
 
         {/* Only show password fields if user can change password (not Google-only) */}
-        {authMethod && authMethod.canChangePassword && (
+        {(!authMethod || authMethod.canChangePassword) && (
           <>
             <div>
               <label style={{fontWeight: '600', fontSize: '13px', color: '#4a5568', marginBottom: '8px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Current Password</label>

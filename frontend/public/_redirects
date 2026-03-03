@@ -1,5 +1,7 @@
 # Cloudflare Pages Redirects for SPA
-# API requests are handled by Cloudflare Pages Functions (see /functions/api/[[path]].js)
+# All proxying is handled by Cloudflare Pages Functions:
+# - /api/* → /functions/api/[[path]].js
+# - /auth/* → /functions/auth/[[path]].js
 
 # All other non-file requests go to index.html for client-side routing
 /*    /index.html   200
