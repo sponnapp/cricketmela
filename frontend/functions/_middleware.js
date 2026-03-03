@@ -4,8 +4,9 @@
 export async function onRequest(context) {
   const url = new URL(context.request.url);
 
-  // Don't redirect API calls or static assets
+  // Don't redirect API calls, auth calls, or static assets
   if (url.pathname.startsWith('/api') ||
+      url.pathname.startsWith('/auth') ||
       url.pathname.startsWith('/assets') ||
       url.pathname.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|json|woff|woff2|ttf)$/)) {
     return context.next();

@@ -33,23 +33,11 @@ export async function onRequest(context) {
     // Forward the request to the backend
     const response = await fetch(backendRequest);
 
-    // For OAuth redirects, we need to follow them
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get('location');
-      if (location) {
-        // If it's a relative redirect, make it absolute
-        const redirectUrl = location.startsWith('http')
-          ? location
-          : `${BACKEND_URL}${location}`;
-
-        return Response.redirect(redirectUrl, response.status);
-      }
-    }
-
     // Clone response headers
     const responseHeaders = new Headers(response.headers);
 
-    // Return the response from backend
+    // Return the response from backend AS-IS (including redirects)
+    // Don't modify redirects - let the browser handle them naturally
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,

@@ -1,11 +1,5 @@
 # Cloudflare Pages redirect rules
-# This file handles routing for the SPA and proxies API calls to the backend
-
-# Proxy all API calls to the Fly.io backend
-/api/* https://cricketmela-api.fly.dev/api/:splat 200
-
-# Proxy all OAuth auth calls to the Fly.io backend
-/auth/* https://cricketmela-api.fly.dev/auth/:splat 200
+# All proxying is handled by Cloudflare Pages Functions
 
 # SPA routing - all other routes go to index.html
 /* /index.html 200
