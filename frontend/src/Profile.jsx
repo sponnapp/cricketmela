@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 
 export default function Profile({ user, refreshUser }) {
@@ -9,6 +9,25 @@ export default function Profile({ user, refreshUser }) {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [authMethod, setAuthMethod] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    // Check user's authentication method
+    async function checkAuthMethod() {
+      try {
+        const res = await axios.get(`/api/users/${user.id}/auth-method`, {
+          headers: { 'x-user': user.username }
+        })
+        setAuthMethod(res.data)
+      } catch (err) {
+        console.error('Error checking auth method:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    checkAuthMethod()
+  }, [user.id, user.username])
 
   async function submit(e) {
     e.preventDefault()
@@ -69,21 +88,49 @@ export default function Profile({ user, refreshUser }) {
   return (
     <div style={{padding: '20px', fontFamily: 'Inter, sans-serif'}}>
       <h2 style={{fontFamily: 'Poppins, sans-serif', fontSize: '28px', fontWeight: '600', letterSpacing: '-0.5px', marginBottom: '25px'}}>👤 Profile</h2>
-      <form onSubmit={submit} style={{maxWidth: '500px', display: 'flex', flexDirection: 'column', gap: '18px', backgroundColor: 'white', padding: '30px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(0,0,0,0.08)', border: '1px solid #e8e8e8'}}>
-        <div>
-          <label style={{fontWeight: '600', fontSize: '13px', color: '#4a5568', marginBottom: '8px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Username (read-only)</label>
-          <input
-            type="text"
-            value={user?.username || ''}
-            disabled
-            style={{padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: '10px', fontSize: '14px', backgroundColor: '#f7fafc', width: '100%', boxSizing: 'border-box', fontFamily: 'Inter, sans-serif', color: '#718096'}}
-          />
-        </div>
 
-        <div>
-          <label style={{fontWeight: '600', fontSize: '13px', color: '#4a5568', marginBottom: '8px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Display Name</label>
-          <input
-            type="text"
+      {loading ? (
+        <div style={{maxWidth: '500px', padding: '30px', textAlign: 'center'}}>Loading...</div>
+      ) : (
+        <form onSubmit={submit} style={{maxWidth: '500px', display: 'flex', flexDirection: 'column', gap: '18px', backgroundColor: 'white', padding: '30px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(0,0,0,0.08)', border: '1px solid #e8e8e8'}}>
+
+          {/* Authentication Method Indicator */}
+          {authMethod && authMethod.authMethod === 'google' && (
+            <div style={{padding: '15px', background: 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)', borderRadius: '10px', marginBottom: '10px', border: '1px solid #90caf9'}}>
+              <p style={{margin: '0 0 8px 0', fontWeight: '600', color: '#1565c0', fontSize: '14px'}}>
+                🔵 Google Authentication
+              </p>
+              <p style={{margin: 0, color: '#1976d2', fontSize: '13px'}}>
+                You sign in with your Google account. Password management is not available.
+              </p>
+            </div>
+          )}
+
+          {authMethod && authMethod.authMethod === 'both' && (
+            <div style={{padding: '15px', background: 'linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%)', borderRadius: '10px', marginBottom: '10px', border: '1px solid #ffb74d'}}>
+              <p style={{margin: '0 0 8px 0', fontWeight: '600', color: '#e65100', fontSize: '14px'}}>
+                🔐 Dual Authentication
+              </p>
+              <p style={{margin: 0, color: '#ef6c00', fontSize: '13px'}}>
+                You can sign in with Google OR username/password.
+              </p>
+            </div>
+          )}
+
+          <div>
+            <label style={{fontWeight: '600', fontSize: '13px', color: '#4a5568', marginBottom: '8px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Username (read-only)</label>
+            <input
+              type="text"
+              value={user?.username || ''}
+              disabled
+              style={{padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: '10px', fontSize: '14px', backgroundColor: '#f7fafc', width: '100%', boxSizing: 'border-box', fontFamily: 'Inter, sans-serif', color: '#718096'}}
+            />
+          </div>
+
+          <div>
+            <label style={{fontWeight: '600', fontSize: '13px', color: '#4a5568', marginBottom: '8px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Display Name</label>
+            <input
+              type="text"
             value={displayName}
             onChange={e => setDisplayName(e.target.value)}
             placeholder="Display name"
@@ -93,9 +140,12 @@ export default function Profile({ user, refreshUser }) {
           />
         </div>
 
-        <div>
-          <label style={{fontWeight: '600', fontSize: '13px', color: '#4a5568', marginBottom: '8px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Current Password</label>
-          <input
+        {/* Only show password fields if user can change password (not Google-only) */}
+        {authMethod && authMethod.canChangePassword && (
+          <>
+            <div>
+              <label style={{fontWeight: '600', fontSize: '13px', color: '#4a5568', marginBottom: '8px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Current Password</label>
+              <input
             type="password"
             value={currentPassword}
             onChange={e => setCurrentPassword(e.target.value)}
@@ -132,6 +182,8 @@ export default function Profile({ user, refreshUser }) {
             onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
           />
         </div>
+          </>
+        )}
 
         {error && <div style={{color: '#e53e3e', fontSize: '13px', fontWeight: '500'}}>{error}</div>}
         {message && <div style={{color: '#38a169', fontSize: '13px', fontWeight: '500'}}>{message}</div>}
@@ -167,7 +219,8 @@ export default function Profile({ user, refreshUser }) {
         >
           {saving ? 'Saving...' : 'Save Changes'}
         </button>
-      </form>
+        </form>
+      )}
     </div>
   )
 }

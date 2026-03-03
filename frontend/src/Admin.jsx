@@ -14,7 +14,7 @@ export default function Admin({ user, initialTab }) {
   const [selectedSeason, setSelectedSeason] = useState('')
   const [winnerModal, setWinnerModal] = useState({show: false, matchId: null, team1: '', team2: '', selectedTeam: ''})
   const [editModal, setEditModal] = useState({show: false, match: null, formData: {}})
-  const [editUserModal, setEditUserModal] = useState({show: false, user: null, formData: {}, assignedSeasons: []})
+  const [editUserModal, setEditUserModal] = useState({show: false, user: null, formData: {}, assignedSeasons: [], authMethod: null})
   const [passwordResetModal, setPasswordResetModal] = useState({show: false, userId: null, username: '', newPassword: ''})
   const [approveUserModal, setApproveUserModal] = useState({show: false, user: null, formData: {balance: 1000}, selectedSeasons: []})
   const [editSeasonModal, setEditSeasonModal] = useState({show: false, season: null, formData: {}})
@@ -30,7 +30,9 @@ export default function Admin({ user, initialTab }) {
   }, [])
 
   async function fetchSeasons() {
-    const r = await axios.get('/api/seasons')
+    const r = await axios.get('/api/seasons', {
+      headers: { 'x-user': user?.username || 'admin' }
+    })
     setSeasons(r.data)
     if (r.data.length && !selectedSeason) setSelectedSeason(r.data[0].id)
   }
@@ -226,6 +228,12 @@ export default function Admin({ user, initialTab }) {
       const seasonsRes = await axios.get(`/api/admin/users/${userObj.id}/seasons`, {
         headers: { 'x-user': user?.username || 'admin' }
       })
+
+      // Fetch user's authentication method
+      const authRes = await axios.get(`/api/users/${userObj.id}/auth-method`, {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+
       setEditUserModal({
         show: true,
         user: userObj,
@@ -235,10 +243,11 @@ export default function Admin({ user, initialTab }) {
           balance: userObj.balance,
           email: userObj.email || 'xyz@xyz.com'
         },
-        assignedSeasons: seasonsRes.data || []
+        assignedSeasons: seasonsRes.data || [],
+        authMethod: authRes.data || null
       })
     } catch (e) {
-      console.error('Error loading user seasons:', e)
+      console.error('Error loading user data:', e)
       setEditUserModal({
         show: true,
         user: userObj,
@@ -248,7 +257,8 @@ export default function Admin({ user, initialTab }) {
           balance: userObj.balance,
           email: userObj.email || 'xyz@xyz.com'
         },
-        assignedSeasons: []
+        assignedSeasons: [],
+        authMethod: null
       })
     }
   }
@@ -1349,6 +1359,25 @@ export default function Admin({ user, initialTab }) {
         <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000}}>
           <div style={{backgroundColor: 'white', padding: '30px', borderRadius: '8px', maxWidth: '500px', width: '90%', boxShadow: '0 4px 20px rgba(0,0,0,0.3)', maxHeight: '80vh', overflow: 'auto'}}>
             <h3 style={{marginTop: 0}}>Edit User</h3>
+
+            {/* Google OAuth Indicator */}
+            {editUserModal.authMethod && editUserModal.authMethod.authMethod === 'google' && (
+              <div style={{padding: '12px', background: 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)', borderRadius: '8px', marginBottom: '15px', border: '1px solid #90caf9'}}>
+                <p style={{margin: 0, fontWeight: '600', color: '#1565c0', fontSize: '13px'}}>
+                  🔵 Google OAuth User - Password management not available
+                </p>
+              </div>
+            )}
+
+            {/* Dual Authentication Indicator */}
+            {editUserModal.authMethod && editUserModal.authMethod.authMethod === 'both' && (
+              <div style={{padding: '12px', background: 'linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%)', borderRadius: '8px', marginBottom: '15px', border: '1px solid #ffb74d'}}>
+                <p style={{margin: 0, fontWeight: '600', color: '#e65100', fontSize: '13px'}}>
+                  🔐 Dual Authentication - Can login with Google or password
+                </p>
+              </div>
+            )}
+
             <div style={{margin: '15px 0'}}>
               <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Username:</label>
               <input type="text" value={editUserModal.formData.username} disabled style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd', backgroundColor: '#f5f5f5'}} />
@@ -1397,8 +1426,13 @@ export default function Admin({ user, initialTab }) {
               </div>
             </div>
             <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px', flexWrap: 'wrap'}}>
-              <button onClick={() => setEditUserModal({show: false, user: null, formData: {}, assignedSeasons: []})} style={{padding: '8px 16px', backgroundColor: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Cancel</button>
-              <button onClick={() => openPasswordResetModal(editUserModal.user.id, editUserModal.user.username)} style={{padding: '8px 16px', backgroundColor: '#ff9800', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Reset Password</button>
+              <button onClick={() => setEditUserModal({show: false, user: null, formData: {}, assignedSeasons: [], authMethod: null})} style={{padding: '8px 16px', backgroundColor: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Cancel</button>
+
+              {/* Only show Reset Password button if user can have password (not Google-only) */}
+              {(!editUserModal.authMethod || editUserModal.authMethod.canChangePassword) && (
+                <button onClick={() => openPasswordResetModal(editUserModal.user.id, editUserModal.user.username)} style={{padding: '8px 16px', backgroundColor: '#ff9800', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Reset Password</button>
+              )}
+
               <button onClick={submitEditUser} style={{padding: '8px 16px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Save</button>
             </div>
           </div>
