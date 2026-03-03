@@ -200,6 +200,26 @@ db.serialize(() => {
     }
   });
 
+  // Migration: Add google_id column to users table
+  hasColumn('users', 'google_id', (err, exists) => {
+    if (err) {
+      console.error('Error checking google_id column:', err);
+    } else if (!exists) {
+      db.run('ALTER TABLE users ADD COLUMN google_id TEXT', (err) => {
+        if (err) {
+          console.error('Error adding google_id column:', err);
+        } else {
+          console.log('Added google_id column to users table');
+          // Create unique index on google_id
+          db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_google_id ON users(google_id)', (err) => {
+            if (err) console.error('Error creating google_id index:', err);
+            else console.log('Created unique index on google_id');
+          });
+        }
+      });
+    }
+  });
+
 });
 
 // close DB after a short delay to allow async seeds to finish

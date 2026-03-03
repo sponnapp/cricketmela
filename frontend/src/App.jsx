@@ -41,6 +41,39 @@ export default function App() {
     }
   }, [user])
 
+  // Handle Google OAuth callback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+
+    // Handle successful OAuth authentication
+    if (params.get('auth') === 'success') {
+      const userData = params.get('user')
+      if (userData) {
+        try {
+          const parsedUser = JSON.parse(decodeURIComponent(userData))
+          localStorage.setItem('user', JSON.stringify(parsedUser))
+          setUser(parsedUser)
+          // Clean up URL
+          window.history.replaceState({}, document.title, window.location.pathname)
+        } catch (e) {
+          console.error('Failed to parse user data:', e)
+        }
+      }
+    }
+
+    // Handle pending approval error
+    if (params.get('error') === 'pending_approval') {
+      alert('✅ Account created successfully!\n\nYour account is pending admin approval. You will receive an email notification once approved.')
+      window.history.replaceState({}, document.title, window.location.pathname)
+    }
+
+    // Handle authentication failure
+    if (params.get('error') === 'auth_failed') {
+      alert('❌ Google authentication failed. Please try again or use username/password login.')
+      window.history.replaceState({}, document.title, window.location.pathname)
+    }
+  }, [])
+
   // Add cricket background to body when user is logged in
   useEffect(() => {
     if (user) {

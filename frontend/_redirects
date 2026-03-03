@@ -4,6 +4,9 @@
 # Proxy all API calls to the Fly.io backend
 /api/* https://cricketmela-api.fly.dev/api/:splat 200
 
+# Proxy all OAuth auth calls to the Fly.io backend
+/auth/* https://cricketmela-api.fly.dev/auth/:splat 200
+
 # SPA routing - all other routes go to index.html
 /* /index.html 200
 

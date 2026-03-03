@@ -3,6 +3,10 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const sqlite3 = require('sqlite3').verbose();
+const session = require('express-session');
+const passport = require('passport');
+require('dotenv').config();
+
 const emailService = require('./email');
 const app = express();
 const port = process.env.PORT || 4000;
@@ -36,6 +40,25 @@ app.use(cors({
 }));
 
 app.use(express.json());
+
+// Session configuration (BEFORE passport initialization)
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'cricket-mela-secret-key-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
+// Passport initialization
+app.use(passport.initialize());
+app.use(passport.session());
+
+// Load Google OAuth strategy
+require('./auth/googleStrategy')(passport);
 
 const DB_DIR = process.env.NODE_ENV === 'production' ? '/app/data' : __dirname;
 const DB_PATH = path.join(DB_DIR, 'data.db');
@@ -267,8 +290,8 @@ function initializeDatabase() {
           if (!err2) {
             console.log(`✅ Cleaned up duplicate votes for match ${dup.match_id}, user ${dup.user_id}`);
           }
-        });
       });
+    });
     });
   });
 
@@ -277,6 +300,173 @@ function initializeDatabase() {
 
 // Call initialization on startup
 initializeDatabase();
+
+/**
+ * Helper function: Process auto-loss votes for newly assigned seasons with completed matches
+ * When a user is assigned to a season, for each completed match they haven't voted on:
+ * - Charge them 10 points (allow negative balance)
+ * - Distribute those points to the winners using 1:1 ratio
+ */
+function processAutoLossForNewSeasons(userId, newSeasonIds, callback) {
+  if (!newSeasonIds || newSeasonIds.length === 0) {
+    return callback(null);
+  }
+
+  const db = openDb();
+
+  db.serialize(() => {
+    // Get all completed matches (with winners) in the newly assigned seasons
+    db.all(
+      `SELECT m.id, m.season_id, m.home_team, m.away_team, m.winner
+       FROM matches m
+       WHERE m.season_id IN (${newSeasonIds.map(() => '?').join(',')})
+       AND m.winner IS NOT NULL`,
+      newSeasonIds,
+      (err1, matches) => {
+        if (err1) {
+          db.close();
+          console.error('Error fetching completed matches for auto-loss:', err1);
+          return callback(err1);
+        }
+
+        if (!matches || matches.length === 0) {
+          db.close();
+          return callback(null);
+        }
+
+        // For each completed match, check if this user has voted
+        let processed = 0;
+
+        matches.forEach(match => {
+          db.get(
+            'SELECT id FROM votes WHERE match_id = ? AND user_id = ?',
+            [match.id, userId],
+            (err2, existingVote) => {
+              if (err2) {
+                console.error('Error checking vote for new season auto-loss:', err2);
+              }
+
+              // Only process if user hasn't voted on this match
+              if (!existingVote) {
+                const autoPoints = 10;
+                const losingTeam = match.home_team === match.winner ? match.away_team : match.home_team;
+
+                // 1. Deduct balance from user (allow negative)
+                db.run(
+                  'UPDATE users SET balance = balance - ? WHERE id = ?',
+                  [autoPoints, userId],
+                  (err3) => {
+                    if (err3) {
+                      console.error('Error deducting auto-loss balance for new season:', err3);
+                    }
+
+                    // 2. Create auto-loss vote record
+                    db.run(
+                      'INSERT INTO votes (match_id, user_id, team, points) VALUES (?, ?, ?, ?)',
+                      [match.id, userId, losingTeam, autoPoints],
+                      (err4) => {
+                        if (err4) {
+                          console.error('Error creating auto-loss vote for new season:', err4);
+                        }
+
+                        // 3. Distribute to existing winners
+                        db.get(
+                          'SELECT SUM(points) as total FROM votes WHERE match_id = ? AND team = ?',
+                          [match.id, match.winner],
+                          (err5, winnerRow) => {
+                            if (err5) {
+                              console.error('Error getting winner points:', err5);
+                              processed++;
+                              if (processed === matches.length) {
+                                db.close();
+                                callback(null);
+                              }
+                              return;
+                            }
+
+                            const totalWinner = winnerRow && winnerRow.total ? Number(winnerRow.total) : 0;
+
+                            if (totalWinner === 0) {
+                              processed++;
+                              if (processed === matches.length) {
+                                db.close();
+                                callback(null);
+                              }
+                              return;
+                            }
+
+                            // Get all winner votes and distribute
+                            db.all(
+                              'SELECT user_id, points FROM votes WHERE match_id = ? AND team = ?',
+                              [match.id, match.winner],
+                              (err6, winnerVotes) => {
+                                if (err6) {
+                                  console.error('Error getting winner votes:', err6);
+                                  processed++;
+                                  if (processed === matches.length) {
+                                    db.close();
+                                    callback(null);
+                                  }
+                                  return;
+                                }
+
+                                if (!winnerVotes || winnerVotes.length === 0) {
+                                  processed++;
+                                  if (processed === matches.length) {
+                                    db.close();
+                                    callback(null);
+                                  }
+                                  return;
+                                }
+
+                                // Distribute the 10 points to winners proportionally
+                                let winnersProcessed = 0;
+                                winnerVotes.forEach(vote => {
+                                  const share = (vote.points / totalWinner) * autoPoints;
+                                  const amountToAdd = Math.round(share);
+
+                                  db.run(
+                                    'UPDATE users SET balance = balance + ? WHERE id = ?',
+                                    [amountToAdd, vote.user_id],
+                                    (err7) => {
+                                      if (err7) {
+                                        console.error('Error distributing winnings to winner:', err7);
+                                      }
+
+                                      winnersProcessed++;
+                                      if (winnersProcessed === winnerVotes.length) {
+                                        processed++;
+                                        if (processed === matches.length) {
+                                          db.close();
+                                          callback(null);
+                                        }
+                                      }
+                                    }
+                                  );
+                                });
+                              }
+                            );
+                          }
+                        );
+                      }
+                    );
+                  }
+                );
+              } else {
+                // User already voted, just count it
+                processed++;
+                if (processed === matches.length) {
+                  db.close();
+                  callback(null);
+                }
+              }
+            }
+          );
+        });
+      }
+    );
+  });
+}
 
 
 // Simple auth middleware: expects `x-user` header with username; looks up role in DB
@@ -723,17 +913,27 @@ app.post('/api/admin/users/:id/approve', requireRole('admin'), (req, res) => {
                 if (completed === season_ids.length) {
                   db.close();
 
-                  // Send approval email to user (only if email is valid)
-                  if (user.email && user.email !== 'xyz@xyz.com' && user.email.includes('@')) {
-                    emailService.sendApprovalEmail(user.username, user.email, user.display_name, (emailErr) => {
-                      if (emailErr) {
-                        console.log('Warning: Could not send approval email:', emailErr.message);
-                      }
-                      res.json({ ok: true, message: 'User approved and seasons assigned' });
-                    });
-                  } else {
-                    res.json({ ok: true, message: 'User approved and seasons assigned (no email sent - invalid email)' });
-                  }
+                  // Process auto-loss for completed matches in newly assigned seasons
+                  processAutoLossForNewSeasons(id, season_ids, (autoLossErr) => {
+                    if (autoLossErr) {
+                      console.error('Error processing auto-loss for new seasons:', autoLossErr);
+                      // Don't fail the approval, just log the error
+                    } else {
+                      console.log(`✅ Auto-loss processing completed for user ${id} in ${season_ids.length} season(s)`);
+                    }
+
+                    // Send approval email to user (only if email is valid)
+                    if (user.email && user.email !== 'xyz@xyz.com' && user.email.includes('@')) {
+                      emailService.sendApprovalEmail(user.username, user.email, user.display_name, (emailErr) => {
+                        if (emailErr) {
+                          console.log('Warning: Could not send approval email:', emailErr.message);
+                        }
+                        res.json({ ok: true, message: 'User approved and seasons assigned' });
+                      });
+                    } else {
+                      res.json({ ok: true, message: 'User approved and seasons assigned (no email sent - invalid email)' });
+                    }
+                  });
                 }
               });
             });
@@ -814,15 +1014,38 @@ app.put('/api/admin/users/:id/password', requireRole('admin'), (req, res) => {
   }
 
   const db = openDb();
-  db.run('UPDATE users SET password = ? WHERE id = ?', [newPassword, id], function(err) {
-    db.close();
+
+  // Check if user is Google-only user
+  db.get('SELECT google_id, password FROM users WHERE id = ?', [id], (err, row) => {
     if (err) {
-      return res.status(500).json({ error: 'DB error: ' + err.message });
+      db.close();
+      return res.status(500).json({ error: 'DB error' });
     }
-    if (this.changes === 0) {
+
+    if (!row) {
+      db.close();
       return res.status(404).json({ error: 'User not found' });
     }
-    res.json({ ok: true, message: 'Password reset successfully' });
+
+    // Prevent password reset for Google-only users
+    if (row.google_id && !row.password) {
+      db.close();
+      return res.status(400).json({
+        error: 'Cannot set password for Google OAuth users. They authenticate via Google.'
+      });
+    }
+
+    // Proceed with password reset
+    db.run('UPDATE users SET password = ? WHERE id = ?', [newPassword, id], function(err2) {
+      db.close();
+      if (err2) {
+        return res.status(500).json({ error: 'DB error: ' + err2.message });
+      }
+      if (this.changes === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      res.json({ ok: true, message: 'Password reset successfully' });
+    });
   });
 });
 
@@ -850,16 +1073,24 @@ app.delete('/api/admin/users/:id', requireRole('admin'), (req, res) => {
           return res.status(500).json({ error: 'Failed to delete user votes' });
         }
 
-        // Now delete the user
-        db.run('DELETE FROM users WHERE id = ?', [id], function(err2) {
-          db.close();
+        // Delete user's season assignments
+        db.run('DELETE FROM user_seasons WHERE user_id = ?', [id], function(err2) {
           if (err2) {
-            return res.status(500).json({ error: 'Failed to delete user' });
+            db.close();
+            return res.status(500).json({ error: 'Failed to delete user season assignments' });
           }
-          if (this.changes === 0) {
-            return res.status(404).json({ error: 'User not found' });
-          }
-          res.json({ ok: true, message: 'User deleted successfully' });
+
+          // Now delete the user
+          db.run('DELETE FROM users WHERE id = ?', [id], function(err3) {
+            db.close();
+            if (err3) {
+              return res.status(500).json({ error: 'Failed to delete user' });
+            }
+            if (this.changes === 0) {
+              return res.status(404).json({ error: 'User not found' });
+            }
+            res.json({ ok: true, message: 'User deleted successfully' });
+          });
         });
       });
     });
@@ -919,6 +1150,88 @@ app.post('/api/login', (req, res) => {
     res.json({ id: row.id, username: row.username, display_name: row.display_name, role: row.role, balance: row.balance });
   });
 });
+
+// ========== Google OAuth Routes ==========
+
+// Google OAuth login - initiate authentication
+app.get('/auth/google',
+  passport.authenticate('google', { scope: ['profile', 'email'] })
+);
+
+// Google OAuth callback - handle after Google authentication
+app.get('/auth/google/callback',
+  passport.authenticate('google', { failureRedirect: '/auth/google/failure' }),
+  (req, res) => {
+    // Check if user is approved
+    if (req.user.approved === 0) {
+      // User account pending approval
+      const frontendUrl = process.env.NODE_ENV === 'production'
+        ? 'https://cricketmela.pages.dev'
+        : 'http://localhost:5173';
+      return res.redirect(`${frontendUrl}/?error=pending_approval`);
+    }
+
+    // Success - redirect to frontend with user data
+    const userData = encodeURIComponent(JSON.stringify({
+      id: req.user.id,
+      username: req.user.username,
+      display_name: req.user.display_name,
+      role: req.user.role,
+      balance: req.user.balance
+    }));
+
+    const frontendUrl = process.env.NODE_ENV === 'production'
+      ? 'https://cricketmela.pages.dev'
+      : 'http://localhost:5173';
+
+    res.redirect(`${frontendUrl}/?auth=success&user=${userData}`);
+  }
+);
+
+// Google OAuth failure handler
+app.get('/auth/google/failure', (req, res) => {
+  const frontendUrl = process.env.NODE_ENV === 'production'
+    ? 'https://cricketmela.pages.dev'
+    : 'http://localhost:5173';
+  res.redirect(`${frontendUrl}/?error=auth_failed`);
+});
+
+// Logout endpoint
+app.post('/auth/logout', (req, res) => {
+  req.logout((err) => {
+    if (err) {
+      console.error('Logout error:', err);
+      return res.status(500).json({ error: 'Logout failed' });
+    }
+    req.session.destroy((err) => {
+      if (err) {
+        console.error('Session destroy error:', err);
+      }
+      res.json({ ok: true, message: 'Logged out successfully' });
+    });
+  });
+});
+
+// Check authentication status
+app.get('/auth/status', (req, res) => {
+  if (req.isAuthenticated()) {
+    res.json({
+      authenticated: true,
+      user: {
+        id: req.user.id,
+        username: req.user.username,
+        display_name: req.user.display_name,
+        role: req.user.role,
+        balance: req.user.balance,
+        email: req.user.email
+      }
+    });
+  } else {
+    res.json({ authenticated: false });
+  }
+});
+
+// ========== End Google OAuth Routes ==========
 
 app.get('/api/standings', (req, res) => {
   const db = openDb();
@@ -1366,6 +1679,34 @@ app.post('/api/admin/upload-matches', requireRole('admin'), (req, res) => {
   })();
 });
 
+// Check user's authentication method (Google OAuth vs password)
+app.get('/api/users/:id/auth-method', (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+  const id = Number(req.params.id);
+
+  // Allow users to check their own auth method, or admins to check anyone
+  if (req.user.id !== id && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  const db = openDb();
+  db.get('SELECT google_id, password FROM users WHERE id = ?', [id], (err, row) => {
+    db.close();
+    if (err) return res.status(500).json({ error: 'DB error' });
+    if (!row) return res.status(404).json({ error: 'User not found' });
+
+    const hasGoogleId = !!row.google_id;
+    const hasPassword = !!row.password;
+
+    res.json({
+      hasGoogleId,
+      hasPassword,
+      authMethod: hasGoogleId && !hasPassword ? 'google' : hasGoogleId && hasPassword ? 'both' : 'password',
+      canChangePassword: !hasGoogleId || hasPassword // Can change if not Google-only
+    });
+  });
+});
+
 // Update user profile (display name, password). Username is immutable.
 app.put('/api/users/:id/profile', (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
@@ -1388,7 +1729,7 @@ app.put('/api/users/:id/profile', (req, res) => {
 
   // If password change requested, validate current password first
   if (password) {
-    db.get('SELECT password FROM users WHERE id = ?', [id], (err, row) => {
+    db.get('SELECT password, google_id FROM users WHERE id = ?', [id], (err, row) => {
       if (err) {
         db.close();
         return res.status(500).json({ error: 'DB error' });
@@ -1396,6 +1737,14 @@ app.put('/api/users/:id/profile', (req, res) => {
       if (!row) {
         db.close();
         return res.status(404).json({ error: 'User not found' });
+      }
+
+      // Prevent Google-only users from setting passwords
+      if (row.google_id && !row.password) {
+        db.close();
+        return res.status(400).json({
+          error: 'Cannot set password for Google OAuth users. Please continue using Google to sign in.'
+        });
       }
 
       // Verify current password (handle null/empty passwords with default 'password')
@@ -1468,28 +1817,54 @@ app.put('/api/admin/users/:id/seasons', requireRole('admin'), (req, res) => {
 
   const db = openDb();
   db.serialize(() => {
-    // First delete all existing assignments
-    db.run('DELETE FROM user_seasons WHERE user_id = ?', [userId], (err1) => {
-      if (err1) {
+    // First get the user's previously assigned seasons
+    db.all('SELECT season_id FROM user_seasons WHERE user_id = ?', [userId], (errOld, oldSeasons) => {
+      if (errOld) {
         db.close();
         return res.status(500).json({ error: 'DB error' });
       }
 
-      if (seasonIds.length === 0) {
-        db.close();
-        return res.json({ ok: true, message: 'Seasons updated' });
-      }
+      const oldSeasonIds = (oldSeasons || []).map(s => s.season_id);
+      // Find newly added seasons (in seasonIds but not in oldSeasonIds)
+      const newSeasonIds = seasonIds.filter(sid => !oldSeasonIds.includes(sid));
 
-      // Insert new assignments
-      let pending = seasonIds.length;
-      seasonIds.forEach(seasonId => {
-        db.run('INSERT INTO user_seasons (user_id, season_id) VALUES (?, ?)', [userId, seasonId], (err2) => {
-          if (err2) console.error('Error inserting season assignment:', err2);
-          pending -= 1;
-          if (pending === 0) {
-            db.close();
-            res.json({ ok: true, message: 'Seasons updated' });
-          }
+      // Delete all existing assignments
+      db.run('DELETE FROM user_seasons WHERE user_id = ?', [userId], (err1) => {
+        if (err1) {
+          db.close();
+          return res.status(500).json({ error: 'DB error' });
+        }
+
+        if (seasonIds.length === 0) {
+          db.close();
+          return res.json({ ok: true, message: 'Seasons updated' });
+        }
+
+        // Insert new assignments
+        let pending = seasonIds.length;
+        seasonIds.forEach(seasonId => {
+          db.run('INSERT INTO user_seasons (user_id, season_id) VALUES (?, ?)', [userId, seasonId], (err2) => {
+            if (err2) console.error('Error inserting season assignment:', err2);
+            pending -= 1;
+            if (pending === 0) {
+              db.close();
+
+              // If there are new seasons, process auto-loss for them
+              if (newSeasonIds.length > 0) {
+                processAutoLossForNewSeasons(userId, newSeasonIds, (autoLossErr) => {
+                  if (autoLossErr) {
+                    console.error('Error processing auto-loss for newly assigned seasons:', autoLossErr);
+                    // Don't fail the request, just log the error
+                  } else {
+                    console.log(`✅ Auto-loss processing completed for user ${userId} in ${newSeasonIds.length} new season(s)`);
+                  }
+                  res.json({ ok: true, message: 'Seasons updated' });
+                });
+              } else {
+                res.json({ ok: true, message: 'Seasons updated' });
+              }
+            }
+          });
         });
       });
     });

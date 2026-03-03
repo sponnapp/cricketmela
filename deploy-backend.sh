@@ -32,6 +32,10 @@ if ! flyctl status &> /dev/null; then
 
     echo "🔒 Setting environment variables..."
     flyctl secrets set NODE_ENV=production
+    flyctl secrets set GOOGLE_CLIENT_ID=902717717741-k71rkuvjnb2759i001r9butf6i7v8mh0.apps.googleusercontent.com
+    flyctl secrets set GOOGLE_CLIENT_SECRET=REDACTED
+    flyctl secrets set SESSION_SECRET=213cdfe81b1abf48fa1184eb3dc30d8f715983dffc8770437054d4fd4511868a
+
 fi
 
 echo "🏗️  Building and deploying..."
