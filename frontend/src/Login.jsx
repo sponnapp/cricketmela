@@ -94,17 +94,89 @@ function IntlBadge({ team }) {
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function Login({ onLogin }) {
   const [isSignup, setIsSignup] = useState(false)
+  const [isForgot, setIsForgot] = useState(false)
+  const [isReset,  setIsReset]  = useState(false)
+  const [resetToken, setResetToken] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [email,    setEmail]    = useState('')
+  const [forgotEmail, setForgotEmail] = useState('')
   const [error,    setError]    = useState(null)
   const [message,  setMessage]  = useState(null)
   const [loading,  setLoading]  = useState(false)
 
+  // Check URL for reset token on mount
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const page = params.get('page')
+    const token = params.get('token')
+    if (page === 'reset-password' && token) {
+      setResetToken(token)
+      setIsReset(true)
+      // Validate token with backend
+      axios.get(`/api/reset-password/validate/${token}`)
+        .then(res => {
+          if (!res.data.valid) {
+            setIsReset(false)
+            setError(res.data.error || 'Invalid or expired reset link. Please request a new one.')
+          }
+        })
+        .catch(() => {
+          setIsReset(false)
+          setError('Invalid or expired reset link. Please request a new one.')
+        })
+    }
+  }, [])
+
+  function goToLogin() {
+    setIsSignup(false); setIsForgot(false); setIsReset(false)
+    setError(null); setMessage(null)
+    setForgotEmail(''); setNewPassword(''); setConfirmPassword('')
+  }
+
   // Google Sign-In handler
   const handleGoogleLogin = () => {
-    // Redirect to backend Google OAuth endpoint
     window.location.href = '/auth/google';
+  }
+
+  async function handleForgotPassword(e) {
+    e.preventDefault()
+    setError(null); setMessage(null)
+    if (!forgotEmail) return setError('Please enter your email address')
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(forgotEmail)) return setError('Enter a valid email address')
+    setLoading(true)
+    try {
+      const res = await axios.post('/api/forgot-password', { email: forgotEmail })
+      setLoading(false)
+      setMessage(res.data.message || 'If that email is registered, a reset link has been sent.')
+    } catch (err) {
+      setLoading(false)
+      setError(err.response?.data?.error || 'Failed to send reset email. Try again.')
+    }
+  }
+
+  async function handleResetPassword(e) {
+    e.preventDefault()
+    setError(null); setMessage(null)
+    if (!newPassword) return setError('Enter a new password')
+    if (newPassword.length < 6) return setError('Password must be at least 6 characters')
+    if (newPassword !== confirmPassword) return setError('Passwords do not match')
+    setLoading(true)
+    try {
+      const res = await axios.post(`/api/reset-password/${resetToken}`, { password: newPassword })
+      setLoading(false)
+      setMessage(res.data.message || 'Password reset successfully!')
+      // Clear URL params and go back to login after 2 seconds
+      setTimeout(() => {
+        window.history.replaceState({}, '', '/')
+        goToLogin()
+      }, 2500)
+    } catch (err) {
+      setLoading(false)
+      setError(err.response?.data?.error || 'Failed to reset password. The link may have expired.')
+    }
   }
 
   async function submit(e) {
@@ -271,23 +343,107 @@ export default function Login({ onLogin }) {
             display:'flex', alignItems:'center', justifyContent:'center',
           }}>
             <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-              {/* Cricket bat */}
               <rect x="14" y="3" width="5" height="18" rx="2.5" fill="#D4A847" transform="rotate(15 14 3)"/>
               <rect x="13" y="19" width="6" height="4" rx="1" fill="#8B5E1A" transform="rotate(15 13 19)"/>
-              {/* Cricket ball */}
               <circle cx="8" cy="25" r="5" fill="#C8102E"/>
               <path d="M5 22 Q8 26 11 22" stroke="#fff" strokeWidth="1" fill="none"/>
               <path d="M5 28 Q8 24 11 28" stroke="#fff" strokeWidth="1" fill="none"/>
             </svg>
           </div>
           <div style={{ fontFamily:"'Poppins',sans-serif", fontSize:'17px', fontWeight:'800', color:'#fff', letterSpacing:'1px' }}>
-            {isSignup ? '📝 SIGN UP' : '🔐 LOGIN'}
+            {isReset ? '🔐 RESET PASSWORD' : isForgot ? '📧 FORGOT PASSWORD' : isSignup ? '📝 SIGN UP' : '🔐 LOGIN'}
           </div>
           <div style={{ fontSize:'12px', color:'rgba(255,255,255,0.5)', marginTop:'2px' }}>
-            {isSignup ? 'Create your account' : 'Welcome back, champion!'}
+            {isReset ? 'Enter your new password' : isForgot ? 'We\'ll send you a reset link' : isSignup ? 'Create your account' : 'Welcome back, champion!'}
           </div>
         </div>
 
+        {/* ── FORGOT PASSWORD FORM ── */}
+        {isForgot && (
+          <form onSubmit={handleForgotPassword} style={{ display:'flex', flexDirection:'column', gap:'11px' }}>
+            <Field icon="✉️" type="email" placeholder="Your registered email" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} />
+            {error && (
+              <>
+                <Alert type="error">{error}</Alert>
+                {/* If error mentions Google, show a Sign in with Google shortcut */}
+                {error.toLowerCase().includes('google') && (
+                  <button
+                    type="button"
+                    onClick={handleGoogleLogin}
+                    style={{
+                      padding:'10px', background:'white', color:'#5f6368',
+                      border:'1px solid #dadce0', borderRadius:'10px',
+                      fontSize:'13px', fontWeight:'600', cursor:'pointer',
+                      display:'flex', alignItems:'center', justifyContent:'center', gap:'8px',
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 18 18">
+                      <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>
+                      <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
+                      <path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z"/>
+                      <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.163 6.656 3.58 9 3.58z"/>
+                    </svg>
+                    Sign in with Google instead
+                  </button>
+                )}
+              </>
+            )}
+            {message && <Alert type="success">{message}</Alert>}
+            {!message && (
+              <button type="submit" disabled={loading} style={{
+                marginTop:'4px', padding:'12px',
+                background: loading ? 'rgba(120,120,120,0.4)' : 'linear-gradient(90deg, #e65c00 0%, #f9d423 50%, #e65c00 100%)',
+                color: loading ? '#aaa' : '#1a0a00',
+                border:'none', borderRadius:'10px',
+                fontSize:'15px', fontWeight:'900',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                letterSpacing:'1.5px',
+                boxShadow: loading ? 'none' : '0 4px 20px rgba(230,92,0,0.5)',
+                fontFamily:"'Poppins', sans-serif",
+              }}>
+                {loading ? '⏳ Sending…' : '📧 SEND RESET LINK'}
+              </button>
+            )}
+            <div style={{ textAlign:'center', fontSize:'13px', color:'rgba(255,255,255,0.6)', marginTop:'4px' }}>
+              <span onClick={goToLogin} style={{ color:'#f9d423', fontWeight:'700', cursor:'pointer', textDecoration:'underline' }}>
+                ← Back to Login
+              </span>
+            </div>
+          </form>
+        )}
+
+        {/* ── RESET PASSWORD FORM ── */}
+        {isReset && (
+          <form onSubmit={handleResetPassword} style={{ display:'flex', flexDirection:'column', gap:'11px' }}>
+            <Field icon="🔒" type="password" placeholder="New password (min 6 chars)" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+            <Field icon="🔒" type="password" placeholder="Confirm new password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
+            {error   && <Alert type="error">{error}</Alert>}
+            {message && <Alert type="success">{message}</Alert>}
+            {!message && (
+              <button type="submit" disabled={loading} style={{
+                marginTop:'4px', padding:'12px',
+                background: loading ? 'rgba(120,120,120,0.4)' : 'linear-gradient(90deg, #e65c00 0%, #f9d423 50%, #e65c00 100%)',
+                color: loading ? '#aaa' : '#1a0a00',
+                border:'none', borderRadius:'10px',
+                fontSize:'15px', fontWeight:'900',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                letterSpacing:'1.5px',
+                boxShadow: loading ? 'none' : '0 4px 20px rgba(230,92,0,0.5)',
+                fontFamily:"'Poppins', sans-serif",
+              }}>
+                {loading ? '⏳ Resetting…' : '🔐 RESET PASSWORD'}
+              </button>
+            )}
+            <div style={{ textAlign:'center', fontSize:'13px', color:'rgba(255,255,255,0.6)', marginTop:'4px' }}>
+              <span onClick={goToLogin} style={{ color:'#f9d423', fontWeight:'700', cursor:'pointer', textDecoration:'underline' }}>
+                ← Back to Login
+              </span>
+            </div>
+          </form>
+        )}
+
+        {/* ── LOGIN / SIGNUP FORM ── */}
+        {!isForgot && !isReset && (
         <form onSubmit={submit} style={{ display:'flex', flexDirection:'column', gap:'11px' }}>
           {/* Google Sign-In Button (only show for login, not signup) */}
           {!isSignup && (
@@ -347,6 +503,18 @@ export default function Login({ onLogin }) {
           <Field icon="🔒" type="password" placeholder="Password"     value={password} onChange={e => setPassword(e.target.value)} />
           {isSignup && <Field icon="✉️" type="email" placeholder="Email address" value={email} onChange={e => setEmail(e.target.value)} />}
 
+          {/* Forgot password link — only on login form */}
+          {!isSignup && (
+            <div style={{ textAlign:'right', marginTop:'-4px' }}>
+              <span
+                onClick={() => { setIsForgot(true); setError(null); setMessage(null) }}
+                style={{ fontSize:'12px', color:'rgba(200,200,255,0.7)', cursor:'pointer', textDecoration:'underline' }}
+              >
+                Forgot password?
+              </span>
+            </div>
+          )}
+
           {error   && <Alert type="error">{error}</Alert>}
           {message && <Alert type="success">{message}</Alert>}
 
@@ -364,7 +532,9 @@ export default function Login({ onLogin }) {
             {loading ? '⏳ Please wait…' : isSignup ? '🚀 CREATE ACCOUNT' : "🏏 LET'S PLAY!"}
           </button>
         </form>
+        )}
 
+        {!isForgot && !isReset && (
         <div style={{ marginTop:'14px', textAlign:'center', fontSize:'13px', color:'rgba(255,255,255,0.6)' }}>
           {isSignup ? (
             <>Already have an account?{' '}
@@ -382,6 +552,7 @@ export default function Login({ onLogin }) {
             </>
           )}
         </div>
+        )}
 
         {/* Disclaimer */}
         <div style={{

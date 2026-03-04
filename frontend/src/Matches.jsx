@@ -1,7 +1,58 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 import axios from 'axios'
+import { toast } from './Toast'
 
 const POINTS = [10, 20, 50]
+
+// ── Countdown Timer Component ────────────────────────────────────────────────
+function CountdownTimer({ scheduledAt, parseMatchDateTime }) {
+  const [timeLeft, setTimeLeft] = useState(null)
+
+  const calcTime = useCallback(() => {
+    const matchTime = parseMatchDateTime(scheduledAt)
+    if (!matchTime) return null
+    const cutoff = new Date(matchTime.getTime() - 30 * 60 * 1000)
+    const now = new Date()
+    const diff = cutoff - now
+    if (diff <= 0) return null
+    const h = Math.floor(diff / 3600000)
+    const m = Math.floor((diff % 3600000) / 60000)
+    const s = Math.floor((diff % 60000) / 1000)
+    return { h, m, s, diff }
+  }, [scheduledAt])
+
+  useEffect(() => {
+    const update = () => setTimeLeft(calcTime())
+    update()
+    const id = setInterval(update, 1000)
+    return () => clearInterval(id)
+  }, [calcTime])
+
+  if (!timeLeft) return null
+
+  const urgent = timeLeft.diff < 10 * 60 * 1000   // < 10 min
+  const warning = timeLeft.diff < 30 * 60 * 1000  // < 30 min
+
+  const colour = urgent ? '#e74c3c' : warning ? '#f39c12' : '#27ae60'
+  const bg = urgent ? 'rgba(231,76,60,0.1)' : warning ? 'rgba(243,156,18,0.1)' : 'rgba(39,174,96,0.08)'
+  const label = timeLeft.h > 0
+    ? `${timeLeft.h}h ${timeLeft.m}m`
+    : `${timeLeft.m}m ${String(timeLeft.s).padStart(2,'0')}s`
+
+  return (
+    <div style={{
+      display:'inline-flex', alignItems:'center', gap:'5px',
+      background: bg, border:`1px solid ${colour}`,
+      borderRadius:'20px', padding:'3px 10px',
+      fontSize:'11px', fontWeight:'700', color: colour,
+      fontFamily:'Inter,sans-serif', letterSpacing:'0.3px',
+      animation: urgent ? 'pulse 1s infinite' : 'none',
+    }}>
+      ⏳ {label}
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.55}}`}</style>
+    </div>
+  )
+}
 
 export default function Matches({ seasonId, user, refreshUser }) {
   const [matches, setMatches] = useState([])
@@ -142,20 +193,22 @@ export default function Matches({ seasonId, user, refreshUser }) {
   }
 
   async function submitVote(matchId, team, points) {
-    if (!user) { alert('Please login'); return }
-    if (user.role === 'admin') { alert('Admins cannot vote'); return }
-    if (!team || !points) { alert('Select both team and points'); return }
+    if (!user) { toast('error','Not logged in','Please login to vote'); return }
+    if (user.role === 'admin') { toast('warning','Admin View','Admins cannot vote'); return }
+    if (!team || !points) { toast('warning','Incomplete','Please select both a team and points'); return }
 
     try {
       const res = await axios.post(`/api/matches/${matchId}/vote`,
         { team, points: parseInt(points) },
         { headers: { 'x-user': user.username } }
       )
-      alert(`${res.data.message}! New balance: ${res.data.balance}`)
-
-      // Update user balance locally (avoid re-login)
+      const isUpdate = !!userVotes[matchId]
+      toast('success',
+        isUpdate ? '✅ Vote Updated!' : '🏏 Vote Placed!',
+        `${team} — ${points} pts | Balance: ${Math.round(res.data.balance)} pts`,
+        4000
+      )
       refreshUser({ ...user, balance: res.data.balance })
-
       // Refresh matches to get updated odds
       await fetchMatches()
 
@@ -167,28 +220,45 @@ export default function Matches({ seasonId, user, refreshUser }) {
   }
 
   return (
-    <div style={{padding: '20px', backgroundColor: '#f8f9fa', minHeight: '100vh'}}>
-      <h2 style={{
-        color: '#1a1a1a',
-        marginBottom: '30px',
-        fontFamily: 'Poppins, sans-serif',
-        fontSize: '28px',
-        fontWeight: '600',
-        letterSpacing: '-0.5px'
-      }}>🏏 Matches & Voting</h2>
+    <div style={{padding: '20px', minHeight: '100vh'}}>
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: '12px',
+        background: 'rgba(255,255,255,0.90)',
+        backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
+        border: '1px solid rgba(255,255,255,0.70)',
+        borderRadius: '14px', padding: '10px 18px 10px 10px',
+        boxShadow: '0 3px 16px rgba(0,0,0,0.12)', marginBottom: '20px',
+      }}>
+        <div style={{
+          width: '42px', height: '42px',
+          background: 'linear-gradient(135deg,#2ecc71,#27ae60)',
+          borderRadius: '12px', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', fontSize: '20px', flexShrink: 0,
+          boxShadow: '0 4px 14px rgba(46,204,113,0.4)',
+        }}>🏏</div>
+        <div>
+          <div style={{fontSize: '18px', fontWeight: '800', color: '#1a1a1a', fontFamily:"'Poppins',sans-serif", lineHeight: 1.2}}>Matches &amp; Voting</div>
+          <div style={{fontSize: '12px', color: '#444', fontWeight: '700', marginTop: '3px'}}>Pick your winner before the match starts</div>
+        </div>
+      </div>
 
       {loading ? (
-        <p style={{fontFamily: 'Inter, sans-serif', fontSize: '14px'}}>Loading matches...</p>
+        <div style={{padding:'40px',textAlign:'center'}}>
+          <div style={{fontSize:'36px',marginBottom:'10px'}}>🏏</div>
+          <p style={{fontFamily:'Inter,sans-serif',fontSize:'14px',color:'#666'}}>Loading matches…</p>
+        </div>
       ) : matches.length === 0 ? (
         <p style={{fontFamily: 'Inter, sans-serif', fontSize: '14px'}}>No matches found</p>
       ) : (
         <div style={{
           overflowX: 'auto',
-          backgroundColor: 'white',
+          background: 'rgba(255,255,255,0.72)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
           borderRadius: '16px',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+          boxShadow: '0 4px 24px rgba(0,0,0,0.10)',
           padding: '0',
-          border: '1px solid #e8e8e8'
+          border: '1px solid rgba(255,255,255,0.55)',
         }}>
           <table style={{
             width: '100%',
@@ -234,7 +304,15 @@ export default function Matches({ seasonId, user, refreshUser }) {
                     <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '13px', fontWeight: '600', color: '#2d3748'}}>{m.away_team}</td>
                     <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#718096'}}>{m.venue || 'N/A'}</td>
                     <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>
-                      {m.scheduled_at ? m.scheduled_at.split('T')[0] : 'N/A'}
+                      <div>{m.scheduled_at ? m.scheduled_at.split('T')[0] : 'N/A'}</div>
+                      {!m.winner && !isVotingClosed(m.scheduled_at) && (
+                        <div style={{marginTop:'4px'}}>
+                          <CountdownTimer scheduledAt={m.scheduled_at} parseMatchDateTime={parseMatchDateTime}/>
+                        </div>
+                      )}
+                      {!m.winner && isVotingClosed(m.scheduled_at) && (
+                        <div style={{marginTop:'4px',fontSize:'11px',color:'#e74c3c',fontWeight:'700'}}>🔒 Voting Closed</div>
+                      )}
                     </td>
                     <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>
                       {m.scheduled_at ? m.scheduled_at.split('T')[1] || 'N/A' : 'N/A'}

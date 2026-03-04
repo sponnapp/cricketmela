@@ -247,6 +247,21 @@ db.serialize(() => {
     }
   });
 
+  // Migration: Create password_reset_tokens table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id INTEGER PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      used INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+  `, (err) => {
+    if (err) console.error('Error creating password_reset_tokens table:', err);
+    else console.log('✅ password_reset_tokens table ready');
+  });
 
 });
 

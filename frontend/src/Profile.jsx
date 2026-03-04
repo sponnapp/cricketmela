@@ -90,12 +90,36 @@ export default function Profile({ user, refreshUser }) {
 
   return (
     <div style={{padding: '20px', fontFamily: 'Inter, sans-serif'}}>
-      <h2 style={{fontFamily: 'Poppins, sans-serif', fontSize: '28px', fontWeight: '600', letterSpacing: '-0.5px', marginBottom: '25px'}}>👤 Profile</h2>
+      {/* Title pill */}
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: '12px',
+        background: 'rgba(255,255,255,0.90)',
+        backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
+        border: '1px solid rgba(255,255,255,0.70)',
+        borderRadius: '14px',
+        padding: '10px 18px 10px 10px',
+        boxShadow: '0 3px 16px rgba(0,0,0,0.12)',
+        marginBottom: '22px',
+      }}>
+        <div style={{
+          width: '42px', height: '42px',
+          background: 'linear-gradient(135deg,#667eea,#764ba2)',
+          borderRadius: '12px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '20px',
+          boxShadow: '0 4px 14px rgba(102,126,234,0.4)',
+          flexShrink: 0,
+        }}>👤</div>
+        <div>
+          <div style={{fontSize: '18px', fontWeight: '800', color: '#1a1a1a', fontFamily:"'Poppins',sans-serif", lineHeight: 1.2}}>Profile</div>
+          <div style={{fontSize: '12px', color: '#444', fontWeight: '700', marginTop: '3px'}}>Update your display name &amp; password</div>
+        </div>
+      </div>
 
       {loading ? (
         <div style={{maxWidth: '500px', padding: '30px', textAlign: 'center'}}>Loading...</div>
       ) : (
-        <form onSubmit={submit} style={{maxWidth: '500px', display: 'flex', flexDirection: 'column', gap: '18px', backgroundColor: 'white', padding: '30px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(0,0,0,0.08)', border: '1px solid #e8e8e8'}}>
+        <form onSubmit={submit} style={{maxWidth: '500px', display: 'flex', flexDirection: 'column', gap: '18px', background: 'rgba(255,255,255,0.78)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', padding: '30px', borderRadius: '16px', boxShadow: '0 4px 24px rgba(0,0,0,0.10)', border: '1px solid rgba(255,255,255,0.6)'}}>
 
           {/* Authentication Method Indicator */}
           {authMethod && authMethod.authMethod === 'google' && (

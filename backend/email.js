@@ -261,6 +261,67 @@ function sendSignupConfirmationEmail(username, email, displayName, callback) {
   });
 }
 
+// Send password reset email with secure link
+function sendPasswordResetEmail(username, email, displayName, resetToken, callback) {
+  getEmailSettings((err, settings) => {
+    if (err || !settings) {
+      console.log('[PASSWORD RESET] Email settings not configured');
+      return callback(new Error('Email settings not configured'));
+    }
+
+    const transporter = createTransporter(settings);
+    if (!transporter) {
+      console.log('[PASSWORD RESET] Email transporter could not be created');
+      return callback(new Error('Email service not configured'));
+    }
+
+    const fromEmail = settings.from || settings.user;
+    const resetLink = process.env.NODE_ENV === 'production'
+      ? `https://cricketmela.pages.dev/?page=reset-password&token=${resetToken}`
+      : `http://localhost:5173/?page=reset-password&token=${resetToken}`;
+
+    const mailOptions = {
+      from: fromEmail,
+      to: email,
+      subject: 'Cricket Mela – Password Reset Request',
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0d1b2a;color:#ffffff;padding:30px;border-radius:10px;">
+          <h2 style="color:#FFD700;text-align:center;">🏏 Cricket Mela</h2>
+          <h3 style="color:#ffffff;">Password Reset Request</h3>
+          <p>Hello <strong>${displayName || username}</strong>,</p>
+          <p>We received a request to reset the password for your Cricket Mela account.</p>
+          <p>Click the button below to reset your password. This link is valid for <strong>30 minutes</strong>.</p>
+          <br/>
+          <div style="text-align:center;margin:30px 0;">
+            <a href="${resetLink}"
+               style="background:linear-gradient(90deg,#e65c00,#f9d423);color:#1a0a00;padding:14px 30px;text-decoration:none;border-radius:8px;font-weight:900;font-size:15px;display:inline-block;letter-spacing:1px;">
+              🔐 Reset My Password
+            </a>
+          </div>
+          <br/>
+          <p style="color:#aaa;font-size:13px;">If the button doesn't work, copy and paste this link into your browser:</p>
+          <p style="color:#acd8ff;font-size:12px;word-break:break-all;">${resetLink}</p>
+          <br/>
+          <p style="color:#aaa;font-size:13px;">If you did not request a password reset, please ignore this email. Your password will not be changed.</p>
+          <p style="color:#aaa;font-size:13px;">This link expires in 30 minutes for security.</p>
+          <hr style="border-color:rgba(255,220,80,0.3);margin:20px 0;"/>
+          <p style="color:#888;font-size:11px;text-align:center;">Cricket Mela – IPL Prediction Game | Fun only, no real money involved</p>
+        </div>
+      `
+    };
+
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        console.log('[PASSWORD RESET] Email sending error:', error);
+        callback(error);
+      } else {
+        console.log('[PASSWORD RESET] Reset email sent to:', email, info.response);
+        callback(null, info);
+      }
+    });
+  });
+}
+
 // Test email configuration
 function testEmailConfig(config, callback) {
   const transporter = createTransporter(config);
@@ -288,6 +349,7 @@ module.exports = {
   sendAdminSignupNotification,
   sendApprovalEmail,
   sendSignupConfirmationEmail,
+  sendPasswordResetEmail,
   getEmailSettings,
   testEmailConfig,
   createTransporter

@@ -55,6 +55,10 @@ if ! command -v wrangler &> /dev/null; then
 fi
 
 # Deploy using wrangler
+# Run from inside frontend/ so wrangler automatically picks up:
+#   dist/       → static built assets
+#   functions/  → Cloudflare Pages Functions (API + auth proxy)
+# Both folders must be siblings for Cloudflare Pages Functions to work.
 echo "🚀 Deploying to Cloudflare Pages..."
 npx wrangler pages deploy dist --project-name=cricketmela
 

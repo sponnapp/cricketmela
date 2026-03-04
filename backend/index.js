@@ -81,6 +81,28 @@ function openDb() {
   return new sqlite3.Database(DB_PATH);
 }
 
+// ── Startup migrations (run once on server start) ──────────────────────────
+(function runStartupMigrations() {
+  const db = openDb();
+  db.serialize(() => {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        token TEXT NOT NULL UNIQUE,
+        expires_at TEXT NOT NULL,
+        used INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+      )
+    `, (err) => {
+      if (err) console.error('[MIGRATION] Failed to create password_reset_tokens table:', err);
+      else console.log('✅ [MIGRATION] password_reset_tokens table ready');
+    });
+  });
+  setTimeout(() => db.close(), 500);
+})();
+
 function parseMatchDateTime(value) {
   if (!value) return null;
   const direct = new Date(value);
@@ -1235,6 +1257,155 @@ app.post('/api/login', (req, res) => {
     if (!row.approved) return res.status(403).json({ error: 'Account pending admin approval' });
     res.json({ id: row.id, username: row.username, display_name: row.display_name, role: row.role, balance: row.balance });
   });
+});
+
+// ========== Password Reset Routes ==========
+
+// POST /api/forgot-password — request a reset link
+app.post('/api/forgot-password', (req, res) => {
+  const { email } = req.body;
+  if (!email || !email.trim()) {
+    return res.status(400).json({ error: 'Email address is required' });
+  }
+
+  const db = openDb();
+  // Use db.all() to handle the case where multiple users share the same email
+  // (e.g. one ID/password account + one Google OAuth account with same email)
+  db.all(
+    "SELECT id, username, display_name, email, google_id, password FROM users WHERE email = ? COLLATE NOCASE AND approved = 1",
+    [email.trim()],
+    (err, users) => {
+      if (err) {
+        db.close();
+        return res.status(500).json({ error: 'DB error' });
+      }
+
+      // No account found — return generic message (don't reveal whether email exists)
+      if (!users || users.length === 0) {
+        db.close();
+        return res.json({ ok: true, message: 'If that email is registered, a reset link has been sent.' });
+      }
+
+      // Find the password-based user (has a password set, not Google-only)
+      const passwordUser = users.find(u => u.password && u.password.trim() !== '');
+      const googleOnlyUsers = users.filter(u => u.google_id && (!u.password || u.password.trim() === ''));
+
+      // If only Google accounts exist for this email — tell them explicitly
+      if (!passwordUser && googleOnlyUsers.length > 0) {
+        db.close();
+        return res.status(400).json({
+          error: 'This email is linked to a Google account. Please use "Sign in with Google" to log in — password reset is not available for Google accounts.'
+        });
+      }
+
+      // Use the password-based user for reset
+      const user = passwordUser;
+
+      // Generate a secure random token (hex string)
+      const crypto = require('crypto');
+      const token = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 minutes
+
+      // Invalidate any existing unused tokens for this user
+      db.run('UPDATE password_reset_tokens SET used = 1 WHERE user_id = ? AND used = 0', [user.id], (updateErr) => {
+        if (updateErr) console.log('[PASSWORD RESET] Warning: could not invalidate old tokens:', updateErr);
+
+        // Insert new token
+        db.run(
+          'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)',
+          [user.id, token, expiresAt],
+          (insertErr) => {
+            db.close();
+            if (insertErr) {
+              return res.status(500).json({ error: 'Failed to create reset token' });
+            }
+
+            // Send the email
+            emailService.sendPasswordResetEmail(
+              user.username,
+              user.email,
+              user.display_name || user.username,
+              token,
+              (emailErr) => {
+                if (emailErr) {
+                  console.log('[PASSWORD RESET] Email failed:', emailErr.message);
+                  // Still return success (don't reveal email config issues to users)
+                }
+                res.json({ ok: true, message: 'If that email is registered, a reset link has been sent.' });
+              }
+            );
+          }
+        );
+      });
+    }
+  );
+});
+
+// POST /api/reset-password/:token — submit new password
+app.post('/api/reset-password/:token', (req, res) => {
+  const { token } = req.params;
+  const { password } = req.body;
+
+  if (!token) return res.status(400).json({ error: 'Reset token is required' });
+  if (!password || password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+
+  const db = openDb();
+  db.get(
+    'SELECT prt.id, prt.user_id, prt.expires_at, prt.used, u.username FROM password_reset_tokens prt JOIN users u ON u.id = prt.user_id WHERE prt.token = ?',
+    [token],
+    (err, row) => {
+      if (err) {
+        db.close();
+        return res.status(500).json({ error: 'DB error' });
+      }
+      if (!row) {
+        db.close();
+        return res.status(400).json({ error: 'Invalid or expired reset link. Please request a new one.' });
+      }
+      if (row.used) {
+        db.close();
+        return res.status(400).json({ error: 'This reset link has already been used. Please request a new one.' });
+      }
+      if (new Date() > new Date(row.expires_at)) {
+        db.close();
+        return res.status(400).json({ error: 'Reset link has expired (valid for 30 minutes). Please request a new one.' });
+      }
+
+      // Update password and mark token as used
+      db.run('UPDATE users SET password = ? WHERE id = ?', [password, row.user_id], (updateErr) => {
+        if (updateErr) {
+          db.close();
+          return res.status(500).json({ error: 'Failed to update password' });
+        }
+        db.run('UPDATE password_reset_tokens SET used = 1 WHERE id = ?', [row.id], (tokenErr) => {
+          db.close();
+          if (tokenErr) console.log('[PASSWORD RESET] Warning: could not mark token as used:', tokenErr);
+          console.log(`[PASSWORD RESET] Password reset successfully for user: ${row.username}`);
+          res.json({ ok: true, message: 'Password has been reset successfully. You can now log in.' });
+        });
+      });
+    }
+  );
+});
+
+// GET /api/reset-password/validate/:token — check if token is valid (for frontend)
+app.get('/api/reset-password/validate/:token', (req, res) => {
+  const { token } = req.params;
+  const db = openDb();
+  db.get(
+    'SELECT prt.expires_at, prt.used, u.username FROM password_reset_tokens prt JOIN users u ON u.id = prt.user_id WHERE prt.token = ?',
+    [token],
+    (err, row) => {
+      db.close();
+      if (err) return res.status(500).json({ valid: false, error: 'DB error' });
+      if (!row) return res.json({ valid: false, error: 'Invalid reset link' });
+      if (row.used) return res.json({ valid: false, error: 'This link has already been used' });
+      if (new Date() > new Date(row.expires_at)) return res.json({ valid: false, error: 'Reset link has expired' });
+      res.json({ valid: true, username: row.username });
+    }
+  );
 });
 
 // ========== Google OAuth Routes ==========
