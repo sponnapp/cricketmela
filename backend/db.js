@@ -201,24 +201,52 @@ db.serialize(() => {
   });
 
   // Migration: Add google_id column to users table
-  hasColumn('users', 'google_id', (err, exists) => {
+  db.all(`PRAGMA table_info(users)`, (err, columns) => {
     if (err) {
-      console.error('Error checking google_id column:', err);
-    } else if (!exists) {
+      console.error('Error checking users table structure:', err);
+      return;
+    }
+
+    const hasGoogleId = columns && columns.some(c => c.name === 'google_id');
+    if (!hasGoogleId) {
       db.run('ALTER TABLE users ADD COLUMN google_id TEXT', (err) => {
         if (err) {
           console.error('Error adding google_id column:', err);
         } else {
-          console.log('Added google_id column to users table');
+          console.log('✅ Added google_id column to users table');
           // Create unique index on google_id
           db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_google_id ON users(google_id)', (err) => {
-            if (err) console.error('Error creating google_id index:', err);
-            else console.log('Created unique index on google_id');
+            if (err) console.log('✅ Index already exists');
+            else console.log('✅ Created unique index on google_id');
           });
         }
       });
+    } else {
+      console.log('✅ google_id column already exists');
     }
   });
+
+  // Migration: Add email column if not present
+  db.all(`PRAGMA table_info(users)`, (err, columns) => {
+    if (err) {
+      console.error('Error checking users table structure:', err);
+      return;
+    }
+
+    const hasEmail = columns && columns.some(c => c.name === 'email');
+    if (!hasEmail) {
+      db.run(`ALTER TABLE users ADD COLUMN email TEXT DEFAULT 'xyz@xyz.com'`, (err) => {
+        if (err) {
+          console.error('Error adding email column:', err);
+        } else {
+          console.log('✅ Added email column to users table');
+        }
+      });
+    } else {
+      console.log('✅ email column already exists');
+    }
+  });
+
 
 });
 

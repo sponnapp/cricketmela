@@ -92,21 +92,102 @@ module.exports = function(passport) {
                     db.close();
                     if (err5) return done(err5);
 
-                    // Send admin notification email
+                    // Send both emails: confirmation to user + notification to admin
+                    // Load settings ONCE and reuse transporter to avoid DB lock conflicts
                     try {
                       const emailService = require('../email');
-                      emailService.sendAdminSignupNotification(
-                        newUser.username,
-                        newUser.email,
-                        newUser.display_name,
-                        (emailErr) => {
-                          if (emailErr) {
-                            console.log('Warning: Could not send admin notification email:', emailErr.message);
-                          }
+                      const appLink = process.env.NODE_ENV === 'production'
+                        ? 'https://cricketmela.pages.dev'
+                        : 'http://localhost:5173';
+                      const approvalLink = process.env.NODE_ENV === 'production'
+                        ? 'https://cricketmela.pages.dev/?page=admin&adminTab=users'
+                        : 'http://localhost:5173/?page=admin&adminTab=users';
+
+                      emailService.getEmailSettings((settingsErr, settings) => {
+                        if (settingsErr || !settings) {
+                          console.log('[GOOGLE SIGNUP] Email settings not configured – skipping emails');
+                          return;
                         }
-                      );
+                        const transporter = emailService.createTransporter(settings);
+                        if (!transporter) {
+                          console.log('[GOOGLE SIGNUP] Transporter could not be created – skipping emails');
+                          return;
+                        }
+
+                        const fromEmail = settings.from || settings.user;
+
+                        // Email 1: Confirmation to the new user
+                        const confirmMailOptions = {
+                          from: fromEmail,
+                          to: newUser.email,
+                          subject: 'Welcome to Cricket Mela – Signup Request Received',
+                          html: `
+                            <h2>Welcome to Cricket Mela! 🏏</h2>
+                            <p>Hello <strong>${newUser.display_name}</strong>,</p>
+                            <p>Thank you for signing up with Google! Your request has been received and is pending admin approval.</p>
+                            <br/>
+                            <p><strong>Your Details:</strong></p>
+                            <ul>
+                              <li><strong>Username:</strong> ${newUser.username}</li>
+                              <li><strong>Email:</strong> ${newUser.email}</li>
+                            </ul>
+                            <br/>
+                            <p>You will receive another email once your account is approved. After approval, you can log in and start placing bets on your favourite IPL matches!</p>
+                            <br/>
+                            <p><a href="${appLink}" style="background-color:#2ecc71;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;display:inline-block;">Visit Cricket Mela</a></p>
+                            <br/>
+                            <p style="color:#999;font-size:12px;">If you did not sign up for this account, please ignore this email.</p>
+                          `
+                        };
+
+                        console.log(`[GOOGLE SIGNUP] Sending confirmation email to: ${newUser.email}`);
+                        transporter.sendMail(confirmMailOptions, (confirmErr, confirmInfo) => {
+                          if (confirmErr) {
+                            console.log(`[GOOGLE SIGNUP] ❌ Confirmation email failed:`, confirmErr.message);
+                          } else {
+                            console.log(`[GOOGLE SIGNUP] ✅ Confirmation email sent to ${newUser.email}:`, confirmInfo.response);
+                          }
+
+                          // Email 2: Admin notification
+                          const dbForAdmin = openDb();
+                          dbForAdmin.all(
+                            "SELECT email FROM users WHERE role = 'admin' AND email IS NOT NULL AND email != 'xyz@xyz.com'",
+                            (adminQueryErr, adminRows) => {
+                              dbForAdmin.close();
+                              const adminEmails = adminRows && adminRows.length > 0
+                                ? adminRows.map(r => r.email).filter(Boolean)
+                                : [fromEmail];
+
+                              const adminMailOptions = {
+                                from: fromEmail,
+                                to: adminEmails.join(', '),
+                                subject: `New User Signup – ${newUser.username}`,
+                                html: `
+                                  <h2>New User Signup Request</h2>
+                                  <p><strong>Username:</strong> ${newUser.username}</p>
+                                  <p><strong>Display Name:</strong> ${newUser.display_name}</p>
+                                  <p><strong>Email:</strong> ${newUser.email}</p>
+                                  <p><strong>Auth:</strong> Google OAuth</p>
+                                  <br/>
+                                  <p>Please log in to the admin panel to approve or reject this user.</p>
+                                  <p><a href="${approvalLink}" style="background-color:#2ecc71;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;display:inline-block;">View Pending Users</a></p>
+                                `
+                              };
+
+                              console.log(`[GOOGLE SIGNUP] Sending admin notification to: ${adminEmails.join(', ')}`);
+                              transporter.sendMail(adminMailOptions, (adminErr, adminInfo) => {
+                                if (adminErr) {
+                                  console.log(`[GOOGLE SIGNUP] ❌ Admin notification failed:`, adminErr.message);
+                                } else {
+                                  console.log(`[GOOGLE SIGNUP] ✅ Admin notification sent to ${adminEmails.length} admin(s):`, adminInfo.response);
+                                }
+                              });
+                            }
+                          );
+                        });
+                      });
                     } catch (emailError) {
-                      console.log('Email service not available:', emailError.message);
+                      console.log('[GOOGLE SIGNUP] Email service error:', emailError.message);
                     }
 
                     console.log('Created new Google user (pending approval):', email);

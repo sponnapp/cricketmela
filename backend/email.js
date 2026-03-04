@@ -206,6 +206,61 @@ function sendApprovalEmail(username, email, displayName, callback) {
   });
 }
 
+// Send confirmation email to user when they successfully sign up
+function sendSignupConfirmationEmail(username, email, displayName, callback) {
+  getEmailSettings((err, settings) => {
+    if (err || !settings) {
+      console.log('Email settings not configured');
+      return callback(new Error('Email settings not configured'));
+    }
+
+    const transporter = createTransporter(settings);
+    if (!transporter) {
+      console.log('Email transporter could not be created');
+      return callback(new Error('Email service not configured'));
+    }
+
+    const fromEmail = settings.from || 'noreply@cricketmela.com';
+    const appLink = process.env.NODE_ENV === 'production'
+      ? 'https://cricketmela.pages.dev'
+      : 'http://localhost:5173';
+
+    const mailOptions = {
+      from: fromEmail,
+      to: email,
+      subject: 'Welcome to Cricket Mela - Signup Request Received',
+      html: `
+        <h2>Welcome to Cricket Mela!</h2>
+        <p>Hello ${displayName},</p>
+        <p>Thank you for signing up! Your signup request has been received and submitted for admin approval.</p>
+        <br/>
+        <p><strong>Your Details:</strong></p>
+        <ul>
+          <li><strong>Username:</strong> ${username}</li>
+          <li><strong>Email:</strong> ${email}</li>
+        </ul>
+        <br/>
+        <p>The admin will review your request and approve your account. You will receive another email notification once your account is approved.</p>
+        <p>Once approved, you can log in and start placing bets on your favorite IPL matches!</p>
+        <br/>
+        <p><a href="${appLink}" style="background-color: #2ecc71; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Visit Cricket Mela</a></p>
+        <br/>
+        <p style="color: #999; font-size: 12px;">If you did not sign up for this account, please ignore this email.</p>
+      `
+    };
+
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        console.log('Email sending error:', error);
+        callback(error);
+      } else {
+        console.log('Signup confirmation email sent to user:', info.response);
+        callback(null, info);
+      }
+    });
+  });
+}
+
 // Test email configuration
 function testEmailConfig(config, callback) {
   const transporter = createTransporter(config);
@@ -232,6 +287,7 @@ function testEmailConfig(config, callback) {
 module.exports = {
   sendAdminSignupNotification,
   sendApprovalEmail,
+  sendSignupConfirmationEmail,
   getEmailSettings,
   testEmailConfig,
   createTransporter
