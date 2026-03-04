@@ -563,117 +563,133 @@ export default function Admin({ user, initialTab }) {
   }, [isSuperuser, activeTab])
 
   return (
-    <div style={{padding: '20px', backgroundColor: '#f9f9f9', minHeight: '100vh'}}>
-      <div style={{marginBottom: '40px'}}>
-        {/* Progress Bar Header */}
+    <div style={{padding: '20px', minHeight: '100vh'}}>
+      <div style={{marginBottom: '28px'}}>
+
+        {/* ── Tab Bar ── */}
         <div style={{
           display: 'flex',
-          gap: '8px',
+          gap: '6px',
           marginBottom: '20px',
-          alignItems: 'center'
+          background: 'rgba(10,20,35,0.75)',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          border: '1px solid rgba(255,255,255,0.10)',
+          borderRadius: '14px',
+          padding: '8px',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.22)',
         }}>
-          {/* Step 1 - Season (Only for Admin) */}
           {!isSuperuser && (
             <div style={{
-              flex: 1,
-              height: '50px',
-              backgroundColor: isActiveTab('season') ? '#2ecc71' : '#e0e0e0',
-              borderRadius: '8px 0 0 8px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: isActiveTab('season') ? 'white' : '#666',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-              fontSize: '14px'
-            }} onClick={() => setActiveTab('season')}>
-              🏆 Season
-            </div>
+              flex: 1, height: '44px',
+              background: isActiveTab('season')
+                ? 'linear-gradient(135deg,#2ecc71,#27ae60)'
+                : 'transparent',
+              borderRadius: '8px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: isActiveTab('season') ? 'white' : 'rgba(255,255,255,0.55)',
+              fontWeight: '700', cursor: 'pointer',
+              transition: 'all 0.25s ease', fontSize: '13px',
+              letterSpacing: '0.3px',
+              boxShadow: isActiveTab('season') ? '0 4px 12px rgba(46,204,113,0.4)' : 'none',
+              border: isActiveTab('season') ? 'none' : '1px solid rgba(255,255,255,0.06)',
+            }}
+            onClick={() => setActiveTab('season')}
+            onMouseOver={e=>{ if(!isActiveTab('season')) e.currentTarget.style.background='rgba(255,255,255,0.08)' }}
+            onMouseOut={e=>{ if(!isActiveTab('season')) e.currentTarget.style.background='transparent' }}
+            >🏆 Season</div>
           )}
-
-          {/* Step 2 - Users (Only for Admin) */}
           {!isSuperuser && (
             <div style={{
-              flex: 1,
-              height: '50px',
-              backgroundColor: isActiveTab('users') ? '#2ecc71' : '#e0e0e0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: isActiveTab('users') ? 'white' : '#666',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-              fontSize: '14px'
-            }} onClick={() => setActiveTab('users')}>
-              👥 Users
-            </div>
+              flex: 1, height: '44px',
+              background: isActiveTab('users')
+                ? 'linear-gradient(135deg,#2ecc71,#27ae60)'
+                : 'transparent',
+              borderRadius: '8px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: isActiveTab('users') ? 'white' : 'rgba(255,255,255,0.55)',
+              fontWeight: '700', cursor: 'pointer',
+              transition: 'all 0.25s ease', fontSize: '13px',
+              letterSpacing: '0.3px',
+              boxShadow: isActiveTab('users') ? '0 4px 12px rgba(46,204,113,0.4)' : 'none',
+              border: isActiveTab('users') ? 'none' : '1px solid rgba(255,255,255,0.06)',
+            }}
+            onClick={() => setActiveTab('users')}
+            onMouseOver={e=>{ if(!isActiveTab('users')) e.currentTarget.style.background='rgba(255,255,255,0.08)' }}
+            onMouseOut={e=>{ if(!isActiveTab('users')) e.currentTarget.style.background='transparent' }}
+            >👥 Users</div>
           )}
-
-          {/* Step 3 - Matches (For both Admin and Superuser) */}
           <div style={{
-            flex: 1,
-            height: '50px',
-            backgroundColor: isActiveTab('matches') ? '#2ecc71' : '#e0e0e0',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: isActiveTab('matches') ? 'white' : '#666',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            transition: 'all 0.3s ease',
-            fontSize: '14px'
-          }} onClick={() => setActiveTab('matches')}>
-            🎮 Matches
-          </div>
-
-          {/* Step 4 - Email Settings (Only for Admin) */}
+            flex: 1, height: '44px',
+            background: isActiveTab('matches')
+              ? 'linear-gradient(135deg,#2ecc71,#27ae60)'
+              : 'transparent',
+            borderRadius: '8px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: isActiveTab('matches') ? 'white' : 'rgba(255,255,255,0.55)',
+            fontWeight: '700', cursor: 'pointer',
+            transition: 'all 0.25s ease', fontSize: '13px',
+            letterSpacing: '0.3px',
+            boxShadow: isActiveTab('matches') ? '0 4px 12px rgba(46,204,113,0.4)' : 'none',
+            border: isActiveTab('matches') ? 'none' : '1px solid rgba(255,255,255,0.06)',
+          }}
+          onClick={() => setActiveTab('matches')}
+          onMouseOver={e=>{ if(!isActiveTab('matches')) e.currentTarget.style.background='rgba(255,255,255,0.08)' }}
+          onMouseOut={e=>{ if(!isActiveTab('matches')) e.currentTarget.style.background='transparent' }}
+          >🎮 Matches</div>
           {!isSuperuser && (
             <div style={{
-              flex: 1,
-              height: '50px',
-              backgroundColor: isActiveTab('email') ? '#2ecc71' : '#e0e0e0',
-              borderRadius: '0 8px 8px 0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: isActiveTab('email') ? 'white' : '#666',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-              fontSize: '14px'
-            }} onClick={() => setActiveTab('email')}>
-              📧 Email
-            </div>
+              flex: 1, height: '44px',
+              background: isActiveTab('email')
+                ? 'linear-gradient(135deg,#2ecc71,#27ae60)'
+                : 'transparent',
+              borderRadius: '8px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: isActiveTab('email') ? 'white' : 'rgba(255,255,255,0.55)',
+              fontWeight: '700', cursor: 'pointer',
+              transition: 'all 0.25s ease', fontSize: '13px',
+              letterSpacing: '0.3px',
+              boxShadow: isActiveTab('email') ? '0 4px 12px rgba(46,204,113,0.4)' : 'none',
+              border: isActiveTab('email') ? 'none' : '1px solid rgba(255,255,255,0.06)',
+            }}
+            onClick={() => setActiveTab('email')}
+            onMouseOver={e=>{ if(!isActiveTab('email')) e.currentTarget.style.background='rgba(255,255,255,0.08)' }}
+            onMouseOut={e=>{ if(!isActiveTab('email')) e.currentTarget.style.background='transparent' }}
+            >📧 Email</div>
           )}
         </div>
 
-        {/* Admin Panel Title */}
+        {/* ── Admin Panel Title ── */}
         <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px'
+          display: 'inline-flex', alignItems: 'center', gap: '12px',
+          background: 'rgba(255,255,255,0.90)',
+          backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
+          border: '1px solid rgba(255,255,255,0.70)',
+          borderRadius: '14px',
+          padding: '10px 18px 10px 10px',
+          boxShadow: '0 3px 16px rgba(0,0,0,0.12)',
         }}>
           <div style={{
-            width: '40px',
-            height: '40px',
-            backgroundColor: '#2ecc71',
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'white',
-            fontWeight: 'bold',
-            fontSize: '20px'
+            width: '42px', height: '42px',
+            background: 'linear-gradient(135deg,#2ecc71,#27ae60)',
+            borderRadius: '12px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '20px',
+            boxShadow: '0 4px 14px rgba(46,204,113,0.4)',
+            flexShrink: 0,
           }}>⚙️</div>
-          <span style={{color: '#333', fontSize: '24px', fontWeight: 'bold'}}>Admin Panel</span>
+          <div>
+            <div style={{fontSize: '18px', fontWeight: '800', color: '#1a1a1a', fontFamily:"'Poppins',sans-serif", lineHeight: 1.2}}>Admin Panel</div>
+            <div style={{fontSize: '12px', color: '#444', fontWeight: '700', marginTop: '3px', letterSpacing: '0.1px'}}>
+              {activeTab === 'season' ? '🏆 Manage seasons' : activeTab === 'users' ? '👥 Manage users & approvals' : activeTab === 'matches' ? '🎮 Manage matches & voting' : '📧 Email settings'}
+            </div>
+          </div>
         </div>
       </div>
 
       {activeTab === 'season' && (
         <>
-          <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
+          <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
             <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Create Season</h3>
             <div style={{display: 'flex', gap: '10px'}}>
               <input value={newSeason} onChange={e => setNewSeason(e.target.value)} placeholder="Season name" style={{flex: 1, padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none'}} onFocus={(e) => e.target.style.borderColor = '#2ecc71'} onBlur={(e) => e.target.style.borderColor = '#ddd'} />
@@ -681,7 +697,7 @@ export default function Admin({ user, initialTab }) {
             </div>
           </section>
 
-          <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
+          <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
             <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Manage Seasons</h3>
             {seasons.length === 0 ? <p>No seasons found</p> : (
               <div style={{
@@ -773,7 +789,7 @@ export default function Admin({ user, initialTab }) {
         <>
           {/* Pending Approvals */}
           {users.some(u => u.approved === 0) && (
-            <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
+            <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
               <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Pending Approvals</h3>
               <div style={{
                 overflowX: 'auto',
@@ -840,7 +856,7 @@ export default function Admin({ user, initialTab }) {
             </section>
           )}
 
-          <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
+          <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
             <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Create New User</h3>
             <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 150px 120px', gap: '10px'}}>
               <input
@@ -925,7 +941,7 @@ export default function Admin({ user, initialTab }) {
             </button>
           </section>
 
-          <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
+          <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
             <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>All Users</h3>
             {users.length === 0 ? <p>No users found</p> : (
               <div style={{
@@ -1024,7 +1040,7 @@ export default function Admin({ user, initialTab }) {
       {activeTab === 'matches' && (
         <>
           {!isSuperuser && (
-            <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
+            <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
               <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Bulk Upload CSV Matches</h3>
               <small style={{display: 'block', marginBottom: '10px', color: '#666'}}>Format: Date,Venue,Team 1,Team 2,Time</small>
               <textarea
@@ -1046,7 +1062,7 @@ export default function Admin({ user, initialTab }) {
             </section>
           )}
 
-          <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
+          <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
             <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Manage Matches</h3>
             <div style={{marginBottom: '15px', display: 'flex', gap: '10px', alignItems: 'center'}}>
               <label style={{fontWeight: 'bold', color: '#1a1a1a'}}>Select Season:</label>
@@ -1216,7 +1232,7 @@ export default function Admin({ user, initialTab }) {
 
       {activeTab === 'email' && (
         <>
-          <section style={{backgroundColor: 'white', borderRadius: '20px', padding: '25px', marginBottom: '25px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #f0f0f0'}}>
+          <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
             <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Email Settings</h3>
             <p style={{color: '#666', fontSize: '14px', marginBottom: '20px'}}>Configure Gmail SMTP for sending signup notifications and approval emails to users.</p>
 
@@ -1302,7 +1318,7 @@ export default function Admin({ user, initialTab }) {
 
       {winnerModal.show && (
         <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000}}>
-          <div style={{backgroundColor: 'white', padding: '30px', borderRadius: '8px', maxWidth: '400px', width: '90%', boxShadow: '0 4px 20px rgba(0,0,0,0.3)'}}>
+          <div style={{background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', padding: '28px', borderRadius: '16px', maxWidth: '400px', width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.6)'}}>
             <h3 style={{marginTop: 0}}>Select Winning Team</h3>
             <div style={{margin: '20px 0'}}>
               <label style={{display: 'block', marginBottom: '15px', cursor: 'pointer'}}>
@@ -1441,7 +1457,7 @@ export default function Admin({ user, initialTab }) {
 
       {editSeasonModal.show && (
         <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000}}>
-          <div style={{backgroundColor: 'white', padding: '30px', borderRadius: '8px', maxWidth: '400px', width: '90%', boxShadow: '0 4px 20px rgba(0,0,0,0.3)'}}>
+          <div style={{background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', padding: '28px', borderRadius: '16px', maxWidth: '400px', width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.6)'}}>
             <h3 style={{marginTop: 0}}>Edit Season</h3>
             <div style={{margin: '15px 0'}}>
               <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Season Name:</label>
@@ -1457,7 +1473,7 @@ export default function Admin({ user, initialTab }) {
 
       {passwordResetModal.show && (
         <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000}}>
-          <div style={{backgroundColor: 'white', padding: '30px', borderRadius: '8px', maxWidth: '400px', width: '90%', boxShadow: '0 4px 20px rgba(0,0,0,0.3)'}}>
+          <div style={{background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', padding: '28px', borderRadius: '16px', maxWidth: '400px', width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.6)'}}>
             <h3 style={{marginTop: 0}}>Reset Password for {passwordResetModal.username}</h3>
             <div style={{margin: '15px 0'}}>
               <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>New Password:</label>

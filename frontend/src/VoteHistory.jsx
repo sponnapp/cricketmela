@@ -101,7 +101,26 @@ export default function VoteHistory({ user }) {
 
   return (
     <div style={{padding: '20px', fontFamily: 'Inter, sans-serif'}}>
-      <h2 style={{fontFamily: 'Poppins, sans-serif', fontSize: '28px', fontWeight: '600', letterSpacing: '-0.5px', marginBottom: '25px'}}>📊 Your Vote History</h2>
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: '12px',
+        background: 'rgba(255,255,255,0.90)',
+        backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
+        border: '1px solid rgba(255,255,255,0.70)',
+        borderRadius: '14px', padding: '10px 18px 10px 10px',
+        boxShadow: '0 3px 16px rgba(0,0,0,0.12)', marginBottom: '22px',
+      }}>
+        <div style={{
+          width: '42px', height: '42px',
+          background: 'linear-gradient(135deg,#f39c12,#e67e22)',
+          borderRadius: '12px', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', fontSize: '20px', flexShrink: 0,
+          boxShadow: '0 4px 14px rgba(243,156,18,0.4)',
+        }}>📋</div>
+        <div>
+          <div style={{fontSize: '18px', fontWeight: '800', color: '#1a1a1a', fontFamily:"'Poppins',sans-serif", lineHeight: 1.2}}>Vote History</div>
+          <div style={{fontSize: '12px', color: '#444', fontWeight: '700', marginTop: '3px'}}>Your picks &amp; point history</div>
+        </div>
+      </div>
       <div style={{marginBottom: '20px', fontSize: '14px'}}>
         <strong style={{fontSize: '16px'}}>Current Balance: {Math.round(user?.balance ?? 0)} points</strong>
       </div>
@@ -112,7 +131,7 @@ export default function VoteHistory({ user }) {
       ) : votes.length === 0 ? (
         <p style={{fontSize: '14px', color: '#718096'}}>No votes yet.</p>
       ) : (
-        <div style={{overflowX: 'auto', backgroundColor: 'white', borderRadius: '12px', boxShadow: '0 2px 10px rgba(0,0,0,0.08)', border: '1px solid #e8e8e8'}}>
+        <div style={{overflowX: 'auto', background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '12px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
           <table style={{width: '100%', borderCollapse: 'collapse'}}>
             <thead>
               <tr style={{background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white'}}>

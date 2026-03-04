@@ -3,8 +3,19 @@
 
 const BACKEND_URL = 'https://cricketmela-api.fly.dev';
 
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, x-user, Authorization',
+};
+
 export async function onRequest(context) {
   const { request } = context;
+
+  // Handle CORS preflight
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
 
   // Get the path after /api/
   const url = new URL(request.url);
@@ -30,22 +41,15 @@ export async function onRequest(context) {
     // Forward the request to the backend
     const response = await fetch(backendRequest);
 
-    // Clone the response
+    // Clone the response and add CORS headers
     const newResponse = new Response(response.body, response);
-
-    // Add CORS headers
-    newResponse.headers.set('Access-Control-Allow-Origin', '*');
-    newResponse.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    newResponse.headers.set('Access-Control-Allow-Headers', 'Content-Type, x-user');
+    Object.entries(CORS_HEADERS).forEach(([k, v]) => newResponse.headers.set(k, v));
 
     return newResponse;
   } catch (error) {
     return new Response(JSON.stringify({ error: 'Backend connection failed', details: error.message }), {
       status: 502,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
+      headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
     });
   }
 }
