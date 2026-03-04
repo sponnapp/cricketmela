@@ -49,7 +49,9 @@ app.use(session({
   cookie: {
     secure: process.env.NODE_ENV === 'production', // HTTPS only in production
     httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Allow cross-site cookies in production
+    domain: process.env.NODE_ENV === 'production' ? undefined : undefined // Let browser handle domain
   }
 }));
 
@@ -1122,14 +1124,98 @@ app.post('/api/signup', (req, res) => {
         return res.status(500).json({ error: 'User already exists or DB error' });
       }
 
-      // Send admin notification email
-      emailService.sendAdminSignupNotification(username, email, finalDisplayName, (emailErr) => {
-        if (emailErr) {
-          console.log('Warning: Could not send admin notification email:', emailErr.message);
-          // Still return success - email is optional
+      // Load email settings ONCE, then send both emails with same settings
+      // This avoids race conditions with multiple DB connections
+      emailService.getEmailSettings((settingsErr, settings) => {
+        if (settingsErr || !settings) {
+          console.log('[SIGNUP] Email settings not configured – skipping both emails');
+          db.close();
+          return res.status(201).json({ ok: true, message: 'Signup submitted for admin approval' });
         }
-        db.close();
-        res.status(201).json({ ok: true, message: 'Signup submitted for admin approval' });
+
+        const transporter = emailService.createTransporter(settings);
+        if (!transporter) {
+          console.log('[SIGNUP] Email transporter could not be created – skipping both emails');
+          db.close();
+          return res.status(201).json({ ok: true, message: 'Signup submitted for admin approval' });
+        }
+
+        const fromEmail = settings.from || settings.user;
+        const appLink = process.env.NODE_ENV === 'production'
+          ? 'https://cricketmela.pages.dev'
+          : 'http://localhost:5173';
+
+        // Email 1: Confirmation email to the user who just signed up
+        const confirmMailOptions = {
+          from: fromEmail,
+          to: email,
+          subject: 'Welcome to Cricket Mela – Signup Request Received',
+          html: `
+            <h2>Welcome to Cricket Mela! 🏏</h2>
+            <p>Hello <strong>${finalDisplayName}</strong>,</p>
+            <p>Thank you for signing up! Your request has been received and is pending admin approval.</p>
+            <br/>
+            <p><strong>Your Details:</strong></p>
+            <ul>
+              <li><strong>Username:</strong> ${username}</li>
+              <li><strong>Email:</strong> ${email}</li>
+            </ul>
+            <br/>
+            <p>You will receive another email once your account is approved. After approval, you can log in and start placing bets on your favourite IPL matches!</p>
+            <br/>
+            <p><a href="${appLink}" style="background-color:#2ecc71;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;display:inline-block;">Visit Cricket Mela</a></p>
+            <br/>
+            <p style="color:#999;font-size:12px;">If you did not sign up for this account, please ignore this email.</p>
+          `
+        };
+
+        console.log(`[SIGNUP] Sending confirmation email to user: ${email}`);
+        transporter.sendMail(confirmMailOptions, (confirmErr, confirmInfo) => {
+          if (confirmErr) {
+            console.log(`[SIGNUP] ❌ Failed to send confirmation email to ${email}:`, confirmErr.message);
+          } else {
+            console.log(`[SIGNUP] ✅ Confirmation email sent to ${email}:`, confirmInfo.response);
+          }
+
+          // Email 2: Notification to all admin users
+          // Get admin emails from the same already-open DB connection
+          db.all("SELECT email FROM users WHERE role = 'admin' AND email IS NOT NULL AND email != 'xyz@xyz.com'", (adminQueryErr, adminRows) => {
+            db.close();
+
+            const approvalLink = process.env.NODE_ENV === 'production'
+              ? 'https://cricketmela.pages.dev/?page=admin&adminTab=users'
+              : 'http://localhost:5173/?page=admin&adminTab=users';
+
+            const adminEmails = adminRows && adminRows.length > 0
+              ? adminRows.map(r => r.email).filter(Boolean)
+              : [fromEmail]; // fallback to sender if no admin emails configured
+
+            const adminMailOptions = {
+              from: fromEmail,
+              to: adminEmails.join(', '),
+              subject: `New User Signup – ${username}`,
+              html: `
+                <h2>New User Signup Request</h2>
+                <p><strong>Username:</strong> ${username}</p>
+                <p><strong>Display Name:</strong> ${finalDisplayName}</p>
+                <p><strong>Email:</strong> ${email}</p>
+                <br/>
+                <p>Please log in to the admin panel to approve or reject this user.</p>
+                <p><a href="${approvalLink}" style="background-color:#2ecc71;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;display:inline-block;">View Pending Users</a></p>
+              `
+            };
+
+            console.log(`[SIGNUP] Sending admin notification to: ${adminEmails.join(', ')}`);
+            transporter.sendMail(adminMailOptions, (adminErr, adminInfo) => {
+              if (adminErr) {
+                console.log(`[SIGNUP] ❌ Failed to send admin notification:`, adminErr.message);
+              } else {
+                console.log(`[SIGNUP] ✅ Admin notification sent to ${adminEmails.length} admin(s):`, adminInfo.response);
+              }
+              res.status(201).json({ ok: true, message: 'Signup submitted for admin approval' });
+            });
+          });
+        });
       });
     });
 });
@@ -1973,7 +2059,75 @@ app.get('/api/admin/check-emails', (req, res) => {
   });
 });
 
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+// Ensure database migrations are complete before starting server
+function waitForMigrations(callback) {
+  const db = new sqlite3.Database(DB_PATH);
+  let migrationsNeeded = 0;
+  let migrationsDone = 0;
+
+  const checkComplete = () => {
+    migrationsDone++;
+    if (migrationsDone >= 2) {
+      db.close();
+      callback();
+    }
+  };
+
+  // Check and add google_id column
+  db.all(`PRAGMA table_info(users)`, (err, columns) => {
+    if (err) {
+      console.error('Migration check error:', err);
+      checkComplete();
+      return;
+    }
+
+    const hasGoogleId = columns && columns.some(c => c.name === 'google_id');
+    if (!hasGoogleId) {
+      console.log('Adding google_id column...');
+      db.run('ALTER TABLE users ADD COLUMN google_id TEXT', (err) => {
+        if (err && !err.message.includes('duplicate')) {
+          console.error('Error adding google_id:', err.message);
+        } else {
+          console.log('✅ google_id column ready');
+        }
+        checkComplete();
+      });
+    } else {
+      console.log('✅ google_id column already exists');
+      checkComplete();
+    }
+  });
+
+  // Check and add email column
+  db.all(`PRAGMA table_info(users)`, (err, columns) => {
+    if (err) {
+      console.error('Migration check error:', err);
+      checkComplete();
+      return;
+    }
+
+    const hasEmail = columns && columns.some(c => c.name === 'email');
+    if (!hasEmail) {
+      console.log('Adding email column...');
+      db.run(`ALTER TABLE users ADD COLUMN email TEXT DEFAULT 'xyz@xyz.com'`, (err) => {
+        if (err && !err.message.includes('duplicate')) {
+          console.error('Error adding email:', err.message);
+        } else {
+          console.log('✅ email column ready');
+        }
+        checkComplete();
+      });
+    } else {
+      console.log('✅ email column already exists');
+      checkComplete();
+    }
+  });
+}
+
+// Start server after migrations
+waitForMigrations(() => {
+  app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
+  });
 });
 
