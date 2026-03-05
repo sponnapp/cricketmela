@@ -6,6 +6,7 @@ import Admin from './Admin'
 import VoteHistory from './VoteHistory'
 import Standings from './Standings'
 import Profile from './Profile'
+import Predictions from './Predictions'
 import ToastContainer, { setToastHandler, toast } from './Toast'
 import './styles.css'
 
@@ -27,7 +28,7 @@ function UserAvatar({ name, size = 38 }) {
   )
 }
 
-const NAV_ICONS = {seasons:'🏏',admin:'⚙️',history:'📋',standings:'🏆',profile:'👤'}
+const NAV_ICONS = {seasons:'🏏',admin:'⚙️',history:'📋',standings:'🏆',predictions:'🔮',profile:'👤'}
 
 export default function App() {
   const [user, setUser] = useState(() => {
@@ -80,11 +81,12 @@ export default function App() {
   function navigate(p){ if(p==='seasons') setSeasonId(null); setPage(p) }
 
   const navTabs=[
-    {key:'seasons',  label:'Seasons'    },
-    {key:'admin',    label:'Admin',     adminOnly:true},
-    {key:'history',  label:'Vote History'},
-    {key:'standings',label:'Standings' },
-    {key:'profile',  label:'Profile'   },
+    {key:'seasons',     label:'Seasons'      },
+    {key:'admin',       label:'Admin',       adminOnly:true},
+    {key:'history',     label:'Vote History' },
+    {key:'standings',   label:'Standings'    },
+    {key:'predictions', label:'Predictions'  },
+    {key:'profile',     label:'Profile'      },
   ].filter(t=>!t.adminOnly||(user?.role==='admin'||user?.role==='superuser'))
 
   return (
@@ -209,12 +211,13 @@ export default function App() {
           <Login onLogin={u=>{ setUser(u); toast('success',`Welcome, ${u.display_name||u.username}! 🏏`,'Ready to make your picks?') }}/>
         ):(
           <>
-            {page==='seasons'  && <Seasons user={user} onSelect={id=>{setSeasonId(id);setPage('matches')}}/>}
-            {page==='matches'  && seasonId && <Matches seasonId={seasonId} user={user} refreshUser={u=>setUser(u)}/>}
-            {page==='admin'    && <Admin user={user} initialTab={initialAdminTab}/>}
-            {page==='history'  && <VoteHistory user={user}/>}
-            {page==='standings'&& <Standings user={user}/>}
-            {page==='profile'  && <Profile user={user} refreshUser={u=>setUser(u)}/>}
+            {page==='seasons'    && <Seasons user={user} onSelect={id=>{setSeasonId(id);setPage('matches')}}/>}
+            {page==='matches'    && seasonId && <Matches seasonId={seasonId} user={user} refreshUser={u=>setUser(u)}/>}
+            {page==='admin'      && <Admin user={user} initialTab={initialAdminTab}/>}
+            {page==='history'    && <VoteHistory user={user}/>}
+            {page==='standings'  && <Standings user={user}/>}
+            {page==='predictions'&& <Predictions user={user}/>}
+            {page==='profile'    && <Profile user={user} refreshUser={u=>setUser(u)}/>}
           </>
         )}
       </main>
