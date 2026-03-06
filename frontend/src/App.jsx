@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import Login from './Login'
 import Seasons from './Seasons'
 import Matches from './Matches'
@@ -7,6 +7,7 @@ import VoteHistory from './VoteHistory'
 import Standings from './Standings'
 import Profile from './Profile'
 import ToastContainer, { setToastHandler, toast } from './Toast'
+import useVersionCheck from './useVersionCheck'
 import './styles.css'
 
 // ── User Avatar ───────────────────────────────────────────────────────────────
@@ -28,28 +29,127 @@ function UserAvatar({ name, size = 38 }) {
 }
 
 const NAV_ICONS = {seasons:'🏏',admin:'⚙️',history:'📋',standings:'🏆',profile:'👤'}
+const NAV_STATE_KEY = 'cm_nav_state'
+const VALID_PAGES = new Set(['seasons','matches','admin','history','standings','profile'])
+
+function readNavState() {
+  try {
+    const raw = localStorage.getItem(NAV_STATE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!VALID_PAGES.has(parsed?.page)) return null
+    return { page: parsed.page, seasonId: Number(parsed.seasonId) || null, adminTab: parsed.adminTab || null }
+  } catch {
+    return null
+  }
+}
+
+function writeNavState(page, seasonId, adminTab) {
+  try {
+    localStorage.setItem(NAV_STATE_KEY, JSON.stringify({ page, seasonId: seasonId || null, adminTab: adminTab || null }))
+  } catch {
+    // ignore storage failures
+  }
+}
 
 export default function App() {
   const [user, setUser] = useState(() => {
     try { const u=localStorage.getItem('user'); return u?JSON.parse(u):null } catch{return null}
   })
+
+  // Read initial page & seasonId from URL so hard-refresh restores position
   const [page, setPage] = useState(() => {
     const p = new URLSearchParams(window.location.search).get('page')
-    return (p && p!=='reset-password') ? p : 'seasons'
+    if (p && p !== 'reset-password' && VALID_PAGES.has(p)) return p
+    const saved = readNavState()
+    return saved?.page || 'seasons'
   })
-  const [seasonId, setSeasonId] = useState(null)
-  const [initialAdminTab] = useState(() => new URLSearchParams(window.location.search).get('adminTab')||null)
+
+  const [seasonId, setSeasonId] = useState(() => {
+    const s = new URLSearchParams(window.location.search).get('season')
+    if (s) return Number(s) || null
+    const saved = readNavState()
+    return saved?.seasonId || null
+  })
+
+  const [adminTab, setAdminTab] = useState(() => {
+    const urlTab = new URLSearchParams(window.location.search).get('adminTab')
+    if (urlTab) return urlTab
+    const saved = readNavState()
+    return saved?.adminTab || 'season'
+  })
+
   const [toasts, setToasts] = useState([])
+  const [refreshTrigger, setRefreshTrigger] = useState(0)
+
+  // Auto-refresh callback triggered every 30 seconds
+  const handleAutoRefresh = useCallback(() => {
+    // Only refresh if user is logged in
+    if (user) {
+      setRefreshTrigger(prev => prev + 1)
+    }
+  }, [user])
+
+  const { updateAvailable, lastRefresh } = useVersionCheck(handleAutoRefresh)
+  const [bannerDismissed, setBannerDismissed] = useState(false)
 
   const addToast = useCallback((t) => setToasts(prev=>[...prev,{...t,id:Date.now()+Math.random()}]),[])
   useEffect(()=>{ setToastHandler(addToast) },[addToast])
   const removeToast = useCallback((id)=>setToasts(prev=>prev.filter(t=>t.id!==id)),[])
 
+  // Persist user in localStorage
   useEffect(()=>{
     if(user) localStorage.setItem('user',JSON.stringify(user))
     else localStorage.removeItem('user')
   },[user])
 
+  // Persist nav state so hard refresh can recover even if URL is reset externally
+  useEffect(() => {
+    writeNavState(page, seasonId, page === 'admin' ? adminTab : null)
+  }, [page, seasonId, adminTab])
+
+  const isMounted = useRef(false)
+
+  // Write page + seasonId into the URL every time they change
+  // This means hard-refresh will land back on the same page
+  useEffect(()=>{
+    // Don't overwrite special one-time auth/reset URLs
+    const cur = new URLSearchParams(window.location.search)
+    if(cur.get('auth')==='success' || cur.get('error') || cur.get('page')==='reset-password') return
+
+    const params = new URLSearchParams()
+    if(page && page !== 'seasons') params.set('page', page)
+    if(page === 'matches' && seasonId) params.set('season', String(seasonId))
+    if(page === 'admin' && adminTab) params.set('adminTab', adminTab)
+    const newSearch = params.toString() ? '?' + params.toString() : '/'
+    const current = window.location.pathname + window.location.search
+
+    if(current !== newSearch){
+      if(!isMounted.current){
+        // First render — use replaceState so we don't add a history entry
+        window.history.replaceState({ page, seasonId: seasonId || null, adminTab }, '', newSearch)
+      } else {
+        window.history.pushState({ page, seasonId: seasonId || null, adminTab }, '', newSearch)
+      }
+    }
+    isMounted.current = true
+  }, [page, seasonId, adminTab])
+
+  // Handle browser Back / Forward buttons
+  useEffect(()=>{
+    function onPopState(e){
+      const p = e.state?.page || new URLSearchParams(window.location.search).get('page') || 'seasons'
+      const s = e.state?.seasonId || (Number(new URLSearchParams(window.location.search).get('season')) || null)
+      const tab = e.state?.adminTab || new URLSearchParams(window.location.search).get('adminTab') || 'season'
+      setPage(p)
+      setSeasonId(s)
+      setAdminTab(tab)
+    }
+    window.addEventListener('popstate', onPopState)
+    return ()=> window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  // Handle auth callback / error params
   useEffect(()=>{
     const params = new URLSearchParams(window.location.search)
     if(params.get('page')==='reset-password'&&params.get('token')){ localStorage.removeItem('user');setUser(null);return }
@@ -57,17 +157,17 @@ export default function App() {
       try{
         const parsed=JSON.parse(decodeURIComponent(params.get('user')||''))
         localStorage.setItem('user',JSON.stringify(parsed));setUser(parsed)
-        window.history.replaceState({},'','/')
+        window.history.replaceState({ page:'seasons', seasonId:null, adminTab:'season' },'','/')
         toast('success',`Welcome, ${parsed.display_name||parsed.username}! 🏏`,'Ready to make your picks?')
       }catch(e){console.error(e)}
     }
     if(params.get('error')==='pending_approval'){
       toast('info','Account Pending ⏳','Your account needs admin approval. You\'ll get an email once approved.')
-      window.history.replaceState({},'','/')
+      window.history.replaceState({ page:'seasons', seasonId:null, adminTab:'season' },'','/')
     }
     if(params.get('error')==='auth_failed'){
       toast('error','Auth Failed','Google sign-in failed. Try again or use username/password.')
-      window.history.replaceState({},'','/')
+      window.history.replaceState({ page:'seasons', seasonId:null, adminTab:'season' },'','/')
     }
   },[])
 
@@ -90,6 +190,41 @@ export default function App() {
   return (
     <div className="container">
       <ToastContainer toasts={toasts} onRemove={removeToast} />
+
+      {/* ── New-version banner ───────────────────────────────────────────── */}
+      {updateAvailable && !bannerDismissed && (
+        <div style={{
+          position:'fixed', top:0, left:0, right:0, zIndex:9999,
+          background:'linear-gradient(90deg,#f39c12,#e67e22)',
+          color:'#fff', textAlign:'center',
+          padding:'10px 16px', fontSize:'14px', fontFamily:"'Poppins',sans-serif",
+          display:'flex', alignItems:'center', justifyContent:'center', gap:'12px',
+          boxShadow:'0 2px 12px rgba(0,0,0,0.35)'
+        }}>
+          <span>🚀 <strong>New update available!</strong> Refresh when ready — your session won't be interrupted until you do.</span>
+          <button
+            onClick={() => { window.location.reload() }}
+            style={{
+              background:'#fff', color:'#e67e22', border:'none',
+              borderRadius:'20px', padding:'4px 16px', fontWeight:'700',
+              fontSize:'13px', cursor:'pointer', fontFamily:"'Poppins',sans-serif",
+              whiteSpace:'nowrap'
+            }}
+          >
+            Refresh now
+          </button>
+          <button
+            onClick={() => setBannerDismissed(true)}
+            style={{
+              background:'transparent', color:'rgba(255,255,255,0.8)',
+              border:'1px solid rgba(255,255,255,0.4)', borderRadius:'50%',
+              width:'22px', height:'22px', cursor:'pointer',
+              fontSize:'13px', lineHeight:'1', padding:0, flexShrink:0
+            }}
+            aria-label="Dismiss"
+          >✕</button>
+        </div>
+      )}
 
       {user && (
         <header style={{
@@ -154,7 +289,7 @@ export default function App() {
 
               {/* Logout button */}
               <button
-                onClick={()=>{ setUser(null);setPage('seasons');setSeasonId(null);toast('info','Logged out 👋','See you next match!') }}
+                onClick={()=>{ setUser(null); setPage('seasons'); setSeasonId(null); setAdminTab('season'); localStorage.removeItem(NAV_STATE_KEY); window.history.replaceState({page:'seasons',seasonId:null,adminTab:'season'},'','/'); toast('info','Logged out 👋','See you next match!') }}
                 style={{
                   background:'linear-gradient(135deg,#c0392b,#e74c3c)',
                   color:'#fff', border:'none', borderRadius:'20px',
@@ -209,11 +344,11 @@ export default function App() {
           <Login onLogin={u=>{ setUser(u); toast('success',`Welcome, ${u.display_name||u.username}! 🏏`,'Ready to make your picks?') }}/>
         ):(
           <>
-            {page==='seasons'  && <Seasons user={user} onSelect={id=>{setSeasonId(id);setPage('matches')}}/>}
-            {page==='matches'  && seasonId && <Matches seasonId={seasonId} user={user} refreshUser={u=>setUser(u)}/>}
-            {page==='admin'    && <Admin user={user} initialTab={initialAdminTab}/>}
-            {page==='history'  && <VoteHistory user={user}/>}
-            {page==='standings'&& <Standings user={user}/>}
+            {page==='seasons'  && <Seasons user={user} onSelect={id=>{setSeasonId(id);setPage('matches')}} refreshTrigger={refreshTrigger}/>}
+            {page==='matches'  && seasonId && <Matches seasonId={seasonId} user={user} refreshUser={u=>setUser(u)} refreshTrigger={refreshTrigger}/>}
+            {page==='admin'    && <Admin user={user} initialTab={adminTab} onTabChange={setAdminTab} addToast={addToast} refreshTrigger={refreshTrigger}/>}
+            {page==='history'  && <VoteHistory user={user} refreshTrigger={refreshTrigger}/>}
+            {page==='standings'&& <Standings user={user} refreshTrigger={refreshTrigger}/>}
             {page==='profile'  && <Profile user={user} refreshUser={u=>setUser(u)}/>}
           </>
         )}
