@@ -240,6 +240,20 @@ export default function Matches({ seasonId, user, refreshUser }) {
           <div style={{fontSize: '18px', fontWeight: '800', color: '#1a1a1a', fontFamily:"'Poppins',sans-serif", lineHeight: 1.2}}>Matches &amp; Voting</div>
           <div style={{fontSize: '12px', color: '#444', fontWeight: '700', marginTop: '3px'}}>Pick your winner before the match starts</div>
         </div>
+        {user?.role !== 'admin' && seasonBalance !== null && (
+          <div style={{
+            marginLeft: 'auto',
+            background: 'linear-gradient(135deg,#667eea,#764ba2)',
+            color: 'white',
+            borderRadius: '10px',
+            padding: '8px 14px',
+            textAlign: 'center',
+            minWidth: '90px',
+          }}>
+            <div style={{fontSize: '10px', fontWeight: '600', opacity: 0.85, textTransform: 'uppercase', letterSpacing: '0.5px'}}>Season Balance</div>
+            <div style={{fontSize: '16px', fontWeight: '800', fontFamily:"'Poppins',sans-serif"}}>{Math.round(seasonBalance)} pts</div>
+          </div>
+        )}
       </div>
 
       {loading ? (
