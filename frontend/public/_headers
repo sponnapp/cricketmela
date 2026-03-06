@@ -1,0 +1,22 @@
+# Cloudflare Pages Cache Headers
+
+# Never cache the main HTML entry point — ensures users always get latest app
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+# Never cache version.json — used for auto-update detection
+/version.json
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+# Cache hashed JS/CSS assets forever (Vite adds content hashes to filenames)
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Never cache service worker
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+

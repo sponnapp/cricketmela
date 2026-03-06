@@ -54,15 +54,15 @@ function CountdownTimer({ scheduledAt, parseMatchDateTime }) {
   )
 }
 
-export default function Matches({ seasonId, user, refreshUser }) {
+export default function Matches({ seasonId, user, refreshUser, refreshTrigger }) {
   const [matches, setMatches] = useState([])
   const [loading, setLoading] = useState(true)
-  const [votes, setVotes] = useState({}) // {matchId: {team: '', points: ''}}
-  const [userVotes, setUserVotes] = useState({}) // {matchId: {team: '', points: ''}}
+  const [votes, setVotes] = useState({})
+  const [userVotes, setUserVotes] = useState({})
 
   useEffect(() => {
     fetchMatches()
-  }, [seasonId])
+  }, [seasonId, user?.username, refreshTrigger])
 
   async function fetchMatches() {
     setLoading(true)

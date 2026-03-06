@@ -44,6 +44,23 @@ else
     echo "⚠️  Warning: _redirects file not found"
 fi
 
+# Step 1.6: Copy _headers to dist for cache-control
+echo ""
+echo "📋 Step 1.6: Copying _headers configuration..."
+if [ -f "public/_headers" ]; then
+    cp public/_headers dist/
+    echo "✅ _headers copied to dist/"
+else
+    echo "⚠️  Warning: public/_headers file not found"
+fi
+
+# Step 1.7: Generate version.json for auto-update detection
+echo ""
+echo "🔖 Step 1.7: Generating version.json..."
+VERSION=$(git rev-parse --short HEAD 2>/dev/null || date +%s)
+echo "{\"version\":\"$VERSION\",\"buildTime\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > dist/version.json
+echo "✅ version.json generated (version: $VERSION)"
+
 # Step 2: Deploy to Cloudflare Pages
 echo ""
 echo "☁️  Step 2: Deploying to Cloudflare Pages..."

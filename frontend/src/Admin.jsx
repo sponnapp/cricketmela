@@ -1,8 +1,20 @@
 import React, { useEffect, useState } from 'react'
 import axios from 'axios'
 
-export default function Admin({ user, initialTab }) {
+export default function Admin({ user, initialTab, onTabChange, addToast, refreshTrigger }) {
+  // Create a local toast function that uses the prop
+  const toast = (type, title, message, duration) => {
+    if (addToast) addToast({ type, title, message, duration })
+  }
+
   const [activeTab, setActiveTab] = useState(initialTab || 'season')
+
+  // Notify parent when tab changes so it can update URL and nav state
+  useEffect(() => {
+    if (onTabChange) {
+      onTabChange(activeTab)
+    }
+  }, [activeTab, onTabChange])
   const [seasons, setSeasons] = useState([])
   const [matches, setMatches] = useState([])
   const [allMatches, setAllMatches] = useState([])
@@ -39,7 +51,7 @@ export default function Admin({ user, initialTab }) {
     fetchPendingUsers()
     fetchAllMatches()
     fetchEmailSettings()
-  }, [])
+  }, [refreshTrigger])
 
   async function fetchSeasons() {
     const r = await axios.get('/api/seasons', {
@@ -286,19 +298,19 @@ export default function Admin({ user, initialTab }) {
     }
   }
 
-  useEffect(() => { if (selectedSeason) fetchMatches(selectedSeason) }, [selectedSeason])
+  useEffect(() => { if (selectedSeason) fetchMatches(selectedSeason) }, [selectedSeason, refreshTrigger])
 
   async function addSeason() {
-    if (!newSeason) return alert('Enter season name')
+    if (!newSeason) return toast('warning', 'Missing Input', 'Enter season name')
     try {
       await axios.post('/api/admin/seasons', { name: newSeason }, {
         headers: { 'x-user': user?.username || 'admin' }
       })
       setNewSeason('')
       fetchSeasons()
-      alert('Season created successfully')
+      toast('success', 'Success', 'Season created successfully')
     } catch (e) {
-      alert(e.response?.data?.error || 'Failed to create season')
+      toast('error', 'Error', e.response?.data?.error || 'Failed to create season')
     }
   }
 
@@ -307,7 +319,7 @@ export default function Admin({ user, initialTab }) {
     if (balanceStr === null) return
     const balance = parseInt(balanceStr)
     if (Number.isNaN(balance)) {
-      alert('Invalid balance')
+      toast('error', 'Error', 'Invalid balance')
       return
     }
     try {
@@ -315,25 +327,24 @@ export default function Admin({ user, initialTab }) {
         headers: { 'x-user': user?.username || 'admin' }
       })
       fetchUsers()
-      alert('User approved')
+      toast('success', 'Success', 'User approved')
     } catch (e) {
-      alert(e.response?.data?.error || 'Failed to approve user')
+      toast('error', 'Error', e.response?.data?.error || 'Failed to approve user')
     }
   }
 
   async function createUser() {
-    if (!newUser.username) return alert('Enter username')
-    if (!newUser.password) return alert('Enter password')
-    if (!newUser.display_name) return alert('Enter display name')
+    if (!newUser.username) return toast('warning', 'Missing Input', 'Enter username')
+    if (!newUser.password) return toast('warning', 'Missing Input', 'Enter password')
+    if (!newUser.display_name) return toast('warning', 'Missing Input', 'Enter display name')
     try {
       await axios.post('/api/admin/users', newUser, {
         headers: { 'x-user': user?.username || 'admin' }
       })
       setNewUser({ username: '', password: '', role: 'picker', balance: 500, display_name: '', email: '', season_ids: [] })
       fetchUsers()
-      alert('User created successfully')
+      toast('success', 'Success', 'User created successfully')
     } catch (e) {
-      alert(e.response?.data?.error || 'Failed to create user')
     }
   }
 
@@ -390,11 +401,11 @@ export default function Admin({ user, initialTab }) {
         { season_ids: editUserModal.assignedSeasons },
         { headers: { 'x-user': user?.username || 'admin' } }
       )
-      alert('User updated successfully')
+      toast('success', 'Success', 'User updated successfully')
       setEditUserModal({show: false, user: null, formData: {}, assignedSeasons: []})
       fetchUsers()
     } catch (e) {
-      alert(e.response?.data?.error || 'Failed to update user')
+      toast('error', 'Error', e.response?.data?.error || 'Failed to update user')
     }
   }
 
@@ -406,10 +417,10 @@ export default function Admin({ user, initialTab }) {
       await axios.delete(`/api/admin/users/${userId}`,
         { headers: { 'x-user': user?.username || 'admin' } }
       )
-      alert('User deleted successfully')
+      toast('success', 'Success', 'User deleted successfully')
       fetchUsers()
     } catch (e) {
-      alert(e.response?.data?.error || 'Failed to delete user')
+      toast('error', 'Error', e.response?.data?.error || 'Failed to delete user')
     }
   }
 
@@ -418,17 +429,17 @@ export default function Admin({ user, initialTab }) {
   }
 
   async function submitPasswordReset() {
-    if (!passwordResetModal.newPassword) return alert('Enter new password')
+    if (!passwordResetModal.newPassword) return toast('warning', 'Missing Input', 'Enter new password')
     try {
       await axios.put(`/api/admin/users/${passwordResetModal.userId}/password`,
         { newPassword: passwordResetModal.newPassword },
         { headers: { 'x-user': user?.username || 'admin' } }
       )
-      alert('Password reset successfully. User can login with the new password.')
+      toast('success', 'Success', 'Password reset successfully. User can login with the new password.')
       setPasswordResetModal({show: false, userId: null, username: '', newPassword: ''})
       fetchUsers()
     } catch (e) {
-      alert(e.response?.data?.error || 'Failed to reset password')
+      toast('error', 'Error', e.response?.data?.error || 'Failed to reset password')
     }
   }
 
@@ -454,12 +465,12 @@ export default function Admin({ user, initialTab }) {
         )
       }
 
-      alert('User approved successfully')
+      toast('success', 'Success', 'User approved successfully')
       setApproveUserModal({show: false, user: null, formData: {balance: 1000}, selectedSeasons: []})
       fetchUsers()
       fetchPendingUsers()
     } catch (e) {
-      alert(e.response?.data?.error || 'Failed to approve user')
+      toast('error', 'Error', e.response?.data?.error || 'Failed to approve user')
     }
   }
 
@@ -471,7 +482,7 @@ export default function Admin({ user, initialTab }) {
       await axios.delete(`/api/admin/seasons/${seasonId}`,
         { headers: { 'x-user': user?.username || 'admin' } }
       )
-      alert('Season deleted successfully')
+      toast('success', 'Success', 'Season deleted successfully')
       setSelectedSeason('')
       fetchSeasons()
       fetchAllMatches()
@@ -492,7 +503,7 @@ export default function Admin({ user, initialTab }) {
 
   async function submitEditSeason() {
     if (!editSeasonModal.formData.name) {
-      alert('Season name is required')
+      toast('warning', 'Missing Input', 'Season name is required')
       return
     }
     try {
@@ -500,26 +511,26 @@ export default function Admin({ user, initialTab }) {
         { name: editSeasonModal.formData.name },
         { headers: { 'x-user': user?.username || 'admin' } }
       )
-      alert('Season updated successfully')
+      toast('success', 'Success', 'Season updated successfully')
       setEditSeasonModal({show: false, season: null, formData: {}})
       fetchSeasons()
     } catch (e) {
-      alert(e.response?.data?.error || 'Failed to update season')
+      toast('error', 'Error', e.response?.data?.error || 'Failed to update season')
     }
   }
 
   async function uploadCsv() {
-    if (!csvInput || !selectedSeason) return alert('Paste CSV and select season')
+    if (!csvInput || !selectedSeason) return toast('warning', 'Missing Input', 'Paste CSV and select season')
     try {
       const res = await axios.post('/api/admin/upload-matches', { csvData: csvInput, seasonId: selectedSeason }, {
         headers: { 'x-user': user?.username || 'admin' }
       })
-      alert(`Uploaded ${res.data.inserted} matches`)
+      toast('success', 'Success', `Uploaded ${res.data.inserted} matches`)
       setCsvInput('')
       fetchMatches(selectedSeason)
       fetchAllMatches()
     } catch (e) {
-      alert(e.response?.data?.error || 'Upload failed')
+      toast('error', 'Error', e.response?.data?.error || 'Upload failed')
     }
   }
 
@@ -529,7 +540,7 @@ export default function Admin({ user, initialTab }) {
 
   async function submitWinner() {
     if (!winnerModal.selectedTeam) {
-      alert('Please select a winning team')
+      toast('warning', 'Missing Input', 'Please select a winning team')
       return
     }
     try {
@@ -537,11 +548,11 @@ export default function Admin({ user, initialTab }) {
         { winner: winnerModal.selectedTeam },
         { headers: { 'x-user': user?.username || 'admin' } }
       )
-      alert('Winner set successfully')
+      toast('success', 'Success', 'Winner set successfully')
       setWinnerModal({show: false, matchId: null, team1: '', team2: '', selectedTeam: ''})
       fetchMatches(selectedSeason)
     } catch (e) {
-      alert(e.response?.data?.error || 'Failed to set winner')
+      toast('error', 'Error', e.response?.data?.error || 'Failed to set winner')
     }
   }
 
@@ -564,17 +575,17 @@ export default function Admin({ user, initialTab }) {
         editModal.formData,
         { headers: { 'x-user': user?.username || 'admin' } }
       )
-      alert('Match updated successfully')
+      toast('success', 'Success', 'Match updated successfully')
       setEditModal({show: false, match: null, formData: {}})
       fetchMatches(selectedSeason)
     } catch (e) {
-      alert(e.response?.data?.error || 'Failed to update match')
+      toast('error', 'Error', e.response?.data?.error || 'Failed to update match')
     }
   }
 
   async function clearAllMatches() {
     if (!selectedSeason) {
-      alert('Please select a season first')
+      toast('warning', 'Missing Input', 'Please select a season first')
       return
     }
     if (!window.confirm('Are you sure? This will DELETE ALL MATCHES for this season! This action cannot be undone.')) {
@@ -585,11 +596,11 @@ export default function Admin({ user, initialTab }) {
         { seasonId: selectedSeason },
         { headers: { 'x-user': user?.username || 'admin' } }
       )
-      alert('All matches for this season cleared successfully!')
+      toast('success', 'Success', 'All matches for this season cleared successfully!')
       fetchMatches(selectedSeason)
       fetchAllMatches()
     } catch (e) {
-      alert(e.response?.data?.error || 'Failed to clear matches')
+      toast('error', 'Error', e.response?.data?.error || 'Failed to clear matches')
     }
   }
 
@@ -602,10 +613,10 @@ export default function Admin({ user, initialTab }) {
         {},
         { headers: { 'x-user': user?.username || 'admin' } }
       )
-      alert(`${res.data.message}\n\nVotes cleared: ${res.data.votesCleared || 0}\nTotal refunded: ${res.data.refunded || 0} points`)
+      toast('success', 'Success', `${res.data.message}`)
       fetchMatches(selectedSeason)
     } catch (e) {
-      alert(e.response?.data?.error || 'Failed to clear match votes')
+      toast('error', 'Error', e.response?.data?.error || 'Failed to clear match votes')
     }
   }
 
@@ -618,11 +629,11 @@ export default function Admin({ user, initialTab }) {
         {},
         { headers: { 'x-user': user?.username || 'admin' } }
       )
-      alert(`${res.data.message}\n\nWinners reverted: ${res.data.winnersReverted || 0}\nTotal reverted: ${res.data.totalReverted || 0} points`)
+      toast('success', 'Success', `${res.data.message}`)
       fetchMatches(selectedSeason)
       fetchUsers() // Refresh user balances
     } catch (e) {
-      alert(e.response?.data?.error || 'Failed to clear winner')
+      toast('error', 'Error', e.response?.data?.error || 'Failed to clear winner')
     }
   }
 
@@ -634,11 +645,11 @@ export default function Admin({ user, initialTab }) {
       const res = await axios.delete(`/api/admin/matches/${matchId}`, {
         headers: { 'x-user': user?.username || 'admin' }
       })
-      alert(res.data.message || 'Match deleted successfully')
+      toast('success', 'Success', res.data.message || 'Match deleted successfully')
       fetchMatches(selectedSeason)
       fetchAllMatches()
     } catch (e) {
-      alert(e.response?.data?.error || 'Failed to delete match')
+      toast('error', 'Error', e.response?.data?.error || 'Failed to delete match')
     }
   }
 
