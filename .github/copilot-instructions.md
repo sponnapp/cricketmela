@@ -146,6 +146,17 @@ const isSuperuser = user?.role === 'superuser'
 - Parsed in `parseMatchDateTime()` in both `Admin.jsx` and `Matches.jsx`
 - Formatted for display as `01-Mar-2026 | 6:30 AM` in `VoteHistory.jsx`
 
+### Auto-Refresh Feature
+- **Polling Interval**: 30 seconds
+- **Implementation**: `useVersionCheck.js` hook polls `/version.json` every 30s
+- **Behavior**: 
+  - Triggers `refreshTrigger` state update in `App.jsx` every 30s
+  - All components (Seasons, Matches, Admin, VoteHistory, Standings) receive `refreshTrigger` prop
+  - Components re-fetch data when `refreshTrigger` changes
+  - Version check detects new deployments and shows banner to refresh
+- **User Impact**: Data auto-updates without manual refresh, stays current with live changes
+- **Production**: Ensures users see latest match results, odds, and standings automatically
+
 ---
 
 ## Key Backend Patterns
