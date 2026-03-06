@@ -114,6 +114,17 @@ export default function Seasons({ user, onSelect }) {
               <div style={styles.seasonName}>
                 {s.name}
               </div>
+              {user?.role !== 'admin' && s.season_balance !== undefined && s.season_balance !== null && (
+                <div style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '6px',
+                  background: 'linear-gradient(135deg,#667eea,#764ba2)',
+                  color: 'white', borderRadius: '20px',
+                  padding: '6px 16px', marginTop: '12px',
+                  fontSize: '13px', fontWeight: '700',
+                }}>
+                  💰 {Math.round(s.season_balance)} pts
+                </div>
+              )}
               <div style={styles.subtitle}>
                 {hoveredId === s.id ? '→ View Matches' : 'Click to view'}
               </div>
