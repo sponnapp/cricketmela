@@ -83,7 +83,7 @@ function PodiumCard({ u, rank, isMe }) {
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
-export default function Standings({ user: currentUser }) {
+export default function Standings({ user: currentUser, refreshTrigger }) {
   const [standings, setStandings] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -95,7 +95,7 @@ export default function Standings({ user: currentUser }) {
         setLoading(false)
       })
       .catch(() => { setStandings([]); setLoading(false) })
-  }, [])
+  }, [refreshTrigger])
 
   if (loading) return (
     <div style={{padding:'40px', textAlign:'center'}}>

@@ -36,3 +36,7 @@ backups/
 # Fly.io
 .fly/
 fly.toml.bak
+
+# Generated at build time
+frontend/public/version.json
+
