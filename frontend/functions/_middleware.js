@@ -13,6 +13,9 @@ export async function onRequest(context) {
   }
 
   // For all other routes, return index.html (SPA routing)
-  return context.env.ASSETS.fetch(new URL('/index.html', context.request.url));
+  // Preserve query string so /?page=matches&season=2 survives the rewrite
+  const indexUrl = new URL('/index.html', context.request.url);
+  indexUrl.search = url.search;
+  return context.env.ASSETS.fetch(indexUrl);
 }
 

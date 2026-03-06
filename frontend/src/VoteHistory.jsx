@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import axios from 'axios'
 
-export default function VoteHistory({ user }) {
+export default function VoteHistory({ user, refreshTrigger }) {
   const [votes, setVotes] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -97,7 +97,7 @@ export default function VoteHistory({ user }) {
         setLoading(false)
       })
       .catch(() => { setVotes([]); setLoading(false) })
-  }, [user])
+  }, [user, refreshTrigger])
 
   return (
     <div style={{padding: '20px', fontFamily: 'Inter, sans-serif'}}>
