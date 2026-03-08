@@ -91,6 +91,34 @@ db.serialize(() => {
     )
   `);
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS predictions (
+      id INTEGER PRIMARY KEY,
+      match_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      toss_winner TEXT,
+      man_of_match TEXT,
+      best_bowler TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(match_id, user_id),
+      FOREIGN KEY(match_id) REFERENCES matches(id),
+      FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS prediction_results (
+      id INTEGER PRIMARY KEY,
+      match_id INTEGER NOT NULL UNIQUE,
+      toss_winner TEXT,
+      man_of_match TEXT,
+      best_bowler TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(match_id) REFERENCES matches(id)
+    )
+  `);
+
   // Seed users if not present
   db.get("SELECT COUNT(*) as cnt FROM users", (err, row) => {
     if (err) {

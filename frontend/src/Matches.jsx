@@ -59,9 +59,11 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
   const [loading, setLoading] = useState(true)
   const [votes, setVotes] = useState({})
   const [userVotes, setUserVotes] = useState({})
+  const [seasonBalance, setSeasonBalance] = useState(null)
 
   useEffect(() => {
     fetchMatches()
+    fetchSeasonBalance()
   }, [seasonId, user?.username, refreshTrigger])
 
   async function fetchMatches() {
@@ -100,8 +102,43 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
     }
   }
 
+  async function fetchSeasonBalance() {
+    if (!user || user.role === 'admin') return
+    try {
+      const r = await axios.get(`/api/seasons/${seasonId}/my-balance`, {
+        headers: { 'x-user': user.username }
+      })
+      setSeasonBalance(r.data.balance ?? null)
+    } catch (err) {
+      setSeasonBalance(null)
+    }
+  }
+
+  async function submitVote(matchId, team, points) {
+    if (!user) { toast('error', 'Not logged in', 'Please login to vote'); return }
+    if (user.role === 'admin') { toast('warning', 'Admin View', 'Admins cannot vote'); return }
+    if (!team || !points) { toast('warning', 'Incomplete', 'Please select both a team and points'); return }
+    try {
+      const res = await axios.post(`/api/matches/${matchId}/vote`,
+        { team, points: parseInt(points) },
+        { headers: { 'x-user': user.username } }
+      )
+      const isUpdate = !!userVotes[matchId]
+      if (res.data.season_balance !== undefined) {
+        setSeasonBalance(res.data.season_balance)
+      }
+      toast('success',
+        isUpdate ? '✅ Vote Updated!' : '🏏 Vote Placed!',
+        `${team} — ${points} pts | Season Balance: ${Math.round(res.data.season_balance ?? seasonBalance ?? 0)} pts`,
+        4000
+      )
+      await fetchMatches()
+    } catch (err) {
+      alert(err.response?.data?.error || 'Vote failed')
+    }
+  }
+
   function parseMatchDateTime(value) {
-    if (!value) return null
     const direct = new Date(value)
     if (!Number.isNaN(direct.getTime())) return direct
 
@@ -193,27 +230,24 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
   }
 
   async function submitVote(matchId, team, points) {
-    if (!user) { toast('error','Not logged in','Please login to vote'); return }
-    if (user.role === 'admin') { toast('warning','Admin View','Admins cannot vote'); return }
-    if (!team || !points) { toast('warning','Incomplete','Please select both a team and points'); return }
-
+    if (!user) { toast('error', 'Not logged in', 'Please login to vote'); return }
+    if (user.role === 'admin') { toast('warning', 'Admin View', 'Admins cannot vote'); return }
+    if (!team || !points) { toast('warning', 'Incomplete', 'Please select both a team and points'); return }
     try {
       const res = await axios.post(`/api/matches/${matchId}/vote`,
         { team, points: parseInt(points) },
         { headers: { 'x-user': user.username } }
       )
       const isUpdate = !!userVotes[matchId]
+      if (res.data.season_balance !== undefined) {
+        setSeasonBalance(res.data.season_balance)
+      }
       toast('success',
         isUpdate ? '✅ Vote Updated!' : '🏏 Vote Placed!',
-        `${team} — ${points} pts | Balance: ${Math.round(res.data.balance)} pts`,
+        `${team} — ${points} pts | Season Balance: ${Math.round(res.data.season_balance ?? seasonBalance ?? 0)} pts`,
         4000
       )
-      refreshUser({ ...user, balance: res.data.balance })
-      // Refresh matches to get updated odds
       await fetchMatches()
-
-      // Keep the vote displayed in the form
-      // No need to clear - it should stay as selected
     } catch (err) {
       alert(err.response?.data?.error || 'Vote failed')
     }
