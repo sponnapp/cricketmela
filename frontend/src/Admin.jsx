@@ -20,6 +20,9 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
   const [allMatches, setAllMatches] = useState([])
   const [users, setUsers] = useState([])
   const [pendingUsers, setPendingUsers] = useState([])
+  const [userSeasonBalances, setUserSeasonBalances] = useState({})
+  const [seasonBalancesLoading, setSeasonBalancesLoading] = useState({})
+  const [expandedUserRows, setExpandedUserRows] = useState({})
   const [newSeason, setNewSeason] = useState('')
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'picker', balance: 500, display_name: '', email: '', season_ids: [] })
   const [csvInput, setCsvInput] = useState('')
@@ -42,7 +45,8 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
     selectedSeries: null,
     matchesList: [],
     selectedMatches: [], // set of match ids or indices
-    seasonName: ''
+    seasonName: '',
+    hasFetched: false
   })
 
   useEffect(() => {
@@ -69,6 +73,25 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
       setUsers(r.data)
     } catch (e) {
       console.log('Error fetching users:', e)
+    }
+  }
+
+  async function toggleUserSeasonBreakdown(userId) {
+    const isOpen = !!expandedUserRows[userId]
+    setExpandedUserRows(prev => ({ ...prev, [userId]: !isOpen }))
+    if (isOpen) return
+    if (userSeasonBalances[userId]) return
+
+    try {
+      setSeasonBalancesLoading(prev => ({ ...prev, [userId]: true }))
+      const r = await axios.get(`/api/admin/users/${userId}/season-balances`, {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      setUserSeasonBalances(prev => ({ ...prev, [userId]: r.data || [] }))
+    } catch (e) {
+      setUserSeasonBalances(prev => ({ ...prev, [userId]: [] }))
+    } finally {
+      setSeasonBalancesLoading(prev => ({ ...prev, [userId]: false }))
     }
   }
 
@@ -141,6 +164,17 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
     return new Date(year, monthIndex, day, hour, minute, 0, 0)
   }
 
+  function formatMatchDateTime(value) {
+    if (!value) return 'TBD'
+    const d = parseMatchDateTime(value)
+    if (!d || isNaN(d.getTime())) return value
+    const dd = String(d.getDate()).padStart(2, '0')
+    const mon = d.toLocaleString('en-US', { month: 'short' })
+    const yr = d.getFullYear()
+    const t = d.toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+    return dd + '-' + mon + '-' + yr + ' | ' + t
+  }
+
   // Sort matches by date and time
   function sortMatchesByDateTime(matches) {
     return [...matches].sort((a, b) => {
@@ -183,19 +217,19 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
     setCricApiModal({
       show: true, step: 'series', loading: false, error: '',
       searchQuery: '', seriesList: [], selectedSeries: null,
-      matchesList: [], selectedMatches: [], seasonName: ''
+      matchesList: [], selectedMatches: [], seasonName: '', hasFetched: false
     })
   }
 
   async function fetchCricApiSeries(searchQuery = '') {
     setCricApiModal(prev => ({...prev, loading: true, error: ''}))
     try {
-      const r = await axios.get(`/api/admin/cricapi/series?search=${encodeURIComponent(searchQuery)}`, {
+      const r = await axios.get('/api/admin/cricapi/series?search=' + encodeURIComponent(searchQuery), {
         headers: { 'x-user': user?.username || 'admin' }
       })
-      setCricApiModal(prev => ({...prev, loading: false, seriesList: r.data.series || [], step: 'series'}))
+      setCricApiModal(prev => ({...prev, loading: false, seriesList: r.data.series || [], step: 'series', hasFetched: true}))
     } catch (e) {
-      setCricApiModal(prev => ({...prev, loading: false, error: e.response?.data?.error || 'Failed to fetch series'}))
+      setCricApiModal(prev => ({...prev, loading: false, hasFetched: true, error: (e.response && e.response.data && e.response.data.error) || 'Failed to fetch series'}))
     }
   }
 
@@ -211,7 +245,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
       selectedMatches: []
     }))
     try {
-      const r = await axios.get(`/api/admin/cricapi/series/${encodeURIComponent(series.id)}/matches`, {
+      const r = await axios.get(`/api/admin/cricapi/series/${encodeURIComponent(series.id)}/matches?name=${encodeURIComponent(series.name || '')}`, {
         headers: { 'x-user': user?.username || 'admin' }
       })
       const rawMatches = r.data.matches || []
@@ -263,7 +297,11 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
       }))
     try {
       const r = await axios.post('/api/admin/cricapi/import-season',
-        { seasonName: seasonName.trim(), matches: matchesToImport },
+        {
+          seasonName: seasonName.trim(),
+          matches: matchesToImport,
+          seriesId: cricApiModal.selectedSeries?.id || null
+        },
         { headers: { 'x-user': user?.username || 'admin' } }
       )
       setCricApiModal(prev => ({...prev, show: false, loading: false}))
@@ -516,6 +554,19 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
       fetchSeasons()
     } catch (e) {
       toast('error', 'Error', e.response?.data?.error || 'Failed to update season')
+    }
+  }
+
+  async function refreshSeasonSquad(season) {
+    try {
+      const r = await axios.post(`/api/admin/seasons/${season.id}/refresh-squad`, {}, {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      const teams = r.data?.teams ?? 0
+      const players = r.data?.players ?? 0
+      toast('success', 'Squad Refreshed', `${season.name}: ${teams} teams, ${players} players loaded`)
+    } catch (e) {
+      toast('error', 'Refresh Failed', e.response?.data?.error || 'Could not refresh squad data')
     }
   }
 
@@ -912,6 +963,24 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                             >
                               Delete
                             </button>
+                            <button
+                              onClick={() => refreshSeasonSquad(s)}
+                              style={{
+                                padding: '6px 12px',
+                                fontSize: '11px',
+                                backgroundColor: '#2ecc71',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontWeight: '600',
+                                transition: 'all 0.2s ease'
+                              }}
+                              onMouseOver={(e) => e.target.style.backgroundColor = '#27ae60'}
+                              onMouseOut={(e) => e.target.style.backgroundColor = '#2ecc71'}
+                            >
+                              Refresh Squad
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -1024,7 +1093,6 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                 onBlur={(e) => e.target.style.borderColor = '#ddd'}
               />
               <select
-                          onClick={() => approveUser(u.id)}
                 onChange={e => setNewUser({...newUser, role: e.target.value})}
                 style={{padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none', cursor: 'pointer'}}
               >
@@ -1105,68 +1173,133 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                       <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Display Name</th>
                       <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Email</th>
                       <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Role</th>
-                      <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Balance</th>
                       <th style={{padding: '14px 12px', textAlign: 'center', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {users.map((u, idx) => (
-                      <tr key={u.id} style={{
-                        borderBottom: '1px solid #f0f0f0',
-                        backgroundColor: idx % 2 === 0 ? '#fafbfc' : 'white',
-                        transition: 'all 0.2s ease'
-                      }}
-                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f7fa'}
-                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#fafbfc' : 'white'}
-                      >
-                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '13px', fontWeight: '500'}}><strong>{u.username}</strong></td>
-                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{u.display_name || u.username}</td>
-                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{u.email || 'xyz@xyz.com'}</td>
-                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px'}}>
-                          <span style={{backgroundColor: u.role === 'admin' ? '#dc3545' : u.role === 'superuser' ? '#ff9800' : '#28a745', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600'}}>{u.role}</span>
-                        </td>
-                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', fontWeight: '500'}}>{Math.round(u.balance)}</td>
-                        <td style={{padding: '14px 12px', textAlign: 'center'}}>
-                          <div style={{display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap'}}>
-                            <button
-                              onClick={() => editUser(u)}
-                              style={{
-                                padding: '6px 12px',
-                                fontSize: '11px',
-                                backgroundColor: '#667eea',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '6px',
-                                cursor: 'pointer',
-                                fontWeight: '600',
-                                transition: 'all 0.2s ease'
-                              }}
-                              onMouseOver={(e) => e.target.style.backgroundColor = '#5568d3'}
-                              onMouseOut={(e) => e.target.style.backgroundColor = '#667eea'}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => deleteUser(u.id, u.username)}
-                              style={{
-                                padding: '6px 12px',
-                                fontSize: '11px',
-                                backgroundColor: '#e74c3c',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '6px',
-                                cursor: 'pointer',
-                                fontWeight: '600',
-                                transition: 'all 0.2s ease'
-                              }}
-                              onMouseOver={(e) => e.target.style.backgroundColor = '#c0392b'}
-                              onMouseOut={(e) => e.target.style.backgroundColor = '#e74c3c'}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
+                      <React.Fragment key={u.id}>
+                        <tr style={{
+                          borderBottom: '1px solid #f0f0f0',
+                          backgroundColor: idx % 2 === 0 ? '#fafbfc' : 'white',
+                          transition: 'all 0.2s ease'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f7fa'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#fafbfc' : 'white'}
+                        >
+                          <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '13px', fontWeight: '500'}}><strong>{u.username}</strong></td>
+                          <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{u.display_name || u.username}</td>
+                          <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{u.email || 'xyz@xyz.com'}</td>
+                          <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px'}}>
+                            <span style={{backgroundColor: u.role === 'admin' ? '#dc3545' : u.role === 'superuser' ? '#ff9800' : '#28a745', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600'}}>{u.role}</span>
+                          </td>
+                          <td style={{padding: '14px 12px', textAlign: 'center'}}>
+                            <div style={{display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap'}}>
+                              <button
+                                onClick={() => toggleUserSeasonBreakdown(u.id)}
+                                style={{
+                                  padding: '6px 10px',
+                                  fontSize: '11px',
+                                  backgroundColor: expandedUserRows[u.id] ? '#6c757d' : '#00a86b',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  fontWeight: '600',
+                                  transition: 'all 0.2s ease'
+                                }}
+                              >
+                                {expandedUserRows[u.id] ? 'Hide Seasons' : 'Season Balance'}
+                              </button>
+                              <button
+                                onClick={() => editUser(u)}
+                                style={{
+                                  padding: '6px 12px',
+                                  fontSize: '11px',
+                                  backgroundColor: '#667eea',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  fontWeight: '600',
+                                  transition: 'all 0.2s ease'
+                                }}
+                                onMouseOver={(e) => e.target.style.backgroundColor = '#5568d3'}
+                                onMouseOut={(e) => e.target.style.backgroundColor = '#667eea'}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => deleteUser(u.id, u.username)}
+                                style={{
+                                  padding: '6px 12px',
+                                  fontSize: '11px',
+                                  backgroundColor: '#e74c3c',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  fontWeight: '600',
+                                  transition: 'all 0.2s ease'
+                                }}
+                                onMouseOver={(e) => e.target.style.backgroundColor = '#c0392b'}
+                                onMouseOut={(e) => e.target.style.backgroundColor = '#e74c3c'}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+
+                        {expandedUserRows[u.id] && (
+                          <tr style={{backgroundColor: '#f6f8ff'}}>
+                            <td colSpan={5} style={{padding: '10px 14px', borderBottom: '1px solid #e9edf7'}}>
+                              {seasonBalancesLoading[u.id] ? (
+                                <span style={{fontSize: '12px', color: '#667'}}>Loading season balances...</span>
+                              ) : (userSeasonBalances[u.id] || []).length === 0 ? (
+                                <span style={{fontSize: '12px', color: '#999'}}>No season assignments found for this user.</span>
+                              ) : (
+                                <div style={{display: 'flex', flexWrap: 'wrap', gap: '8px'}}>
+                                  <span style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    padding: '5px 10px',
+                                    borderRadius: '999px',
+                                    border: '1px solid #b8c6ff',
+                                    backgroundColor: '#eef3ff',
+                                    fontSize: '11px',
+                                    color: '#2f3d7e',
+                                    fontWeight: '700'
+                                  }}>
+                                    <span>Σ Season Total</span>
+                                    <span style={{color: '#1d5bd1'}}>
+                                      {Math.round((userSeasonBalances[u.id] || []).reduce((sum, sb) => sum + (Number(sb.balance) || 0), 0))} pts
+                                    </span>
+                                  </span>
+                                  {(userSeasonBalances[u.id] || []).map(sb => (
+                                    <span key={`${u.id}-${sb.season_id}`} style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '6px',
+                                      padding: '5px 10px',
+                                      borderRadius: '999px',
+                                      border: '1px solid #cdd7ff',
+                                      backgroundColor: 'white',
+                                      fontSize: '11px',
+                                      color: '#2f3d7e',
+                                      fontWeight: '600'
+                                    }}>
+                                      <span>{sb.season_name}</span>
+                                      <span style={{color: '#00a86b'}}>{Math.round(sb.balance)} pts</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -1251,32 +1384,30 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                       >
                         <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '13px', fontWeight: '500'}}><strong>{m.home_team}</strong> vs <strong>{m.away_team}</strong></td>
                         <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{m.venue || 'N/A'}</td>
-                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{m.scheduled_at || 'N/A'}</td>
+                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{formatMatchDateTime(m.scheduled_at)}</td>
                         <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px'}}>
                           {m.winner ? <span style={{backgroundColor: '#2ecc71', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600'}}>{m.winner}</span> : <span style={{color: '#a0aec0', fontSize: '12px', fontWeight: '600'}}>TBD</span>}
                         </td>
                         <td style={{padding: '14px 12px', textAlign: 'center'}}>
                           <div style={{display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap'}}>
-                            {!isSuperuser && (
-                              <button
-                                onClick={() => editMatch(m)}
-                                style={{
-                                  padding: '6px 12px',
-                                  fontSize: '11px',
-                                  backgroundColor: '#667eea',
-                                  color: 'white',
-                                  border: 'none',
-                                  borderRadius: '6px',
-                                  cursor: 'pointer',
-                                  fontWeight: '600',
-                                  transition: 'all 0.2s ease'
-                                }}
-                                onMouseOver={(e) => e.target.style.backgroundColor = '#5568d3'}
-                                onMouseOut={(e) => e.target.style.backgroundColor = '#667eea'}
-                              >
-                                Edit
-                              </button>
-                            )}
+                            <button
+                              onClick={() => editMatch(m)}
+                              style={{
+                                padding: '6px 12px',
+                                fontSize: '11px',
+                                backgroundColor: '#667eea',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontWeight: '600',
+                                transition: 'all 0.2s ease'
+                              }}
+                              onMouseOver={(e) => e.target.style.backgroundColor = '#5568d3'}
+                              onMouseOut={(e) => e.target.style.backgroundColor = '#667eea'}
+                            >
+                              Edit
+                            </button>
                             {(isSuperuser || user?.role === 'admin') && (
                               <button
                                 onClick={() => setWinner(m.id, m.home_team, m.away_team)}
@@ -1703,7 +1834,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                     value={cricApiModal.searchQuery}
                     onChange={e => setCricApiModal(prev => ({...prev, searchQuery: e.target.value}))}
                     onKeyDown={e => { if (e.key === 'Enter') fetchCricApiSeries(cricApiModal.searchQuery) }}
-                    placeholder="Search series… (e.g. IPL, India)"
+                    placeholder="Search series (e.g. IPL, India, T20)"
                     style={{flex:1,padding:'10px 15px',border:'1px solid #ddd',borderRadius:'25px',fontSize:'14px',outline:'none'}}
                     onFocus={e => e.target.style.borderColor='#667eea'}
                     onBlur={e => e.target.style.borderColor='#ddd'}
@@ -1713,35 +1844,22 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                     disabled={cricApiModal.loading}
                     style={{padding:'10px 22px',background:'linear-gradient(135deg,#667eea,#764ba2)',color:'white',border:'none',borderRadius:'25px',cursor:'pointer',fontWeight:'bold',fontSize:'13px',opacity:cricApiModal.loading?0.6:1}}
                   >
-                    {cricApiModal.loading ? '🔄 Loading…' : '🔍 Search'}
+                    {cricApiModal.loading ? '🔄 Loading...' : '🔍 Search'}
                   </button>
                 </div>
 
                 {cricApiModal.loading ? (
-                  <div style={{textAlign:'center',padding:'40px',color:'#667eea',fontSize:'14px'}}>🔄 Fetching series from CricAPI…</div>
-                ) : cricApiModal.seriesList.length === 0 ? (
-                  <div style={{textAlign:'center',padding:'40px',color:'#999',fontSize:'14px'}}>No series found. Try searching for "IPL" or "T20".</div>
-                ) : (
-                  <div style={{overflowY:'auto',flex:1}}>
-                    {cricApiModal.seriesList.map((s, idx) => (
-                      <div
-                        key={s.id || idx}
-                        onClick={() => fetchCricApiMatches(s)}
-                        style={{padding:'13px 15px',marginBottom:'8px',borderRadius:'10px',border:'1px solid #e8e8e8',cursor:'pointer',transition:'all 0.2s',backgroundColor:'#fafbfc'}}
-                        onMouseEnter={e => { e.currentTarget.style.backgroundColor='#eef1ff'; e.currentTarget.style.borderColor='#667eea'; }}
-                        onMouseLeave={e => { e.currentTarget.style.backgroundColor='#fafbfc'; e.currentTarget.style.borderColor='#e8e8e8'; }}
-                      >
-                        <div style={{fontWeight:'700',fontSize:'14px',color:'#1a1a1a'}}>{s.name || s.title}</div>
-                        <div style={{fontSize:'12px',color:'#666',marginTop:'4px',display:'flex',gap:'14px',flexWrap:'wrap'}}>
-                          {s.startDate && <span>📅 {s.startDate}{s.endDate ? ` → ${s.endDate}` : ''}</span>}
-                          {s.odi && <span>ODI: {s.odi}</span>}
-                          {s.t20 && <span>T20: {s.t20}</span>}
-                          {s.test && <span>Test: {s.test}</span>}
-                          {s.squads && <span>Squads: {s.squads}</span>}
-                        </div>
-                      </div>
-                    ))}
+                  <div style={{textAlign:'center',padding:'40px',color:'#667eea',fontSize:'14px'}}>🔄 Fetching series from CricAPI...</div>
+                ) : !cricApiModal.hasFetched ? (
+                  <div style={{textAlign:'center',padding:'40px',color:'#999',fontSize:'14px'}}>
+                    Press <strong>Search</strong> to list upcoming series, or type a keyword first (e.g. India, IPL).
                   </div>
+                ) : (
+                  <SeriesResultList
+                    seriesList={cricApiModal.seriesList}
+                    searchQuery={cricApiModal.searchQuery}
+                    onSelect={fetchCricApiMatches}
+                  />
                 )}
               </>
             )}
@@ -1767,7 +1885,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                   <span style={{fontSize:'12px',color:'#666'}}>{cricApiModal.selectedMatches.length} of {cricApiModal.matchesList.length} selected</span>
                   <button onClick={() => setCricApiModal(prev => ({...prev, selectedMatches: prev.matchesList.map(m => m._idx)}))} style={{padding:'4px 12px',fontSize:'11px',backgroundColor:'#667eea',color:'white',border:'none',borderRadius:'20px',cursor:'pointer',fontWeight:'600'}}>Select All</button>
                   <button onClick={() => setCricApiModal(prev => ({...prev, selectedMatches: []}))} style={{padding:'4px 12px',fontSize:'11px',backgroundColor:'#bdc3c7',color:'white',border:'none',borderRadius:'20px',cursor:'pointer',fontWeight:'600'}}>Clear All</button>
-                  <button onClick={() => setCricApiModal(prev => ({...prev, step:'series'}))} style={{padding:'4px 12px',fontSize:'11px',backgroundColor:'transparent',color:'#667eea',border:'1px solid #667eea',borderRadius:'20px',cursor:'pointer',fontWeight:'600',marginLeft:'auto'}}>← Back</button>
+                  <button onClick={() => setCricApiModal(prev => ({...prev, step:'series'}))} style={{padding:'4px 12px',fontSize:'11px',background:'transparent',color:'#667eea',border:'1px solid #667eea',borderRadius:'20px',cursor:'pointer',fontWeight:'600',marginLeft:'auto'}}>← Back</button>
                 </div>
 
                 {cricApiModal.loading ? (
@@ -1847,14 +1965,41 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
   )
 }
 
+// ── SeriesResultList ─────────────────────────────────────────────────────────
+function SeriesResultList({ seriesList, searchQuery, onSelect }) {
+  const q = (searchQuery || '').trim().toLowerCase()
+  const displayed = q
+    ? seriesList.filter(s => (s.name || s.title || '').toLowerCase().includes(q))
+    : seriesList
 
+  if (displayed.length === 0) {
+    return (
+      <div style={{textAlign:'center',padding:'40px',color:'#999',fontSize:'14px'}}>
+        {q ? 'No series match your search. Try a broader term.' : 'No upcoming series found.'}
+      </div>
+    )
+  }
 
-
-
-
-
-
-
-
-
+  return (
+    <div style={{overflowY:'auto',flex:1}}>
+      {displayed.map((s, idx) => (
+        <div
+          key={s.id || idx}
+          onClick={() => onSelect(s)}
+          style={{padding:'13px 15px',marginBottom:'8px',borderRadius:'10px',border:'1px solid #e8e8e8',cursor:'pointer',transition:'all 0.2s',backgroundColor:'#fafbfc'}}
+          onMouseEnter={e => { e.currentTarget.style.backgroundColor='#eef1ff'; e.currentTarget.style.borderColor='#667eea' }}
+          onMouseLeave={e => { e.currentTarget.style.backgroundColor='#fafbfc'; e.currentTarget.style.borderColor='#e8e8e8' }}
+        >
+          <div style={{fontWeight:'700',fontSize:'14px',color:'#1a1a1a'}}>{s.name || s.title}</div>
+          <div style={{fontSize:'12px',color:'#666',marginTop:'4px',display:'flex',gap:'14px',flexWrap:'wrap'}}>
+            {s.startDate && <span>Date: {s.startDate}{s.endDate ? ' to ' + s.endDate : ''}</span>}
+            {(s.odi > 0) && <span>ODI: {s.odi}</span>}
+            {(s.t20 > 0) && <span>T20: {s.t20}</span>}
+            {(s.test > 0) && <span>Test: {s.test}</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
 

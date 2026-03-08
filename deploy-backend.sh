@@ -29,13 +29,31 @@ if ! flyctl status &> /dev/null; then
 
     echo "💾 Creating persistent volume for database..."
     flyctl volumes create cricket_data --size 1
+fi
 
-    echo "🔒 Setting environment variables..."
-    flyctl secrets set NODE_ENV=production
-    flyctl secrets set GOOGLE_CLIENT_ID=902717717741-k71rkuvjnb2759i001r9butf6i7v8mh0.apps.googleusercontent.com
-    flyctl secrets set GOOGLE_CLIENT_SECRET=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
-    flyctl secrets set SESSION_SECRET=213cdfe81b1abf48fa1184eb3dc30d8f715983dffc8770437054d4fd4511868a
+echo "🔒 Setting environment variables..."
+# Always set NODE_ENV explicitly for production behavior.
+flyctl secrets set NODE_ENV=production
 
+# Optional: set OAuth/session secrets from your local env if provided.
+# This avoids committing sensitive values in this script.
+if [[ -n "${SESSION_SECRET:-}" ]]; then
+    flyctl secrets set SESSION_SECRET="$SESSION_SECRET"
+fi
+if [[ -n "${GOOGLE_CLIENT_ID:-}" ]]; then
+    flyctl secrets set GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID"
+fi
+if [[ -n "${GOOGLE_CLIENT_SECRET:-}" ]]; then
+    flyctl secrets set GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET"
+fi
+
+if [[ -z "${SESSION_SECRET:-}" || -z "${GOOGLE_CLIENT_ID:-}" || -z "${GOOGLE_CLIENT_SECRET:-}" ]]; then
+    echo "⚠️  Some optional secrets were not set from environment variables."
+    echo "   If you use Google login, set and rerun:"
+    echo "   export SESSION_SECRET='<strong-random-secret>'"
+    echo "   export GOOGLE_CLIENT_ID='<google-client-id>'"
+    echo "   export GOOGLE_CLIENT_SECRET='<google-client-secret>'"
+    echo "   ./deploy-backend.sh"
 fi
 
 echo "🏗️  Building and deploying..."
@@ -50,4 +68,3 @@ echo ""
 echo "📊 To view logs: flyctl logs"
 echo "🔍 To check status: flyctl status"
 echo "💻 To SSH into app: flyctl ssh console"
-

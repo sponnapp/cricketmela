@@ -2,11 +2,11 @@ import React, { useEffect, useState, useCallback, useRef } from 'react'
 import Login from './Login'
 import Seasons from './Seasons'
 import Matches from './Matches'
+import Predictions from './Predictions'
 import Admin from './Admin'
 import VoteHistory from './VoteHistory'
 import Standings from './Standings'
 import Profile from './Profile'
-import Predictions from './Predictions'
 import ToastContainer, { setToastHandler, toast } from './Toast'
 import useVersionCheck from './useVersionCheck'
 import './styles.css'
@@ -276,10 +276,17 @@ export default function App() {
                   {user.display_name||user.username}
                 </div>
                 <div style={{fontSize:'11px', color:'rgba(255,215,0,0.85)', fontWeight:'600'}}>
-                  {user.role==='admin' ? '∞ pts' : `${Math.round(user.balance??0)} pts`}
-                  {user.role!=='admin' && (
+                  {user.role==='admin' ? (
                     <span style={{
-                      marginLeft:'6px', fontSize:'10px', fontWeight:'700',
+                      fontSize:'10px', fontWeight:'700',
+                      background:'rgba(231,76,60,0.2)', color:'#e74c3c',
+                      padding:'1px 6px', borderRadius:'8px',
+                      border:'1px solid rgba(231,76,60,0.3)',
+                      textTransform:'uppercase', letterSpacing:'0.5px',
+                    }}>Admin</span>
+                  ) : (
+                    <span style={{
+                      fontSize:'10px', fontWeight:'700',
                       background:'rgba(46,204,113,0.2)', color:'#2ecc71',
                       padding:'1px 6px', borderRadius:'8px',
                       border:'1px solid rgba(46,204,113,0.3)',
@@ -351,7 +358,7 @@ export default function App() {
             {page==='admin'      && <Admin user={user} initialTab={adminTab} onTabChange={setAdminTab} addToast={addToast} refreshTrigger={refreshTrigger}/>}
             {page==='history'    && <VoteHistory user={user} refreshTrigger={refreshTrigger}/>}
             {page==='standings'  && <Standings user={user} refreshTrigger={refreshTrigger}/>}
-            {page==='predictions'&& <Predictions user={user}/>}
+            {page==='predictions'&& <Predictions user={user} refreshTrigger={refreshTrigger}/>}
             {page==='profile'    && <Profile user={user} refreshUser={u=>setUser(u)}/>}
           </>
         )}

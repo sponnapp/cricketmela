@@ -222,6 +222,30 @@ function initializeDatabase() {
       FOREIGN KEY(user_id) REFERENCES users(id)
     )`);
 
+    // Create predictions table for match predictions feature
+    db.run(`CREATE TABLE IF NOT EXISTS predictions (
+      id INTEGER PRIMARY KEY,
+      match_id INTEGER,
+      user_id INTEGER,
+      toss_winner TEXT,
+      man_of_match TEXT,
+      best_bowler TEXT,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(match_id, user_id),
+      FOREIGN KEY(match_id) REFERENCES matches(id),
+      FOREIGN KEY(user_id) REFERENCES users(id)
+    )`);
+
+    // Create prediction_results table for storing actual match outcomes
+    db.run(`CREATE TABLE IF NOT EXISTS prediction_results (
+      id INTEGER PRIMARY KEY,
+      match_id INTEGER UNIQUE,
+      toss_winner TEXT,
+      man_of_match TEXT,
+      best_bowler TEXT,
+      FOREIGN KEY(match_id) REFERENCES matches(id)
+    )`);
+
     // Add venue column if it doesn't exist (migration for old tables)
     db.all(`PRAGMA table_info(matches)`, (err, columns) => {
       if (err) {
@@ -301,6 +325,20 @@ function initializeDatabase() {
             }
           });
         }
+      }
+    });
+
+    // Migration: Add cricapi_series_id column to seasons if it doesn't exist
+    db.all(`PRAGMA table_info(seasons)`, (err, columns) => {
+      if (err) { console.error('Error checking seasons columns:', err); return; }
+      const hasSeriesId = columns && columns.some(c => c.name === 'cricapi_series_id');
+      if (!hasSeriesId) {
+        db.run(`ALTER TABLE seasons ADD COLUMN cricapi_series_id TEXT`, (alterErr) => {
+          if (alterErr) console.log('Note: Could not add cricapi_series_id to seasons:', alterErr.message);
+          else console.log('✅ Added cricapi_series_id column to seasons table');
+        });
+      } else {
+        console.log('✅ seasons.cricapi_series_id column already exists');
       }
     });
 
@@ -432,7 +470,7 @@ function processAutoLossForNewSeasons(userId, newSeasonIds, callback) {
                                       if (processed === matches.length) { db.close(); callback(null); }
                                     }
                                   });
-                              });
+                            });
                             });
                         });
                     });
@@ -484,6 +522,16 @@ app.get('/api/me', (req, res) => {
 });
 
 // Seasons and matches
+// Public endpoint: all seasons (no auth required, used by Standings)
+app.get('/api/seasons/all', (req, res) => {
+  const db = openDb();
+  db.all('SELECT id, name FROM seasons ORDER BY id ASC', (err, rows) => {
+    db.close();
+    if (err) return res.status(500).json({ error: 'DB error' });
+    res.json(rows || []);
+  });
+});
+
 app.get('/api/seasons', (req, res) => {
   const db = openDb();
   if (req.user && req.user.role !== 'admin') {
@@ -517,6 +565,26 @@ app.get('/api/seasons/:id/my-balance', (req, res) => {
       if (!row) return res.status(404).json({ error: 'Season not assigned to user' });
       res.json({ balance: row.balance ?? 1000 });
     });
+});
+
+// Get user's total balance across all seasons (only for currently existing seasons)
+app.get('/api/users/my-total-balance', (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+  const db = openDb();
+  db.get(
+    `SELECT COALESCE(
+      (SELECT SUM(us.balance)
+       FROM user_seasons us
+       JOIN seasons s ON s.id = us.season_id
+       WHERE us.user_id = ?),
+      0) as total_balance`,
+    [req.user.id],
+    (err, row) => {
+      db.close();
+      if (err) return res.status(500).json({ error: 'DB error' });
+      res.json({ balance: row.total_balance ?? 0 });
+    }
+  );
 });
 
 app.get('/api/seasons/:id/matches', (req, res) => {
@@ -689,12 +757,17 @@ app.post('/api/matches/:id/vote', (req, res) => {
 
 // ── CricAPI proxy endpoints ───────────────────────────────────────────────────
 
-const CRICAPI_KEY = '52dd6e24-2f57-4e92-84d5-76ee525e33fa';
+const CRICAPI_KEY = '491b7c88-16e4-428d-b2c9-99b687267947';
+
+// Prefer known-good series IDs when CricAPI returns duplicate names with inconsistent IDs.
+const CRICAPI_SERIES_ID_OVERRIDES = {
+  "icc men's t20 world cup 2026": '0cdf6736-ad9b-4e95-a647-5ee3a99c5510'
+};
 
 // GET /api/admin/cricapi/series  – fetch series for next 6 months
 app.get('/api/admin/cricapi/series', requireRole('admin', 'superuser'), (req, res) => {
   const https = require('https');
-  const search = req.query.search || '';
+  const search = String(req.query.search || '').trim();
   const url = `https://api.cricapi.com/v1/series?apikey=${CRICAPI_KEY}&offset=0&search=${encodeURIComponent(search)}`;
   https.get(url, (apiRes) => {
     let data = '';
@@ -703,16 +776,66 @@ app.get('/api/admin/cricapi/series', requireRole('admin', 'superuser'), (req, re
       try {
         const parsed = JSON.parse(data);
         if (!parsed.data) return res.json({ series: [] });
-        // Filter to series within next 6 months
+
+        // If admin explicitly searches, do not hide older series by date window.
+        const sourceList = Array.isArray(parsed.data) ? parsed.data : [];
         const now = new Date();
         const sixMonthsLater = new Date(now);
         sixMonthsLater.setMonth(sixMonthsLater.getMonth() + 6);
-        const filtered = parsed.data.filter(s => {
-          if (!s.startDate) return true; // include if no date
-          const startDate = new Date(s.startDate);
-          return startDate >= now && startDate <= sixMonthsLater;
+
+        const filtered = search
+          ? sourceList
+          : sourceList.filter(s => {
+              if (!s.startDate) return true; // no date info — include it
+              const raw = String(s.startDate).trim();
+              const isoMatch = raw.match(/^\d{4}-\d{2}-\d{2}$/);
+              if (isoMatch) {
+                const startDate = new Date(raw);
+                if (isNaN(startDate.getTime())) return true; // unparseable — include
+                const thirtyDaysAgo = new Date(now);
+                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                return startDate >= thirtyDaysAgo && startDate <= sixMonthsLater;
+              }
+              // Partial date like "Feb 15" — include when we cannot reliably place the year.
+              return true;
+            });
+
+        // De-duplicate by series name (prefer entries with more complete data)
+        const nameMap = new Map();
+        filtered.forEach(s => {
+          const name = (s.name || '').trim();
+          if (!name) return;
+
+          const existing = nameMap.get(name);
+          if (!existing) {
+            nameMap.set(name, s);
+          } else {
+            // Prefer entry with totalMatches data, or earlier start date
+            const hasTotalMatches = s.totalMatches && s.totalMatches > 0;
+            const existingHasTotalMatches = existing.totalMatches && existing.totalMatches > 0;
+
+            if (hasTotalMatches && !existingHasTotalMatches) {
+              nameMap.set(name, s);
+            } else if (!hasTotalMatches && existingHasTotalMatches) {
+              // Keep existing
+            } else {
+              // Both have or don't have totalMatches - prefer entry with full ISO date
+              const hasFullDate = s.startDate && /^\d{4}-\d{2}-\d{2}$/.test(s.startDate);
+              const existingHasFullDate = existing.startDate && /^\d{4}-\d{2}-\d{2}$/.test(existing.startDate);
+              if (hasFullDate && !existingHasFullDate) {
+                nameMap.set(name, s);
+              }
+            }
+          }
         });
-        res.json({ series: filtered, total: filtered.length });
+
+        const unique = Array.from(nameMap.values()).map((s) => {
+          const key = String(s.name || '').trim().toLowerCase();
+          const overrideId = CRICAPI_SERIES_ID_OVERRIDES[key];
+          return overrideId ? { ...s, id: overrideId } : s;
+        });
+
+        res.json({ series: unique, total: unique.length });
       } catch (e) {
         res.status(500).json({ error: 'Failed to parse CricAPI response' });
       }
@@ -726,6 +849,53 @@ app.get('/api/admin/cricapi/series', requireRole('admin', 'superuser'), (req, re
 app.get('/api/admin/cricapi/series/:id/matches', requireRole('admin', 'superuser'), (req, res) => {
   const https = require('https');
   const seriesId = req.params.id;
+  const seriesName = String(req.query.name || '').trim();
+
+  function getJson(url, done) {
+    https.get(url, (apiRes) => {
+      let data = '';
+      apiRes.on('data', chunk => data += chunk);
+      apiRes.on('end', () => {
+        try {
+          done(null, JSON.parse(data));
+        } catch (e) {
+          done(e);
+        }
+      });
+    }).on('error', done);
+  }
+
+  function fetchSeriesInfo(id, done) {
+    const url = `https://api.cricapi.com/v1/series_info?apikey=${CRICAPI_KEY}&id=${encodeURIComponent(id)}`;
+    getJson(url, (err, parsed) => {
+      if (err) return done(err);
+      const info = parsed && parsed.data ? parsed.data : null;
+      const matchList = (info && Array.isArray(info.matchList)) ? info.matchList : [];
+      done(null, { info, matchList });
+    });
+  }
+
+  function findAlternateSeriesIds(done) {
+    if (!seriesName) return done(null, []);
+    const url = `https://api.cricapi.com/v1/series?apikey=${CRICAPI_KEY}&offset=0&search=${encodeURIComponent(seriesName)}`;
+    getJson(url, (err, parsed) => {
+      if (err) return done(null, []);
+      const list = Array.isArray(parsed && parsed.data) ? parsed.data : [];
+      const nameKey = seriesName.toLowerCase();
+      const ids = [];
+      const seen = new Set([seriesId]);
+      for (const s of list) {
+        const sName = String((s && s.name) || '').trim().toLowerCase();
+        const sId = String((s && s.id) || '').trim();
+        if (!sId || seen.has(sId)) continue;
+        if (sName === nameKey) {
+          seen.add(sId);
+          ids.push(sId);
+        }
+      }
+      done(null, ids.slice(0, 10));
+    });
+  }
 
   function fetchFromMatchesApi(seriesInfo) {
     // Fallback: use /matches endpoint filtered by series_id
@@ -760,33 +930,43 @@ app.get('/api/admin/cricapi/series/:id/matches', requireRole('admin', 'superuser
     fetchPage();
   }
 
-  const url = `https://api.cricapi.com/v1/series_info?apikey=${CRICAPI_KEY}&id=${encodeURIComponent(seriesId)}`;
-  https.get(url, (apiRes) => {
-    let data = '';
-    apiRes.on('data', chunk => data += chunk);
-    apiRes.on('end', () => {
-      try {
-        const parsed = JSON.parse(data);
-        if (!parsed.data) return fetchFromMatchesApi(null);
-        const matchList = parsed.data.matchList || [];
-        if (matchList.length > 0) {
-          res.json({ matches: matchList, seriesInfo: parsed.data });
-        } else {
-          // matchList empty – try /matches endpoint filtered by series_id
-          fetchFromMatchesApi(parsed.data);
-        }
-      } catch (e) {
-        res.status(500).json({ error: 'Failed to parse CricAPI response' });
+  function tryAlternateIds(ids, baseSeriesInfo, idx) {
+    if (!ids || idx >= ids.length) {
+      return fetchFromMatchesApi(baseSeriesInfo);
+    }
+    fetchSeriesInfo(ids[idx], (errAlt, alt) => {
+      if (!errAlt && alt && alt.matchList.length > 0) {
+        return res.json({
+          matches: alt.matchList,
+          seriesInfo: alt.info || baseSeriesInfo || {},
+          resolvedSeriesId: ids[idx]
+        });
       }
+      tryAlternateIds(ids, baseSeriesInfo, idx + 1);
     });
-  }).on('error', err => {
-    res.status(500).json({ error: 'Failed to connect to CricAPI: ' + err.message });
+  }
+
+  fetchSeriesInfo(seriesId, (err, primary) => {
+    if (err) {
+      return res.status(500).json({ error: 'Failed to connect to CricAPI: ' + err.message });
+    }
+
+    if (primary && primary.matchList.length > 0) {
+      return res.json({ matches: primary.matchList, seriesInfo: primary.info || {} });
+    }
+
+    findAlternateSeriesIds((_, altIds) => {
+      if (altIds && altIds.length > 0) {
+        return tryAlternateIds(altIds, primary ? primary.info : null, 0);
+      }
+      return fetchFromMatchesApi(primary ? primary.info : null);
+    });
   });
 });
 
 // POST /api/admin/cricapi/import-season – create season + import selected matches
 app.post('/api/admin/cricapi/import-season', requireRole('admin'), (req, res) => {
-  const { seasonName, matches: matchesToImport } = req.body;
+  const { seasonName, matches: matchesToImport, seriesId } = req.body;
   if (!seasonName) return res.status(400).json({ error: 'seasonName required' });
   if (!Array.isArray(matchesToImport) || matchesToImport.length === 0) {
     return res.status(400).json({ error: 'At least one match required' });
@@ -794,8 +974,8 @@ app.post('/api/admin/cricapi/import-season', requireRole('admin'), (req, res) =>
 
   const db = openDb();
   db.serialize(() => {
-    // Create the season
-    db.run('INSERT INTO seasons (name) VALUES (?)', [seasonName], function(err) {
+    // Create the season (with optional cricapi_series_id)
+    db.run('INSERT INTO seasons (name, cricapi_series_id) VALUES (?, ?)', [seasonName, seriesId || null], function(err) {
       if (err) {
         db.close();
         return res.status(500).json({ error: 'Failed to create season: ' + err.message });
@@ -883,16 +1063,24 @@ app.delete('/api/admin/seasons/:id', requireRole('admin'), (req, res) => {
             return res.status(500).json({ error: 'Failed to delete matches' });
           }
 
-          // Delete the season
-          db.run('DELETE FROM seasons WHERE id = ?', [id], function(err3) {
-            db.close();
-            if (err3) {
-              return res.status(500).json({ error: 'Failed to delete season' });
+          // Delete all user_seasons assignments for this season
+          db.run('DELETE FROM user_seasons WHERE season_id = ?', [id], function(err2b) {
+            if (err2b) {
+              db.close();
+              return res.status(500).json({ error: 'Failed to delete user season assignments' });
             }
-            if (this.changes === 0) {
-              return res.status(404).json({ error: 'Season not found' });
-            }
-            res.json({ ok: true, message: 'Season deleted successfully' });
+
+            // Delete the season
+            db.run('DELETE FROM seasons WHERE id = ?', [id], function(err3) {
+              db.close();
+              if (err3) {
+                return res.status(500).json({ error: 'Failed to delete season' });
+              }
+              if (this.changes === 0) {
+                return res.status(404).json({ error: 'Season not found' });
+              }
+              res.json({ ok: true, message: 'Season deleted successfully' });
+            });
           });
         });
       });
@@ -1307,7 +1495,6 @@ app.post('/api/signup', (req, res) => {
     });
 });
 
-
 // Login endpoint: username + password auth
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
@@ -1557,18 +1744,41 @@ app.get('/auth/status', (req, res) => {
 
 app.get('/api/standings', (req, res) => {
   const db = openDb();
-  // Sum all season balances per user for standings; fall back to users.balance if no seasons assigned
-  db.all(`
-    SELECT u.id, u.username, u.display_name, u.role,
-      COALESCE((SELECT SUM(us.balance) FROM user_seasons us WHERE us.user_id = u.id), u.balance) as balance
-    FROM users u
-    WHERE u.role != 'admin' AND u.approved = 1
-    ORDER BY balance DESC
-  `, (err, rows) => {
-    db.close();
-    if (err) return res.status(500).json({ error: 'DB error' });
-    res.json(rows || []);
-  });
+  const seasonId = req.query.season_id ? Number(req.query.season_id) : null;
+
+  if (seasonId) {
+    // Season-specific standings: use user_seasons.balance for that season
+    db.all(`
+      SELECT u.id, u.username, u.display_name, u.role, us.balance
+      FROM users u
+      JOIN user_seasons us ON us.user_id = u.id
+      WHERE us.season_id = ? AND u.role != 'admin' AND u.approved = 1
+      ORDER BY us.balance DESC
+    `, [seasonId], (err, rows) => {
+      db.close();
+      if (err) return res.status(500).json({ error: 'DB error' });
+      res.json(rows || []);
+    });
+  } else {
+    // Overall standings: sum of all season balances (only for currently existing seasons)
+    db.all(`
+      SELECT u.id, u.username, u.display_name, u.role,
+        COALESCE(
+          (SELECT SUM(us.balance)
+           FROM user_seasons us
+           JOIN seasons s ON s.id = us.season_id
+           WHERE us.user_id = u.id),
+          u.balance
+        ) as balance
+      FROM users u
+      WHERE u.role != 'admin' AND u.approved = 1
+      ORDER BY balance DESC
+    `, (err, rows) => {
+      db.close();
+      if (err) return res.status(500).json({ error: 'DB error' });
+      res.json(rows || []);
+    });
+  }
 });
 
 // Get user's vote history
@@ -1576,9 +1786,12 @@ app.get('/api/users/:userId/votes', (req, res) => {
   const userId = Number(req.params.userId);
   const db = openDb();
   db.all(`
-    SELECT v.id, v.match_id, v.team, v.points, v.created_at, m.home_team, m.away_team, m.winner, m.scheduled_at
+    SELECT v.id, v.match_id, v.team, v.points, v.created_at,
+           m.home_team, m.away_team, m.winner, m.scheduled_at,
+           m.season_id, s.name as season_name
     FROM votes v
     JOIN matches m ON v.match_id = m.id
+    LEFT JOIN seasons s ON s.id = m.season_id
     WHERE v.user_id = ?
     ORDER BY m.scheduled_at ASC
   `, [userId], (err, rows) => {
@@ -1673,8 +1886,6 @@ app.delete('/api/admin/matches/:id', requireRole('admin'), (req, res) => {
           });
         };
 
-        if (!votes || votes.length === 0) { doDelete(); return; }
-
         // If winner was set, reverse the season balance changes first
         if (matchRow.winner) {
           const winner = matchRow.winner;
@@ -1765,13 +1976,7 @@ app.post('/api/admin/matches/:id/winner', requireRole(['admin', 'superuser']), (
                       let losersProcessed = 0;
                       loserVotes.forEach(v => {
                         db.run('UPDATE user_seasons SET balance = balance - ? WHERE user_id = ? AND season_id = ?',
-                          [v.points, v.user_id, seasonId], () => {
-                            losersProcessed++;
-                            if (losersProcessed === loserVotes.length) {
-                              db.close();
-                              return res.json({ ok: true, distributed: 0, autoLoss: nonVotedUsers.length });
-                            }
-                          });
+                          [v.points, v.user_id, seasonId], () => { losersProcessed++; if (losersProcessed === loserVotes.length) { db.close(); return res.json({ ok: true, distributed: 0, autoLoss: nonVotedUsers.length }); } });
                       });
                       return;
                     }
@@ -1845,7 +2050,6 @@ app.post('/api/admin/matches/:id/winner', requireRole(['admin', 'superuser']), (
   });
 });
 
-
 // Admin: Clear votes and odds for a specific match
 // Since votes no longer deduct balance on placement, we just delete the vote records.
 // If the match already has a winner (balance was already settled), we also reverse the season balance changes.
@@ -1860,8 +2064,8 @@ app.post('/api/admin/matches/:id/clear-votes', requireRole('admin'), (req, res) 
       if (errM) { db.close(); return res.status(500).json({ error: 'DB error' }); }
       if (!matchRow) { db.close(); return res.status(404).json({ error: 'Match not found' }); }
 
-      db.all('SELECT user_id, points, team FROM votes WHERE match_id = ?', [matchId], (err1, votes) => {
-        if (err1) { db.close(); return res.status(500).json({ error: 'Failed to fetch votes: ' + err1.message }); }
+      db.all('SELECT user_id, points, team FROM votes WHERE match_id = ?', [matchId], (err, votes) => {
+        if (err) { db.close(); return res.status(500).json({ error: 'DB error: ' + err.message }); }
 
         if (!votes || votes.length === 0) {
           db.close();
@@ -2433,10 +2637,551 @@ function waitForMigrations(callback) {
   });
 }
 
-// Start server after migrations
-waitForMigrations(() => {
-  app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
+// ──────────────────────────────────────────────────────────────────────────────
+// PREDICTIONS API
+// ──────────────────────────────────────────────────────────────────────────────
+
+// Small in-memory cache to reduce CricAPI calls for repeated UI refreshes
+const predictionPlayersCache = new Map();
+
+function getCachedPredictionPlayers(key) {
+  const hit = predictionPlayersCache.get(key);
+  if (!hit) return null;
+  // 10 minute cache
+  if (Date.now() - hit.ts > 10 * 60 * 1000) {
+    predictionPlayersCache.delete(key);
+    return null;
+  }
+  return hit.data;
+}
+
+function setCachedPredictionPlayers(key, data) {
+  predictionPlayersCache.set(key, { ts: Date.now(), data });
+}
+
+function fetchJson(url, cb) {
+  const https = require('https');
+  https.get(url, (apiRes) => {
+    let raw = '';
+    apiRes.on('data', chunk => { raw += chunk; });
+    apiRes.on('end', () => {
+      try {
+        cb(null, JSON.parse(raw));
+      } catch (e) {
+        cb(new Error('Invalid JSON response'));
+      }
+    });
+  }).on('error', (err) => cb(err));
+}
+
+function normalizeTeamName(name) {
+  return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function extractPlayersFromMatch(matchObj) {
+  const players = [];
+
+  // Some CricAPI responses include teamInfo[].players (array of objects or strings)
+  if (Array.isArray(matchObj.teamInfo)) {
+    matchObj.teamInfo.forEach(team => {
+      if (Array.isArray(team.players)) {
+        team.players.forEach(p => {
+          if (typeof p === 'string') players.push(p);
+          else if (p && p.name) players.push(p.name);
+        });
+      }
+    });
+  }
+
+  // Fallback shape seen in some responses
+  if (Array.isArray(matchObj.players)) {
+    matchObj.players.forEach(p => {
+      if (typeof p === 'string') players.push(p);
+      else if (p && p.name) players.push(p.name);
+    });
+  }
+
+  return [...new Set(players.filter(Boolean).map(x => String(x).trim()))];
+}
+
+// GET /api/predictions/players - Fetch likely player list for a match using CricAPI
+app.get('/api/predictions/players', requireRole('picker', 'superuser', 'admin'), (req, res) => {
+  const homeTeam = String(req.query.home_team || '').trim();
+  const awayTeam = String(req.query.away_team || '').trim();
+
+  if (!homeTeam || !awayTeam) {
+    return res.status(400).json({ error: 'home_team and away_team required' });
+  }
+
+  const cacheKey = `${normalizeTeamName(homeTeam)}__${normalizeTeamName(awayTeam)}`;
+  const cached = getCachedPredictionPlayers(cacheKey);
+  if (cached) return res.json(cached);
+
+  const homeKey = normalizeTeamName(homeTeam);
+  const awayKey = normalizeTeamName(awayTeam);
+
+  // Try matches feed first (usually has the freshest squads)
+  const url = `https://api.cricapi.com/v1/matches?apikey=${CRICAPI_KEY}&offset=0`;
+  fetchJson(url, (err, parsed) => {
+    if (err || !parsed) {
+      return res.json({ players: [], source: 'unavailable' });
+    }
+
+    const matches = Array.isArray(parsed.data) ? parsed.data : [];
+    let candidate = null;
+
+    for (const m of matches) {
+      const teams = Array.isArray(m.teams) ? m.teams : [];
+      const keys = teams.map(normalizeTeamName);
+      if (keys.includes(homeKey) && keys.includes(awayKey)) {
+        candidate = m;
+        break;
+      }
+    }
+
+    let players = candidate ? extractPlayersFromMatch(candidate) : [];
+
+    // Fallback: if squads are missing, query players search for each team name
+    const finish = (finalPlayers, source) => {
+      const data = { players: finalPlayers, source };
+      setCachedPredictionPlayers(cacheKey, data);
+      res.json(data);
+    };
+
+    if (players.length > 0) {
+      return finish(players, 'matches');
+    }
+
+    const teamSearch = (teamName, cb) => {
+      const searchUrl = `https://api.cricapi.com/v1/players?apikey=${CRICAPI_KEY}&offset=0&search=${encodeURIComponent(teamName)}`;
+      fetchJson(searchUrl, (e2, p2) => {
+        if (e2 || !p2 || !Array.isArray(p2.data)) return cb([]);
+        const names = p2.data
+          .map(x => x && x.name ? String(x.name).trim() : '')
+          .filter(Boolean)
+          .slice(0, 30);
+        cb(names);
+      });
+    };
+
+    teamSearch(homeTeam, (homePlayers) => {
+      teamSearch(awayTeam, (awayPlayers) => {
+        players = [...new Set([...(homePlayers || []), ...(awayPlayers || [])])];
+        return finish(players, 'players-search');
+      });
+    });
   });
+});
+
+// GET /api/predictions/players-by-season/:seasonId - Fetch player squad for a season using CricAPI series_squad
+// Optional query params: team1, team2 - to filter players by specific teams
+app.get('/api/predictions/players-by-season/:seasonId', requireRole('picker', 'superuser', 'admin'), (req, res) => {
+  const seasonId = Number(req.params.seasonId);
+  const team1 = req.query.team1 ? String(req.query.team1).trim() : null;
+  const team2 = req.query.team2 ? String(req.query.team2).trim() : null;
+
+  const db = openDb();
+
+  db.get('SELECT cricapi_series_id FROM seasons WHERE id = ?', [seasonId], (err, season) => {
+    db.close();
+    if (err) return res.status(500).json({ error: 'DB error' });
+    if (!season) return res.status(404).json({ error: 'Season not found' });
+    if (!season.cricapi_series_id) {
+      return res.json({ players: [], source: 'no_series_id', message: 'No CricAPI series ID stored for this season' });
+    }
+
+    const cacheKey = `season_squad_${seasonId}`;
+    const cached = getCachedPredictionPlayers(cacheKey);
+
+    // If we have cached data, filter by teams if provided
+    if (cached) {
+      if (team1 && team2) {
+        const filtered = filterPlayersByTeams(cached, team1, team2);
+        return res.json(filtered);
+      }
+      return res.json(cached);
+    }
+
+    const url = `https://api.cricapi.com/v1/series_squad?apikey=${CRICAPI_KEY}&id=${encodeURIComponent(season.cricapi_series_id)}`;
+    fetchJson(url, (fetchErr, parsed) => {
+      if (fetchErr || !parsed) {
+        return res.json({ players: [], source: 'api_error', message: 'Failed to fetch squad from CricAPI' });
+      }
+
+      const squads = Array.isArray(parsed.data) ? parsed.data : [];
+
+      // Store full squad data with team information and player details
+      const teamSquadMap = {};
+      squads.forEach(teamSquad => {
+        const teamName = teamSquad.teamName || teamSquad.name || '';
+        if (teamName && Array.isArray(teamSquad.players)) {
+          const players = [];
+          teamSquad.players.forEach(player => {
+            if (player && typeof player === 'object' && player.name) {
+              // Store full player object with image, role, etc.
+              players.push({
+                id: player.id || null,
+                name: String(player.name).trim(),
+                role: player.role || '',
+                playerImg: player.playerImg || '',
+                battingStyle: player.battingStyle || '',
+                bowlingStyle: player.bowlingStyle || '',
+                country: player.country || ''
+              });
+            }
+          });
+          teamSquadMap[teamName] = players;
+        }
+      });
+
+      // Create full player list
+      const allPlayers = [];
+      Object.values(teamSquadMap).forEach(players => {
+        allPlayers.push(...players);
+      });
+
+      const fullData = {
+        players: allPlayers,
+        source: 'series_squad',
+        season_id: seasonId,
+        teamSquads: teamSquadMap
+      };
+
+      setCachedPredictionPlayers(cacheKey, fullData);
+
+      // Filter by teams if provided
+      if (team1 && team2) {
+        const filtered = filterPlayersByTeams(fullData, team1, team2);
+        return res.json(filtered);
+      }
+
+      res.json(fullData);
+    });
+  });
+});
+
+// POST /api/admin/seasons/:id/refresh-squad - force refresh latest season squad from CricAPI
+app.post('/api/admin/seasons/:id/refresh-squad', requireRole('admin'), (req, res) => {
+  const seasonId = Number(req.params.id);
+  if (!Number.isFinite(seasonId)) {
+    return res.status(400).json({ error: 'Invalid season id' });
+  }
+
+  const db = openDb();
+  db.get('SELECT id, name, cricapi_series_id FROM seasons WHERE id = ?', [seasonId], (err, season) => {
+    db.close();
+    if (err) return res.status(500).json({ error: 'DB error' });
+    if (!season) return res.status(404).json({ error: 'Season not found' });
+    if (!season.cricapi_series_id) {
+      return res.status(400).json({ error: 'This season has no CricAPI series mapping. Re-import from CricAPI first.' });
+    }
+
+    const cacheKey = `season_squad_${seasonId}`;
+    predictionPlayersCache.delete(cacheKey);
+
+    const url = `https://api.cricapi.com/v1/series_squad?apikey=${CRICAPI_KEY}&id=${encodeURIComponent(season.cricapi_series_id)}`;
+    fetchJson(url, (fetchErr, parsed) => {
+      if (fetchErr || !parsed) {
+        return res.status(502).json({ error: 'Failed to fetch squad from CricAPI' });
+      }
+
+      const squads = Array.isArray(parsed.data) ? parsed.data : [];
+      const teamSquadMap = {};
+      squads.forEach(teamSquad => {
+        const teamName = teamSquad.teamName || teamSquad.name || '';
+        if (!teamName || !Array.isArray(teamSquad.players)) return;
+
+        const players = [];
+        teamSquad.players.forEach(player => {
+          if (player && typeof player === 'object' && player.name) {
+            players.push({
+              id: player.id || null,
+              name: String(player.name).trim(),
+              role: player.role || '',
+              playerImg: player.playerImg || '',
+              battingStyle: player.battingStyle || '',
+              bowlingStyle: player.bowlingStyle || '',
+              country: player.country || ''
+            });
+          }
+        });
+        teamSquadMap[teamName] = players;
+      });
+
+      const allPlayers = [];
+      Object.values(teamSquadMap).forEach(players => allPlayers.push(...players));
+
+      const fullData = {
+        players: allPlayers,
+        source: 'series_squad',
+        season_id: seasonId,
+        teamSquads: teamSquadMap
+      };
+
+      setCachedPredictionPlayers(cacheKey, fullData);
+
+      res.json({
+        ok: true,
+        season_id: seasonId,
+        season_name: season.name,
+        teams: Object.keys(teamSquadMap).length,
+        players: allPlayers.length,
+        refreshed_at: new Date().toISOString()
+      });
+    });
+  });
+});
+
+// Helper function to filter players by team names
+function filterPlayersByTeams(squadData, team1, team2) {
+  if (!squadData.teamSquads) {
+    // Fallback if teamSquads not available
+    return { ...squadData, players: squadData.players || [] };
+  }
+
+  const normalize = (name) => String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const team1Norm = normalize(team1);
+  const team2Norm = normalize(team2);
+
+  const matchedPlayers = [];
+
+  // Find matching teams by normalized name
+  Object.entries(squadData.teamSquads).forEach(([teamName, players]) => {
+    const teamNorm = normalize(teamName);
+    if (teamNorm.includes(team1Norm) || team1Norm.includes(teamNorm) ||
+        teamNorm.includes(team2Norm) || team2Norm.includes(teamNorm)) {
+      matchedPlayers.push(...players);
+    }
+  });
+
+  const uniqueFiltered = [...new Set(matchedPlayers)];
+
+  return {
+    ...squadData,
+    players: uniqueFiltered.length > 0 ? uniqueFiltered : squadData.players,
+    filtered: uniqueFiltered.length > 0,
+    matchedTeams: uniqueFiltered.length
+  };
+}
+
+// GET /api/predictions/upcoming - upcoming matches available for prediction
+app.get('/api/predictions/upcoming', requireRole('picker', 'superuser', 'admin'), (req, res) => {
+  const seasonId = req.query.season_id ? Number(req.query.season_id) : null;
+  const db = openDb();
+
+  const finish = (rows) => {
+    const now = new Date();
+    const data = (rows || [])
+      .map((m) => ({ ...m, _dt: parseMatchDateTime(m.scheduled_at) }))
+      .filter((m) => !m.winner)
+      .filter((m) => m._dt && !Number.isNaN(m._dt.getTime()) && m._dt >= now)
+      .sort((a, b) => a._dt - b._dt)
+      .map(({ _dt, ...rest }) => rest);
+
+    db.close();
+    res.json(data);
+  };
+
+  if (req.user.role === 'admin') {
+    const params = [];
+    let query = `
+      SELECT m.id, m.season_id, m.home_team, m.away_team, m.scheduled_at, m.venue, m.winner, s.name as season_name
+      FROM matches m
+      JOIN seasons s ON s.id = m.season_id
+    `;
+    if (seasonId) {
+      query += ' WHERE m.season_id = ?';
+      params.push(seasonId);
+    }
+    db.all(query, params, (err, rows) => {
+      if (err) {
+        db.close();
+        return res.status(500).json({ error: 'DB error' });
+      }
+      finish(rows);
+    });
+    return;
+  }
+
+  const params = [req.user.id];
+  let query = `
+    SELECT m.id, m.season_id, m.home_team, m.away_team, m.scheduled_at, m.venue, m.winner, s.name as season_name
+    FROM matches m
+    JOIN seasons s ON s.id = m.season_id
+    JOIN user_seasons us ON us.season_id = m.season_id
+    WHERE us.user_id = ?
+  `;
+  if (seasonId) {
+    query += ' AND m.season_id = ?';
+    params.push(seasonId);
+  }
+
+  db.all(query, params, (err, rows) => {
+    if (err) {
+      db.close();
+      return res.status(500).json({ error: 'DB error' });
+    }
+    finish(rows);
+  });
+});
+
+// GET /api/predictions/user-history - Get user's prediction history
+// ⚠️ MUST be defined BEFORE /api/predictions/:matchId to avoid Express matching "user-history" as a matchId
+app.get('/api/predictions/user-history', requireRole('picker', 'superuser', 'admin'), (req, res) => {
+  const username = req.headers['x-user'];
+  const { season_id } = req.query;
+  const db = openDb();
+
+  db.get('SELECT id FROM users WHERE LOWER(username) = ?', [username.toLowerCase()], (err, user) => {
+    if (err || !user) {
+      db.close();
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    let query = `
+      SELECT p.*, m.home_team, m.away_team, m.scheduled_at, m.winner, m.season_id,
+             s.name as season_name,
+             pr.toss_winner as actual_toss, pr.man_of_match as actual_mom, pr.best_bowler as actual_bowler
+      FROM predictions p
+      JOIN matches m ON p.match_id = m.id
+      JOIN seasons s ON m.season_id = s.id
+      LEFT JOIN prediction_results pr ON p.match_id = pr.match_id
+      WHERE p.user_id = ?
+    `;
+
+    const params = [user.id];
+
+    if (season_id) {
+      query += ' AND m.season_id = ?';
+      params.push(season_id);
+    }
+
+    query += ' ORDER BY m.scheduled_at DESC';
+
+    db.all(query, params, (err, predictions) => {
+      db.close();
+      if (err) return res.status(500).json({ error: 'Database error' });
+      res.json(predictions || []);
+    });
+  });
+});
+
+// GET /api/predictions/:matchId - Get user's prediction for a match
+app.get('/api/predictions/:matchId', requireRole('picker', 'superuser', 'admin'), (req, res) => {
+  const username = req.headers['x-user'];
+  const { matchId } = req.params;
+  const db = openDb();
+
+  db.get('SELECT id FROM users WHERE LOWER(username) = ?', [username.toLowerCase()], (err, user) => {
+    if (err || !user) {
+      db.close();
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    db.get('SELECT * FROM predictions WHERE match_id = ? AND user_id = ?', [matchId, user.id], (err, prediction) => {
+      db.close();
+      if (err) return res.status(500).json({ error: 'Database error' });
+      res.json(prediction || null);
+    });
+  });
+});
+
+// POST /api/predictions - Submit or update prediction
+app.post('/api/predictions', requireRole('picker', 'superuser', 'admin'), (req, res) => {
+  const username = req.headers['x-user'];
+  const { match_id, toss_winner, man_of_match, best_bowler } = req.body;
+
+  if (!match_id) {
+    return res.status(400).json({ error: 'Match ID required' });
+  }
+
+  const db = openDb();
+
+  db.get('SELECT id FROM users WHERE LOWER(username) = ?', [username.toLowerCase()], (err, user) => {
+    if (err || !user) {
+      db.close();
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // Check if match exists and prediction window is open (1 hour before match)
+    db.get('SELECT scheduled_at, winner FROM matches WHERE id = ?', [match_id], (err, match) => {
+      if (err) {
+        db.close();
+        return res.status(500).json({ error: 'Database error' });
+      }
+      if (!match) {
+        db.close();
+        return res.status(404).json({ error: 'Match not found' });
+      }
+      if (match.winner) {
+        db.close();
+        return res.status(400).json({ error: 'Match winner has been set. Voting is now closed.' });
+      }
+
+      // Check voting window (1 hour cutoff)
+      const matchTime = parseMatchDateTime(match.scheduled_at);
+      if (!matchTime) { db.close(); return res.status(400).json({ error: 'Invalid match schedule. Please contact admin.' }); }
+      const cutoffTime = new Date(matchTime.getTime() - 60 * 60 * 1000);
+      if (new Date() >= cutoffTime) { db.close(); return res.status(400).json({ error: 'Prediction window closed (closes 1 hour before match)' }); }
+
+      // Upsert prediction
+      db.run(`
+        INSERT INTO predictions (match_id, user_id, toss_winner, man_of_match, best_bowler, updated_at)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(match_id, user_id) DO UPDATE SET
+          toss_winner = excluded.toss_winner,
+          man_of_match = excluded.man_of_match,
+          best_bowler = excluded.best_bowler,
+          updated_at = CURRENT_TIMESTAMP
+      `, [match_id, user.id, toss_winner, man_of_match, best_bowler], function(err) {
+        db.close();
+        if (err) return res.status(500).json({ error: 'Failed to save prediction' });
+        res.json({ ok: true, message: 'Prediction saved successfully' });
+      });
+    });
+  });
+});
+
+// GET /api/predictions/results/:matchId - Get prediction results for a match (admin only)
+app.get('/api/predictions/results/:matchId', requireRole('admin', 'superuser'), (req, res) => {
+  const { matchId } = req.params;
+  const db = openDb();
+
+  db.get('SELECT * FROM prediction_results WHERE match_id = ?', [matchId], (err, result) => {
+    db.close();
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json(result || null);
+  });
+});
+
+// POST /api/predictions/results - Set prediction results (admin only)
+app.post('/api/predictions/results', requireRole('admin', 'superuser'), (req, res) => {
+  const { match_id, toss_winner, man_of_match, best_bowler } = req.body;
+
+  if (!match_id) {
+    return res.status(400).json({ error: 'Match ID required' });
+  }
+
+  const db = openDb();
+
+  db.run(`
+    INSERT INTO prediction_results (match_id, toss_winner, man_of_match, best_bowler)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(match_id) DO UPDATE SET
+      toss_winner = excluded.toss_winner,
+      man_of_match = excluded.man_of_match,
+      best_bowler = excluded.best_bowler
+  `, [match_id, toss_winner, man_of_match, best_bowler], function(err) {
+    db.close();
+    if (err) return res.status(500).json({ error: 'Failed to save results' });
+    res.json({ ok: true, message: 'Prediction results saved successfully' });
+  });
+});
+
+
+// Start the server
+app.listen(port, () => {
+  console.log(`✅ Cricket Mela backend running on port ${port}`);
+  console.log(`📍 Database location: ${DB_PATH}`);
 });
 
