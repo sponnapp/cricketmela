@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react'
 import Login from './Login'
 import Seasons from './Seasons'
 import Matches from './Matches'
+import Predictions from './Predictions'
 import Admin from './Admin'
 import VoteHistory from './VoteHistory'
 import Standings from './Standings'
@@ -28,9 +29,9 @@ function UserAvatar({ name, size = 38 }) {
   )
 }
 
-const NAV_ICONS = {seasons:'🏏',admin:'⚙️',history:'📋',standings:'🏆',profile:'👤'}
+const NAV_ICONS = {seasons:'🏏',admin:'⚙️',history:'📋',standings:'🏆',predictions:'🔮',profile:'👤'}
 const NAV_STATE_KEY = 'cm_nav_state'
-const VALID_PAGES = new Set(['seasons','matches','admin','history','standings','profile'])
+const VALID_PAGES = new Set(['seasons','matches','admin','history','standings','predictions','profile'])
 
 function readNavState() {
   try {
@@ -180,11 +181,12 @@ export default function App() {
   function navigate(p){ if(p==='seasons') setSeasonId(null); setPage(p) }
 
   const navTabs=[
-    {key:'seasons',  label:'Seasons'    },
-    {key:'admin',    label:'Admin',     adminOnly:true},
-    {key:'history',  label:'Vote History'},
-    {key:'standings',label:'Standings' },
-    {key:'profile',  label:'Profile'   },
+    {key:'seasons',     label:'Seasons'      },
+    {key:'admin',       label:'Admin',       adminOnly:true},
+    {key:'history',     label:'Vote History' },
+    {key:'standings',   label:'Standings'    },
+    {key:'predictions', label:'Predictions'  },
+    {key:'profile',     label:'Profile'      },
   ].filter(t=>!t.adminOnly||(user?.role==='admin'||user?.role==='superuser'))
 
   return (
@@ -274,10 +276,17 @@ export default function App() {
                   {user.display_name||user.username}
                 </div>
                 <div style={{fontSize:'11px', color:'rgba(255,215,0,0.85)', fontWeight:'600'}}>
-                  {user.role==='admin' ? '∞ pts' : `${Math.round(user.balance??0)} pts`}
-                  {user.role!=='admin' && (
+                  {user.role==='admin' ? (
                     <span style={{
-                      marginLeft:'6px', fontSize:'10px', fontWeight:'700',
+                      fontSize:'10px', fontWeight:'700',
+                      background:'rgba(231,76,60,0.2)', color:'#e74c3c',
+                      padding:'1px 6px', borderRadius:'8px',
+                      border:'1px solid rgba(231,76,60,0.3)',
+                      textTransform:'uppercase', letterSpacing:'0.5px',
+                    }}>Admin</span>
+                  ) : (
+                    <span style={{
+                      fontSize:'10px', fontWeight:'700',
                       background:'rgba(46,204,113,0.2)', color:'#2ecc71',
                       padding:'1px 6px', borderRadius:'8px',
                       border:'1px solid rgba(46,204,113,0.3)',
@@ -344,12 +353,13 @@ export default function App() {
           <Login onLogin={u=>{ setUser(u); toast('success',`Welcome, ${u.display_name||u.username}! 🏏`,'Ready to make your picks?') }}/>
         ):(
           <>
-            {page==='seasons'  && <Seasons user={user} onSelect={id=>{setSeasonId(id);setPage('matches')}} refreshTrigger={refreshTrigger}/>}
-            {page==='matches'  && seasonId && <Matches seasonId={seasonId} user={user} refreshUser={u=>setUser(u)} refreshTrigger={refreshTrigger}/>}
-            {page==='admin'    && <Admin user={user} initialTab={adminTab} onTabChange={setAdminTab} addToast={addToast} refreshTrigger={refreshTrigger}/>}
-            {page==='history'  && <VoteHistory user={user} refreshTrigger={refreshTrigger}/>}
-            {page==='standings'&& <Standings user={user} refreshTrigger={refreshTrigger}/>}
-            {page==='profile'  && <Profile user={user} refreshUser={u=>setUser(u)}/>}
+            {page==='seasons'    && <Seasons user={user} onSelect={id=>{setSeasonId(id);setPage('matches')}} refreshTrigger={refreshTrigger}/>}
+            {page==='matches'    && seasonId && <Matches seasonId={seasonId} user={user} refreshUser={u=>setUser(u)} refreshTrigger={refreshTrigger}/>}
+            {page==='admin'      && <Admin user={user} initialTab={adminTab} onTabChange={setAdminTab} addToast={addToast} refreshTrigger={refreshTrigger}/>}
+            {page==='history'    && <VoteHistory user={user} refreshTrigger={refreshTrigger}/>}
+            {page==='standings'  && <Standings user={user} refreshTrigger={refreshTrigger}/>}
+            {page==='predictions'&& <Predictions user={user} refreshTrigger={refreshTrigger}/>}
+            {page==='profile'    && <Profile user={user} refreshUser={u=>setUser(u)}/>}
           </>
         )}
       </main>

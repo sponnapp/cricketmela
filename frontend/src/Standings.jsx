@@ -86,16 +86,56 @@ function PodiumCard({ u, rank, isMe }) {
 export default function Standings({ user: currentUser, refreshTrigger }) {
   const [standings, setStandings] = useState([])
   const [loading, setLoading] = useState(true)
+  const [seasons, setSeasons] = useState([])
+  const allowOverall = currentUser?.role === 'admin'
+  const [selectedSeason, setSelectedSeason] = useState(allowOverall ? 'all' : '')
+
+  // Fetch seasons: admin gets all, other users get only assigned seasons
+  useEffect(() => {
+    const req = allowOverall
+      ? axios.get('/api/seasons/all')
+      : axios.get('/api/seasons', { headers: { 'x-user': currentUser?.username || '' } })
+
+    req.then(r => {
+      const list = r.data || []
+      setSeasons(list)
+      if (!allowOverall) {
+        if (list.length === 0) {
+          setSelectedSeason('')
+        } else {
+          const currentAllowed = list.some(s => String(s.id) === String(selectedSeason))
+          if (!currentAllowed) setSelectedSeason(String(list[0].id))
+        }
+      }
+    }).catch(() => setSeasons([]))
+  }, [allowOverall, currentUser?.username])
 
   useEffect(() => {
-    axios.get('/api/standings')
+    // For non-admin users, wait until a valid season is selected
+    if (!allowOverall && !selectedSeason) {
+      setStandings([])
+      setLoading(false)
+      return
+    }
+
+    const url = selectedSeason === 'all'
+      ? '/api/standings'
+      : `/api/standings?season_id=${selectedSeason}`
+
+    setLoading(true)
+    axios.get(url)
       .then(r => {
-        const filtered = (r.data||[]).filter(u=>u.role!=='admin').sort((a,b)=>b.balance-a.balance)
+        const filtered = (r.data || []).filter(u => u.role !== 'admin').sort((a, b) => b.balance - a.balance)
         setStandings(filtered)
         setLoading(false)
       })
       .catch(() => { setStandings([]); setLoading(false) })
-  }, [refreshTrigger])
+  }, [refreshTrigger, selectedSeason, allowOverall])
+
+  // Season label for display
+  const seasonLabel = selectedSeason === 'all'
+    ? 'Overall'
+    : (seasons.find(s => String(s.id) === String(selectedSeason))?.name || 'Season')
 
   if (loading) return (
     <div style={{padding:'40px', textAlign:'center'}}>
@@ -106,7 +146,17 @@ export default function Standings({ user: currentUser, refreshTrigger }) {
   )
 
   if (standings.length === 0) return (
-    <div style={{padding:'40px', textAlign:'center', color:'#666'}}>No players yet.</div>
+    <div style={{padding:'20px', fontFamily:'Inter,sans-serif'}}>
+      {/* Season selector even on empty state */}
+      <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom:'20px', flexWrap:'wrap'}}>
+        <h2 style={{fontFamily:"'Poppins',sans-serif", fontSize:'26px', fontWeight:'800', margin:0, display:'flex', alignItems:'center', gap:'8px'}}>
+          <span>🏆</span>
+          <span style={{background:'linear-gradient(90deg,#FFD700,#ff8c00)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', color:'transparent'}}>Leaderboard</span>
+        </h2>
+        {seasons.length > 0 && <SeasonDropdown seasons={seasons} value={selectedSeason} onChange={setSelectedSeason} allowOverall={allowOverall} />}
+      </div>
+      <p style={{color:'#666'}}>No players yet for {seasonLabel}.</p>
+    </div>
   )
 
   const top3   = standings.slice(0, 3)
@@ -117,18 +167,29 @@ export default function Standings({ user: currentUser, refreshTrigger }) {
   return (
     <div style={{padding:'20px', fontFamily:'Inter,sans-serif'}}>
 
-      {/* Title */}
-      <h2 style={{
-        fontFamily:"'Poppins',sans-serif", fontSize:'26px', fontWeight:'800',
-        marginBottom:'12px', display:'flex', alignItems:'center', gap:'8px',
-      }}>
-        <span>🏆</span>
+      {/* Title + Season Selector */}
+      <div style={{display:'flex', alignItems:'center', gap:'12px', marginBottom:'16px', flexWrap:'wrap'}}>
+        <h2 style={{
+          fontFamily:"'Poppins',sans-serif", fontSize:'26px', fontWeight:'800',
+          margin:0, display:'flex', alignItems:'center', gap:'8px',
+        }}>
+          <span>🏆</span>
+          <span style={{
+            background:'linear-gradient(90deg,#FFD700,#ff8c00)',
+            WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent',
+            backgroundClip:'text', color:'transparent',
+          }}>Leaderboard</span>
+        </h2>
+        {seasons.length > 0 && <SeasonDropdown seasons={seasons} value={selectedSeason} onChange={setSelectedSeason} allowOverall={allowOverall} />}
+        {/* Season badge */}
         <span style={{
-          background:'linear-gradient(90deg,#FFD700,#ff8c00)',
-          WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent',
-          backgroundClip:'text', color:'transparent',
-        }}>Leaderboard</span>
-      </h2>
+          background: selectedSeason === 'all' ? 'linear-gradient(135deg,#667eea,#764ba2)' : 'linear-gradient(135deg,#2ecc71,#27ae60)',
+          color:'white', borderRadius:'20px', padding:'4px 14px',
+          fontSize:'12px', fontWeight:'700', fontFamily:'Inter,sans-serif',
+        }}>
+          {seasonLabel}
+        </span>
+      </div>
 
       {/* Your rank banner */}
       {myRank >= 0 && (
@@ -160,10 +221,7 @@ export default function Standings({ user: currentUser, refreshTrigger }) {
         }}>
           <div style={{display:'flex', justifyContent:'center', alignItems:'flex-end', gap:'10px', flexWrap:'wrap'}}>
             {top3.map((u, rank) => (
-              <PodiumCard
-                key={u.id} u={u} rank={rank}
-                isMe={currentUser?.username === u.username}
-              />
+              <PodiumCard key={u.id} u={u} rank={rank} isMe={currentUser?.username === u.username} />
             ))}
           </div>
         </div>
@@ -227,6 +285,30 @@ export default function Standings({ user: currentUser, refreshTrigger }) {
           </table>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Season Dropdown ───────────────────────────────────────────────────────────
+function SeasonDropdown({ seasons, value, onChange, allowOverall }) {
+  return (
+    <div style={{display:'flex', alignItems:'center', gap:'8px'}}>
+      <span style={{fontSize:'12px', fontWeight:'700', color:'#555', whiteSpace:'nowrap'}}>🏏 Season:</span>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        style={{
+          padding:'7px 12px', borderRadius:'8px', fontSize:'13px', fontWeight:'600',
+          border:'1px solid #ddd', background:'white', cursor:'pointer',
+          fontFamily:'Inter, sans-serif', color:'#333',
+          boxShadow:'0 1px 4px rgba(0,0,0,0.08)',
+        }}
+      >
+        {allowOverall && <option value="all">Overall</option>}
+        {seasons.map(s => (
+          <option key={s.id} value={s.id}>{s.name}</option>
+        ))}
+      </select>
     </div>
   )
 }

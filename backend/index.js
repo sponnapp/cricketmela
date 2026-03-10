@@ -78,7 +78,16 @@ if (process.env.NODE_ENV === 'production' && fs.existsSync(legacyDbPath) && !fs.
 }
 
 function openDb() {
-  return new sqlite3.Database(DB_PATH);
+  const db = require('./db');
+  // Return a proxy so existing db.close() calls throughout the code are safe no-ops.
+  // The real connection must stay open for the lifetime of the process.
+  return new Proxy(db, {
+    get(target, prop) {
+      if (prop === 'close') return () => {}; // no-op
+      const val = target[prop];
+      return typeof val === 'function' ? val.bind(target) : val;
+    }
+  });
 }
 
 // ── Startup migrations (run once on server start) ──────────────────────────
@@ -100,12 +109,20 @@ function openDb() {
       else console.log('✅ [MIGRATION] password_reset_tokens table ready');
     });
   });
-  setTimeout(() => db.close(), 500);
 })();
 
 function parseMatchDateTime(value) {
   if (!value) return null;
-  const direct = new Date(value);
+  const raw = String(value).trim();
+
+  // CricAPI commonly sends ISO without timezone (GMT). Interpret as UTC explicitly.
+  const isoNoTz = raw.match(/^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}(?::\d{2})?$/);
+  if (isoNoTz) {
+    const utc = new Date(`${raw}Z`);
+    if (!Number.isNaN(utc.getTime())) return utc;
+  }
+
+  const direct = new Date(raw);
   if (!Number.isNaN(direct.getTime())) return direct;
 
   const monthMap = {
@@ -113,7 +130,7 @@ function parseMatchDateTime(value) {
     jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
   };
 
-  const parts = String(value).split('T');
+  const parts = raw.split('T');
   if (parts.length < 2) return null;
   const [datePart, timePartRaw] = parts;
 
@@ -138,18 +155,23 @@ function parseMatchDateTime(value) {
   }
 
   const timePart = timePartRaw.trim();
-  const timeMatch = timePart.match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i);
+  const timeMatch = timePart.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*(AM|PM))?$/i);
   if (!timeMatch) return null;
   let hour = parseInt(timeMatch[1], 10);
   const minute = parseInt(timeMatch[2], 10);
-  const ampm = timeMatch[3] ? timeMatch[3].toUpperCase() : null;
+  const second = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0;
+  const ampm = timeMatch[4] ? timeMatch[4].toUpperCase() : null;
 
   if (ampm) {
     if (hour === 12) hour = 0;
     if (ampm === 'PM') hour += 12;
   }
 
-  return new Date(year, monthIndex, day, hour, minute, 0, 0);
+  // YYYY-MM-DD + 24h format is treated as UTC (CricAPI GMT); other formats stay local.
+  if (isoDate && !ampm) {
+    return new Date(Date.UTC(year, monthIndex, day, hour, minute, second, 0));
+  }
+  return new Date(year, monthIndex, day, hour, minute, second, 0);
 }
 
 // Initialize database schema (create tables if they don't exist, add missing columns)
@@ -174,14 +196,29 @@ function initializeDatabase() {
       name TEXT
     )`);
 
-    // User-to-season assignments
+    // User-to-season assignments (with per-season balance)
     db.run(`CREATE TABLE IF NOT EXISTS user_seasons (
       user_id INTEGER,
       season_id INTEGER,
+      balance INTEGER DEFAULT 1000,
       UNIQUE(user_id, season_id),
       FOREIGN KEY(user_id) REFERENCES users(id),
       FOREIGN KEY(season_id) REFERENCES seasons(id)
     )`);
+
+    // Migration: Add balance column to user_seasons if it doesn't exist
+    db.all(`PRAGMA table_info(user_seasons)`, (err, columns) => {
+      if (err) { console.error('Error checking user_seasons columns:', err); return; }
+      const hasBalance = columns && columns.some(c => c.name === 'balance');
+      if (!hasBalance) {
+        db.run(`ALTER TABLE user_seasons ADD COLUMN balance INTEGER DEFAULT 1000`, (alterErr) => {
+          if (alterErr) console.log('Note: Could not add balance to user_seasons:', alterErr.message);
+          else console.log('✅ Added balance column to user_seasons table');
+        });
+      } else {
+        console.log('✅ user_seasons.balance column already exists');
+      }
+    });
 
     // Create matches table with venue column
     db.run(`CREATE TABLE IF NOT EXISTS matches (
@@ -205,6 +242,30 @@ function initializeDatabase() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(match_id) REFERENCES matches(id),
       FOREIGN KEY(user_id) REFERENCES users(id)
+    )`);
+
+    // Create predictions table for match predictions feature
+    db.run(`CREATE TABLE IF NOT EXISTS predictions (
+      id INTEGER PRIMARY KEY,
+      match_id INTEGER,
+      user_id INTEGER,
+      toss_winner TEXT,
+      man_of_match TEXT,
+      best_bowler TEXT,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(match_id, user_id),
+      FOREIGN KEY(match_id) REFERENCES matches(id),
+      FOREIGN KEY(user_id) REFERENCES users(id)
+    )`);
+
+    // Create prediction_results table for storing actual match outcomes
+    db.run(`CREATE TABLE IF NOT EXISTS prediction_results (
+      id INTEGER PRIMARY KEY,
+      match_id INTEGER UNIQUE,
+      toss_winner TEXT,
+      man_of_match TEXT,
+      best_bowler TEXT,
+      FOREIGN KEY(match_id) REFERENCES matches(id)
     )`);
 
     // Add venue column if it doesn't exist (migration for old tables)
@@ -289,6 +350,20 @@ function initializeDatabase() {
       }
     });
 
+    // Migration: Add cricapi_series_id column to seasons if it doesn't exist
+    db.all(`PRAGMA table_info(seasons)`, (err, columns) => {
+      if (err) { console.error('Error checking seasons columns:', err); return; }
+      const hasSeriesId = columns && columns.some(c => c.name === 'cricapi_series_id');
+      if (!hasSeriesId) {
+        db.run(`ALTER TABLE seasons ADD COLUMN cricapi_series_id TEXT`, (alterErr) => {
+          if (alterErr) console.log('Note: Could not add cricapi_series_id to seasons:', alterErr.message);
+          else console.log('✅ Added cricapi_series_id column to seasons table');
+        });
+      } else {
+        console.log('✅ seasons.cricapi_series_id column already exists');
+      }
+    });
+
     // Clean up duplicate votes: keep only the latest vote per user per match
     db.all(`
       SELECT match_id, user_id, COUNT(*) as count
@@ -318,18 +393,17 @@ function initializeDatabase() {
     });
     });
   });
-
-  setTimeout(() => db.close(), 1000); // Close after a longer delay to allow all operations
 }
 
 // Call initialization on startup
 initializeDatabase();
 
 /**
+/**
  * Helper function: Process auto-loss votes for newly assigned seasons with completed matches
  * When a user is assigned to a season, for each completed match they haven't voted on:
- * - Charge them 10 points (allow negative balance)
- * - Distribute those points to the winners using 1:1 ratio
+ * - Charge them 10 points from their season balance (allow negative)
+ * - Distribute those points to the winners using 1:1 ratio (season balance)
  */
 function processAutoLossForNewSeasons(userId, newSeasonIds, callback) {
   if (!newSeasonIds || newSeasonIds.length === 0) {
@@ -358,134 +432,74 @@ function processAutoLossForNewSeasons(userId, newSeasonIds, callback) {
           return callback(null);
         }
 
-        // For each completed match, check if this user has voted
         let processed = 0;
 
         matches.forEach(match => {
-          db.get(
-            'SELECT id FROM votes WHERE match_id = ? AND user_id = ?',
-            [match.id, userId],
-            (err2, existingVote) => {
-              if (err2) {
-                console.error('Error checking vote for new season auto-loss:', err2);
-              }
+          db.get('SELECT id FROM votes WHERE match_id = ? AND user_id = ?', [match.id, userId], (err2, existingVote) => {
+            if (err2) console.error('Error checking vote for new season auto-loss:', err2);
 
-              // Only process if user hasn't voted on this match
-              if (!existingVote) {
-                const autoPoints = 10;
-                const losingTeam = match.home_team === match.winner ? match.away_team : match.home_team;
+            if (!existingVote) {
+              const autoPoints = 10;
+              const losingTeam = match.home_team === match.winner ? match.away_team : match.home_team;
+              const seasonId = match.season_id;
 
-                // 1. Deduct balance from user (allow negative)
-                db.run(
-                  'UPDATE users SET balance = balance - ? WHERE id = ?',
-                  [autoPoints, userId],
-                  (err3) => {
-                    if (err3) {
-                      console.error('Error deducting auto-loss balance for new season:', err3);
-                    }
+              // 1. Deduct from user's season balance (allow negative)
+              db.run('UPDATE user_seasons SET balance = balance - ? WHERE user_id = ? AND season_id = ?',
+                [autoPoints, userId, seasonId], (err3) => {
+                  if (err3) console.error('Error deducting auto-loss season balance:', err3);
 
-                    // 2. Create auto-loss vote record
-                    db.run(
-                      'INSERT INTO votes (match_id, user_id, team, points) VALUES (?, ?, ?, ?)',
-                      [match.id, userId, losingTeam, autoPoints],
-                      (err4) => {
-                        if (err4) {
-                          console.error('Error creating auto-loss vote for new season:', err4);
-                        }
+                  // 2. Create auto-loss vote record
+                  db.run('INSERT INTO votes (match_id, user_id, team, points) VALUES (?, ?, ?, ?)',
+                    [match.id, userId, losingTeam, autoPoints], (err4) => {
+                      if (err4) console.error('Error creating auto-loss vote:', err4);
 
-                        // 3. Distribute to existing winners
-                        db.get(
-                          'SELECT SUM(points) as total FROM votes WHERE match_id = ? AND team = ?',
-                          [match.id, match.winner],
-                          (err5, winnerRow) => {
-                            if (err5) {
-                              console.error('Error getting winner points:', err5);
-                              processed++;
-                              if (processed === matches.length) {
-                                db.close();
-                                callback(null);
-                              }
-                              return;
-                            }
-
-                            const totalWinner = winnerRow && winnerRow.total ? Number(winnerRow.total) : 0;
-
-                            if (totalWinner === 0) {
-                              processed++;
-                              if (processed === matches.length) {
-                                db.close();
-                                callback(null);
-                              }
-                              return;
-                            }
-
-                            // Get all winner votes and distribute
-                            db.all(
-                              'SELECT user_id, points FROM votes WHERE match_id = ? AND team = ?',
-                              [match.id, match.winner],
-                              (err6, winnerVotes) => {
-                                if (err6) {
-                                  console.error('Error getting winner votes:', err6);
-                                  processed++;
-                                  if (processed === matches.length) {
-                                    db.close();
-                                    callback(null);
-                                  }
-                                  return;
-                                }
-
-                                if (!winnerVotes || winnerVotes.length === 0) {
-                                  processed++;
-                                  if (processed === matches.length) {
-                                    db.close();
-                                    callback(null);
-                                  }
-                                  return;
-                                }
-
-                                // Distribute the 10 points to winners proportionally
-                                let winnersProcessed = 0;
-                                winnerVotes.forEach(vote => {
-                                  const share = (vote.points / totalWinner) * autoPoints;
-                                  const amountToAdd = Math.round(share);
-
-                                  db.run(
-                                    'UPDATE users SET balance = balance + ? WHERE id = ?',
-                                    [amountToAdd, vote.user_id],
-                                    (err7) => {
-                                      if (err7) {
-                                        console.error('Error distributing winnings to winner:', err7);
-                                      }
-
-                                      winnersProcessed++;
-                                      if (winnersProcessed === winnerVotes.length) {
-                                        processed++;
-                                        if (processed === matches.length) {
-                                          db.close();
-                                          callback(null);
-                                        }
-                                      }
-                                    }
-                                  );
-                                });
-                              }
-                            );
+                      // 3. Distribute to existing winners (add to their season balance)
+                      db.get('SELECT SUM(points) as total FROM votes WHERE match_id = ? AND team = ?',
+                        [match.id, match.winner], (err5, winnerRow) => {
+                          if (err5) {
+                            console.error('Error getting winner points:', err5);
+                            processed++;
+                            if (processed === matches.length) { db.close(); callback(null); }
+                            return;
                           }
-                        );
-                      }
-                    );
-                  }
-                );
-              } else {
-                // User already voted, just count it
-                processed++;
-                if (processed === matches.length) {
-                  db.close();
-                  callback(null);
-                }
-              }
+
+                          const totalWinner = winnerRow && winnerRow.total ? Number(winnerRow.total) : 0;
+                          if (totalWinner === 0) {
+                            processed++;
+                            if (processed === matches.length) { db.close(); callback(null); }
+                            return;
+                          }
+
+                          db.all('SELECT user_id, points FROM votes WHERE match_id = ? AND team = ?',
+                            [match.id, match.winner], (err6, winnerVotes) => {
+                              if (err6 || !winnerVotes || winnerVotes.length === 0) {
+                                processed++;
+                                if (processed === matches.length) { db.close(); callback(null); }
+                                return;
+                              }
+
+                              let winnersProcessed = 0;
+                              winnerVotes.forEach(vote => {
+                                const gain = Math.round((vote.points / totalWinner) * autoPoints);
+                                db.run('UPDATE user_seasons SET balance = balance + ? WHERE user_id = ? AND season_id = ?',
+                                  [gain, vote.user_id, seasonId], (err7) => {
+                                    if (err7) console.error('Error distributing auto-loss gain:', err7);
+                                    winnersProcessed++;
+                                    if (winnersProcessed === winnerVotes.length) {
+                                      processed++;
+                                      if (processed === matches.length) { db.close(); callback(null); }
+                                    }
+                                  });
+                            });
+                            });
+                        });
+                    });
+                });
+            } else {
+              processed++;
+              if (processed === matches.length) { db.close(); callback(null); }
             }
-          );
+          });
         });
       }
     );
@@ -528,11 +542,21 @@ app.get('/api/me', (req, res) => {
 });
 
 // Seasons and matches
+// Public endpoint: all seasons (no auth required, used by Standings)
+app.get('/api/seasons/all', (req, res) => {
+  const db = openDb();
+  db.all('SELECT id, name FROM seasons ORDER BY id ASC', (err, rows) => {
+    db.close();
+    if (err) return res.status(500).json({ error: 'DB error' });
+    res.json(rows || []);
+  });
+});
+
 app.get('/api/seasons', (req, res) => {
   const db = openDb();
   if (req.user && req.user.role !== 'admin') {
     db.all(
-      'SELECT s.* FROM seasons s JOIN user_seasons us ON us.season_id = s.id WHERE us.user_id = ?',
+      'SELECT s.*, us.balance as season_balance FROM seasons s JOIN user_seasons us ON us.season_id = s.id WHERE us.user_id = ?',
       [req.user.id],
       (err, rows) => {
         db.close();
@@ -547,6 +571,40 @@ app.get('/api/seasons', (req, res) => {
     if (err) return res.status(500).json({ error: 'DB error' });
     res.json(rows);
   });
+});
+
+// Get user's balance for a specific season
+app.get('/api/seasons/:id/my-balance', (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+  const seasonId = Number(req.params.id);
+  const db = openDb();
+  db.get('SELECT balance FROM user_seasons WHERE user_id = ? AND season_id = ?',
+    [req.user.id, seasonId], (err, row) => {
+      db.close();
+      if (err) return res.status(500).json({ error: 'DB error' });
+      if (!row) return res.status(404).json({ error: 'Season not assigned to user' });
+      res.json({ balance: row.balance ?? 1000 });
+    });
+});
+
+// Get user's total balance across all seasons (only for currently existing seasons)
+app.get('/api/users/my-total-balance', (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+  const db = openDb();
+  db.get(
+    `SELECT COALESCE(
+      (SELECT SUM(us.balance)
+       FROM user_seasons us
+       JOIN seasons s ON s.id = us.season_id
+       WHERE us.user_id = ?),
+      0) as total_balance`,
+    [req.user.id],
+    (err, row) => {
+      db.close();
+      if (err) return res.status(500).json({ error: 'DB error' });
+      res.json({ balance: row.total_balance ?? 0 });
+    }
+  );
 });
 
 app.get('/api/seasons/:id/matches', (req, res) => {
@@ -638,7 +696,7 @@ app.get('/api/matches/:id/user-vote', (req, res) => {
   );
 });
 
-// Voting endpoint: deduct user balance, insert/update vote (allow replacement before match starts)
+// Voting endpoint: record vote only — no balance change until winner is declared
 app.post('/api/matches/:id/vote', (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
   if (req.user.role === 'admin') return res.status(403).json({ error: 'Admins cannot vote' });
@@ -649,117 +707,323 @@ app.post('/api/matches/:id/vote', (req, res) => {
 
   const db = openDb();
   db.serialize(() => {
-    // Check if match has started and if winner has been set
-    db.get('SELECT scheduled_at, winner FROM matches WHERE id = ?', [matchId], (err, match) => {
+    db.get('SELECT m.scheduled_at, m.winner, m.season_id, m.home_team, m.away_team FROM matches m WHERE m.id = ?', [matchId], (err, match) => {
       if (err) { db.close(); return res.status(500).json({ error: 'DB error' }); }
       if (!match) { db.close(); return res.status(404).json({ error: 'Match not found' }); }
 
-      db.get('SELECT season_id, home_team, away_team FROM matches WHERE id = ?', [matchId], (errSeason, matchMeta) => {
-        if (errSeason) { db.close(); return res.status(500).json({ error: 'DB error' }); }
-        if (!matchMeta) { db.close(); return res.status(404).json({ error: 'Match not found' }); }
-        db.get('SELECT 1 FROM user_seasons WHERE user_id = ? AND season_id = ?', [req.user.id, matchMeta.season_id], (errAssign, allowed) => {
-          if (errAssign) { db.close(); return res.status(500).json({ error: 'DB error' }); }
-          if (!allowed) { db.close(); return res.status(403).json({ error: 'Season not assigned to user' }); }
+      // Check season access
+      db.get('SELECT balance FROM user_seasons WHERE user_id = ? AND season_id = ?', [req.user.id, match.season_id], (errAssign, seasonRow) => {
+        if (errAssign) { db.close(); return res.status(500).json({ error: 'DB error' }); }
+        if (!seasonRow) { db.close(); return res.status(403).json({ error: 'Season not assigned to user' }); }
 
-          // Check if winner has been set - if yes, voting is disabled
-          if (match.winner) {
-            db.close();
-            return res.status(400).json({ error: 'Match winner has been set. Voting is now closed.' });
-          }
+        // Check if winner has been set
+        if (match.winner) {
+          db.close();
+          return res.status(400).json({ error: 'Match winner has been set. Voting is now closed.' });
+        }
 
-          // Check if match has started
-          const matchTime = parseMatchDateTime(match.scheduled_at);
-          if (!matchTime) {
-            db.close();
-            return res.status(400).json({ error: 'Invalid match schedule. Please contact admin.' });
-          }
-          const now = new Date();
-          const cutoffTime = new Date(matchTime.getTime() - 30 * 60 * 1000);
-          if (now >= cutoffTime) {
-            db.close();
-            return res.status(400).json({ error: 'Voting closed 30 minutes before match start.' });
-          }
+        // Check voting window (30 min cutoff)
+        const matchTime = parseMatchDateTime(match.scheduled_at);
+        if (!matchTime) { db.close(); return res.status(400).json({ error: 'Invalid match schedule. Please contact admin.' }); }
+        const cutoffTime = new Date(matchTime.getTime() - 30 * 60 * 1000);
+        if (new Date() >= cutoffTime) { db.close(); return res.status(400).json({ error: 'Voting closed 30 minutes before match start.' }); }
 
-          // Check if user already voted for this match
-          db.get('SELECT id, points, team FROM votes WHERE match_id = ? AND user_id = ?', [matchId, req.user.id], (err2, existingVote) => {
-            if (err2) { db.close(); return res.status(500).json({ error: 'DB error' }); }
+        // Check if vote points exceed season balance
+        const seasonBalance = seasonRow.balance ?? 1000;
+        db.get('SELECT id, points, team FROM votes WHERE match_id = ? AND user_id = ?', [matchId, req.user.id], (err2, existingVote) => {
+          if (err2) { db.close(); return res.status(500).json({ error: 'DB error' }); }
 
-            if (existingVote) {
-              // User already voted - check if they're changing the vote
-              if (existingVote.team === team && parseInt(existingVote.points) === points) {
-                // Same vote - just return success
-                db.get('SELECT balance FROM users WHERE id = ?', [req.user.id], (err3, user) => {
-                  db.close();
-                  if (err3) return res.status(500).json({ error: 'DB error' });
-                  return res.json({ ok: true, balance: user.balance, message: 'Vote unchanged' });
-                });
-                return;
-              }
-
-              // Changing vote - need to refund old points and deduct new points
-              const pointsDifference = points - parseInt(existingVote.points);
-
-              db.get('SELECT balance FROM users WHERE id = ?', [req.user.id], (err3, user) => {
-                if (err3) { db.close(); return res.status(500).json({ error: 'DB error' }); }
-
-                const newBalance = user.balance - pointsDifference;
-                if (newBalance < 0) {
-                  db.close();
-                  return res.status(400).json({ error: 'Insufficient balance to change vote' });
-                }
-
-                // Update balance
-                db.run('UPDATE users SET balance = ? WHERE id = ?', [newBalance, req.user.id], function(err4) {
-                  if (err4) { db.close(); return res.status(500).json({ error: 'DB error' }); }
-
-                  // Update the vote (delete old and insert new to ensure fresh data in odds)
-                  db.run('DELETE FROM votes WHERE id = ?', [existingVote.id], function(err5) {
-                    if (err5) { db.close(); return res.status(500).json({ error: 'DB error' }); }
-
-                    // Insert new vote with updated points
-                    db.run('INSERT INTO votes (match_id, user_id, team, points) VALUES (?, ?, ?, ?)', [matchId, req.user.id, team, points], function(err6) {
-                      if (err6) { db.close(); return res.status(500).json({ error: 'DB error' }); }
-
-                      db.get('SELECT balance FROM users WHERE id = ?', [req.user.id], (err7, r2) => {
-                        db.close();
-                        if (err7) return res.status(500).json({ error: 'DB error' });
-                        return res.json({ ok: true, balance: r2.balance, message: 'Vote updated' });
-                      });
-                    });
-                  });
-                });
-              });
-              return;
+          if (existingVote) {
+            // Same vote — no change
+            if (existingVote.team === team && parseInt(existingVote.points) === points) {
+              db.close();
+              return res.json({ ok: true, season_balance: seasonBalance, balance: req.user.balance, message: 'Vote unchanged' });
             }
 
-            // No existing vote - place new vote
-            db.get('SELECT balance FROM users WHERE id = ?', [req.user.id], (err3, user) => {
+            // Changing vote — check new points against season balance
+            if (points > seasonBalance) {
+              db.close();
+              return res.status(400).json({ error: `Insufficient season balance. Available: ${seasonBalance} pts` });
+            }
+
+            // Update vote (delete old, insert new)
+            db.run('DELETE FROM votes WHERE id = ?', [existingVote.id], function(err3) {
               if (err3) { db.close(); return res.status(500).json({ error: 'DB error' }); }
-              const balance = user.balance;
-              if (balance < points) { db.close(); return res.status(400).json({ error: 'Insufficient balance' }); }
-
-              // Deduct balance
-              db.run('UPDATE users SET balance = balance - ? WHERE id = ?', [points, req.user.id], function(err4) {
+              db.run('INSERT INTO votes (match_id, user_id, team, points) VALUES (?, ?, ?, ?)', [matchId, req.user.id, team, points], function(err4) {
                 if (err4) { db.close(); return res.status(500).json({ error: 'DB error' }); }
-
-                // Insert vote
-                db.run('INSERT INTO votes (match_id, user_id, team, points) VALUES (?, ?, ?, ?)', [matchId, req.user.id, team, points], function(err5) {
-                  if (err5) { db.close(); return res.status(500).json({ error: 'DB error' }); }
-
-                  db.get('SELECT balance FROM users WHERE id = ?', [req.user.id], (err6, r2) => {
-                    db.close();
-                    if (err6) return res.status(500).json({ error: 'DB error' });
-                    res.json({ ok: true, balance: r2.balance, message: 'Vote placed' });
-                  });
-                });
+                db.close();
+                return res.json({ ok: true, season_balance: seasonBalance, balance: req.user.balance, message: 'Vote updated' });
               });
             });
+            return;
+          }
+
+          // New vote — check points against season balance
+          if (points > seasonBalance) {
+            db.close();
+            return res.status(400).json({ error: `Insufficient season balance. Available: ${seasonBalance} pts` });
+          }
+
+          db.run('INSERT INTO votes (match_id, user_id, team, points) VALUES (?, ?, ?, ?)', [matchId, req.user.id, team, points], function(err3) {
+            if (err3) { db.close(); return res.status(500).json({ error: 'DB error' }); }
+            db.close();
+            res.json({ ok: true, season_balance: seasonBalance, balance: req.user.balance, message: 'Vote placed' });
           });
         });
       });
     });
   });
 });
+
+// ── CricAPI proxy endpoints ───────────────────────────────────────────────────
+
+const CRICAPI_KEY = '491b7c88-16e4-428d-b2c9-99b687267947';
+
+// Prefer known-good series IDs when CricAPI returns duplicate names with inconsistent IDs.
+const CRICAPI_SERIES_ID_OVERRIDES = {
+  "icc men's t20 world cup 2026": '0cdf6736-ad9b-4e95-a647-5ee3a99c5510'
+};
+
+// GET /api/admin/cricapi/series  – fetch series for next 6 months
+app.get('/api/admin/cricapi/series', requireRole('admin', 'superuser'), (req, res) => {
+  const https = require('https');
+  const search = String(req.query.search || '').trim();
+  const url = `https://api.cricapi.com/v1/series?apikey=${CRICAPI_KEY}&offset=0&search=${encodeURIComponent(search)}`;
+  https.get(url, (apiRes) => {
+    let data = '';
+    apiRes.on('data', chunk => data += chunk);
+    apiRes.on('end', () => {
+      try {
+        const parsed = JSON.parse(data);
+        if (!parsed.data) return res.json({ series: [] });
+
+        // If admin explicitly searches, do not hide older series by date window.
+        const sourceList = Array.isArray(parsed.data) ? parsed.data : [];
+        const now = new Date();
+        const sixMonthsLater = new Date(now);
+        sixMonthsLater.setMonth(sixMonthsLater.getMonth() + 6);
+
+        const filtered = search
+          ? sourceList
+          : sourceList.filter(s => {
+              if (!s.startDate) return true; // no date info — include it
+              const raw = String(s.startDate).trim();
+              const isoMatch = raw.match(/^\d{4}-\d{2}-\d{2}$/);
+              if (isoMatch) {
+                const startDate = new Date(raw);
+                if (isNaN(startDate.getTime())) return true; // unparseable — include
+                const thirtyDaysAgo = new Date(now);
+                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                return startDate >= thirtyDaysAgo && startDate <= sixMonthsLater;
+              }
+              // Partial date like "Feb 15" — include when we cannot reliably place the year.
+              return true;
+            });
+
+        // De-duplicate by series name (prefer entries with more complete data)
+        const nameMap = new Map();
+        filtered.forEach(s => {
+          const name = (s.name || '').trim();
+          if (!name) return;
+
+          const existing = nameMap.get(name);
+          if (!existing) {
+            nameMap.set(name, s);
+          } else {
+            // Prefer entry with totalMatches data, or earlier start date
+            const hasTotalMatches = s.totalMatches && s.totalMatches > 0;
+            const existingHasTotalMatches = existing.totalMatches && existing.totalMatches > 0;
+
+            if (hasTotalMatches && !existingHasTotalMatches) {
+              nameMap.set(name, s);
+            } else if (!hasTotalMatches && existingHasTotalMatches) {
+              // Keep existing
+            } else {
+              // Both have or don't have totalMatches - prefer entry with full ISO date
+              const hasFullDate = s.startDate && /^\d{4}-\d{2}-\d{2}$/.test(s.startDate);
+              const existingHasFullDate = existing.startDate && /^\d{4}-\d{2}-\d{2}$/.test(existing.startDate);
+              if (hasFullDate && !existingHasFullDate) {
+                nameMap.set(name, s);
+              }
+            }
+          }
+        });
+
+        const unique = Array.from(nameMap.values()).map((s) => {
+          const key = String(s.name || '').trim().toLowerCase();
+          const overrideId = CRICAPI_SERIES_ID_OVERRIDES[key];
+          return overrideId ? { ...s, id: overrideId } : s;
+        });
+
+        res.json({ series: unique, total: unique.length });
+      } catch (e) {
+        res.status(500).json({ error: 'Failed to parse CricAPI response' });
+      }
+    });
+  }).on('error', err => {
+    res.status(500).json({ error: 'Failed to connect to CricAPI: ' + err.message });
+  });
+});
+
+// GET /api/admin/cricapi/series/:id/matches  – fetch matches for a specific series
+app.get('/api/admin/cricapi/series/:id/matches', requireRole('admin', 'superuser'), (req, res) => {
+  const https = require('https');
+  const seriesId = req.params.id;
+  const seriesName = String(req.query.name || '').trim();
+
+  function getJson(url, done) {
+    https.get(url, (apiRes) => {
+      let data = '';
+      apiRes.on('data', chunk => data += chunk);
+      apiRes.on('end', () => {
+        try {
+          done(null, JSON.parse(data));
+        } catch (e) {
+          done(e);
+        }
+      });
+    }).on('error', done);
+  }
+
+  function fetchSeriesInfo(id, done) {
+    const url = `https://api.cricapi.com/v1/series_info?apikey=${CRICAPI_KEY}&id=${encodeURIComponent(id)}`;
+    getJson(url, (err, parsed) => {
+      if (err) return done(err);
+      const info = parsed && parsed.data ? parsed.data : null;
+      const matchList = (info && Array.isArray(info.matchList)) ? info.matchList : [];
+      done(null, { info, matchList });
+    });
+  }
+
+  function findAlternateSeriesIds(done) {
+    if (!seriesName) return done(null, []);
+    const url = `https://api.cricapi.com/v1/series?apikey=${CRICAPI_KEY}&offset=0&search=${encodeURIComponent(seriesName)}`;
+    getJson(url, (err, parsed) => {
+      if (err) return done(null, []);
+      const list = Array.isArray(parsed && parsed.data) ? parsed.data : [];
+      const nameKey = seriesName.toLowerCase();
+      const ids = [];
+      const seen = new Set([seriesId]);
+      for (const s of list) {
+        const sName = String((s && s.name) || '').trim().toLowerCase();
+        const sId = String((s && s.id) || '').trim();
+        if (!sId || seen.has(sId)) continue;
+        if (sName === nameKey) {
+          seen.add(sId);
+          ids.push(sId);
+        }
+      }
+      done(null, ids.slice(0, 10));
+    });
+  }
+
+  function fetchFromMatchesApi(seriesInfo) {
+    // Fallback: use /matches endpoint filtered by series_id
+    let allMatches = [];
+    let offset = 0;
+    const fetchPage = () => {
+      const url = `https://api.cricapi.com/v1/matches?apikey=${CRICAPI_KEY}&offset=${offset}`;
+      https.get(url, (apiRes) => {
+        let data = '';
+        apiRes.on('data', chunk => data += chunk);
+        apiRes.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            const pageData = parsed.data || [];
+            const filtered = pageData.filter(m => m.series_id === seriesId);
+            allMatches = allMatches.concat(filtered);
+            // If there are more pages and we found some, try next (max 3 pages)
+            if (pageData.length > 0 && offset < 40) {
+              offset += 25;
+              fetchPage();
+            } else {
+              res.json({ matches: allMatches, seriesInfo: seriesInfo || {} });
+            }
+          } catch (e) {
+            res.json({ matches: allMatches, seriesInfo: seriesInfo || {} });
+          }
+        });
+      }).on('error', () => {
+        res.json({ matches: allMatches, seriesInfo: seriesInfo || {} });
+      });
+    };
+    fetchPage();
+  }
+
+  function tryAlternateIds(ids, baseSeriesInfo, idx) {
+    if (!ids || idx >= ids.length) {
+      return fetchFromMatchesApi(baseSeriesInfo);
+    }
+    fetchSeriesInfo(ids[idx], (errAlt, alt) => {
+      if (!errAlt && alt && alt.matchList.length > 0) {
+        return res.json({
+          matches: alt.matchList,
+          seriesInfo: alt.info || baseSeriesInfo || {},
+          resolvedSeriesId: ids[idx]
+        });
+      }
+      tryAlternateIds(ids, baseSeriesInfo, idx + 1);
+    });
+  }
+
+  fetchSeriesInfo(seriesId, (err, primary) => {
+    if (err) {
+      return res.status(500).json({ error: 'Failed to connect to CricAPI: ' + err.message });
+    }
+
+    if (primary && primary.matchList.length > 0) {
+      return res.json({ matches: primary.matchList, seriesInfo: primary.info || {} });
+    }
+
+    findAlternateSeriesIds((_, altIds) => {
+      if (altIds && altIds.length > 0) {
+        return tryAlternateIds(altIds, primary ? primary.info : null, 0);
+      }
+      return fetchFromMatchesApi(primary ? primary.info : null);
+    });
+  });
+});
+
+// POST /api/admin/cricapi/import-season – create season + import selected matches
+app.post('/api/admin/cricapi/import-season', requireRole('admin'), (req, res) => {
+  const { seasonName, matches: matchesToImport, seriesId } = req.body;
+  if (!seasonName) return res.status(400).json({ error: 'seasonName required' });
+  if (!Array.isArray(matchesToImport) || matchesToImport.length === 0) {
+    return res.status(400).json({ error: 'At least one match required' });
+  }
+
+  const db = openDb();
+  db.serialize(() => {
+    // Create the season (with optional cricapi_series_id)
+    db.run('INSERT INTO seasons (name, cricapi_series_id) VALUES (?, ?)', [seasonName, seriesId || null], function(err) {
+      if (err) {
+        db.close();
+        return res.status(500).json({ error: 'Failed to create season: ' + err.message });
+      }
+      const seasonId = this.lastID;
+      const stmt = db.prepare(
+        'INSERT INTO matches (season_id, home_team, away_team, scheduled_at, venue) VALUES (?, ?, ?, ?, ?)'
+      );
+      let inserted = 0;
+      let errors = [];
+      for (const m of matchesToImport) {
+        try {
+          stmt.run([seasonId, m.home_team, m.away_team, m.scheduled_at || '', m.venue || '']);
+          inserted++;
+        } catch (e) {
+          errors.push(e.message);
+        }
+      }
+      stmt.finalize(err2 => {
+        db.close();
+        if (err2) return res.status(500).json({ error: 'Failed to insert matches: ' + err2.message });
+        res.status(201).json({ ok: true, seasonId, seasonName, inserted, errors });
+      });
+    });
+  });
+});
+
+// ── End CricAPI proxy endpoints ───────────────────────────────────────────────
 
 // Admin endpoints: create season
 app.post('/api/admin/seasons', requireRole('admin'), (req, res) => {
@@ -819,16 +1083,24 @@ app.delete('/api/admin/seasons/:id', requireRole('admin'), (req, res) => {
             return res.status(500).json({ error: 'Failed to delete matches' });
           }
 
-          // Delete the season
-          db.run('DELETE FROM seasons WHERE id = ?', [id], function(err3) {
-            db.close();
-            if (err3) {
-              return res.status(500).json({ error: 'Failed to delete season' });
+          // Delete all user_seasons assignments for this season
+          db.run('DELETE FROM user_seasons WHERE season_id = ?', [id], function(err2b) {
+            if (err2b) {
+              db.close();
+              return res.status(500).json({ error: 'Failed to delete user season assignments' });
             }
-            if (this.changes === 0) {
-              return res.status(404).json({ error: 'Season not found' });
-            }
-            res.json({ ok: true, message: 'Season deleted successfully' });
+
+            // Delete the season
+            db.run('DELETE FROM seasons WHERE id = ?', [id], function(err3) {
+              db.close();
+              if (err3) {
+                return res.status(500).json({ error: 'Failed to delete season' });
+              }
+              if (this.changes === 0) {
+                return res.status(404).json({ error: 'Season not found' });
+              }
+              res.json({ ok: true, message: 'Season deleted successfully' });
+            });
           });
         });
       });
@@ -844,7 +1116,7 @@ app.post('/api/admin/users', requireRole('admin'), (req, res) => {
 
   const db = openDb();
   const userRole = role || 'picker';
-  const userBalance = balance ?? 500;
+  const userBalance = balance ?? 1000;
   const displayName = display_name || username;
   const seasonIds = Array.isArray(season_ids) ? season_ids.map(Number).filter(Boolean) : [];
 
@@ -859,8 +1131,9 @@ app.post('/api/admin/users', requireRole('admin'), (req, res) => {
         }
         let pending = seasonIds.length;
         seasonIds.forEach(seasonId => {
-          db.run('INSERT OR IGNORE INTO user_seasons (user_id, season_id) VALUES (?, ?)', [userId, seasonId], () => {
-            pending -= 1;
+          // Set season-specific balance equal to the user's initial balance
+          db.run('INSERT OR REPLACE INTO user_seasons (user_id, season_id, balance) VALUES (?, ?, ?)', [userId, seasonId, userBalance], () => {
+            pending--;
             if (pending === 0) {
               db.close();
               res.status(201).json({ id: userId, username, display_name: displayName, role: userRole, balance: userBalance, approved: 1 });
@@ -926,10 +1199,10 @@ app.post('/api/admin/users/:id/approve', requireRole('admin'), (req, res) => {
               console.log('Error deleting old user_seasons:', delErr);
             }
 
-            // Insert new season assignments
+            // Insert new season assignments with per-season balance
             let completed = 0;
             season_ids.forEach(seasonId => {
-              db.run('INSERT OR IGNORE INTO user_seasons (user_id, season_id) VALUES (?, ?)', [id, seasonId], function(insErr) {
+              db.run('INSERT OR REPLACE INTO user_seasons (user_id, season_id, balance) VALUES (?, ?, ?)', [id, seasonId, balance], function(insErr) {
                 completed++;
                 if (insErr) {
                   console.log('Error assigning season:', insErr);
@@ -1242,7 +1515,6 @@ app.post('/api/signup', (req, res) => {
     });
 });
 
-
 // Login endpoint: username + password auth
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
@@ -1492,11 +1764,41 @@ app.get('/auth/status', (req, res) => {
 
 app.get('/api/standings', (req, res) => {
   const db = openDb();
-  db.all("SELECT id, username, display_name, role, balance FROM users WHERE role != 'admin' AND approved = 1 ORDER BY balance DESC", (err, rows) => {
-    db.close();
-    if (err) return res.status(500).json({ error: 'DB error' });
-    res.json(rows || []);
-  });
+  const seasonId = req.query.season_id ? Number(req.query.season_id) : null;
+
+  if (seasonId) {
+    // Season-specific standings: use user_seasons.balance for that season
+    db.all(`
+      SELECT u.id, u.username, u.display_name, u.role, us.balance
+      FROM users u
+      JOIN user_seasons us ON us.user_id = u.id
+      WHERE us.season_id = ? AND u.role != 'admin' AND u.approved = 1
+      ORDER BY us.balance DESC
+    `, [seasonId], (err, rows) => {
+      db.close();
+      if (err) return res.status(500).json({ error: 'DB error' });
+      res.json(rows || []);
+    });
+  } else {
+    // Overall standings: sum of all season balances (only for currently existing seasons)
+    db.all(`
+      SELECT u.id, u.username, u.display_name, u.role,
+        COALESCE(
+          (SELECT SUM(us.balance)
+           FROM user_seasons us
+           JOIN seasons s ON s.id = us.season_id
+           WHERE us.user_id = u.id),
+          u.balance
+        ) as balance
+      FROM users u
+      WHERE u.role != 'admin' AND u.approved = 1
+      ORDER BY balance DESC
+    `, (err, rows) => {
+      db.close();
+      if (err) return res.status(500).json({ error: 'DB error' });
+      res.json(rows || []);
+    });
+  }
 });
 
 // Get user's vote history
@@ -1504,9 +1806,12 @@ app.get('/api/users/:userId/votes', (req, res) => {
   const userId = Number(req.params.userId);
   const db = openDb();
   db.all(`
-    SELECT v.id, v.match_id, v.team, v.points, v.created_at, m.home_team, m.away_team, m.winner, m.scheduled_at
+    SELECT v.id, v.match_id, v.team, v.points, v.created_at,
+           m.home_team, m.away_team, m.winner, m.scheduled_at,
+           m.season_id, s.name as season_name
     FROM votes v
     JOIN matches m ON v.match_id = m.id
+    LEFT JOIN seasons s ON s.id = m.season_id
     WHERE v.user_id = ?
     ORDER BY m.scheduled_at ASC
   `, [userId], (err, rows) => {
@@ -1583,52 +1888,54 @@ app.delete('/api/admin/matches/:id', requireRole('admin'), (req, res) => {
   const id = Number(req.params.id);
   const db = openDb();
   db.serialize(() => {
-    // First, refund all users who voted on this match
-    db.all('SELECT user_id, points FROM votes WHERE match_id = ?', [id], (err, votes) => {
-      if (err) {
-        db.close();
-        return res.status(500).json({ error: 'DB error: ' + err.message });
-      }
+    db.get('SELECT season_id, winner FROM matches WHERE id = ?', [id], (errM, matchRow) => {
+      if (errM) { db.close(); return res.status(500).json({ error: 'DB error' }); }
+      if (!matchRow) { db.close(); return res.status(404).json({ error: 'Match not found' }); }
 
-      if (!votes || votes.length === 0) {
-        // No votes to refund, just delete the match
-        db.run('DELETE FROM matches WHERE id = ?', [id], function(err2) {
-          db.close();
-          if (err2) return res.status(500).json({ error: 'DB error: ' + err2.message });
-          if (this.changes === 0) return res.status(404).json({ error: 'Match not found' });
-          res.json({ ok: true, message: 'Match deleted successfully' });
-        });
-        return;
-      }
+      db.all('SELECT user_id, points, team FROM votes WHERE match_id = ?', [id], (err, votes) => {
+        if (err) { db.close(); return res.status(500).json({ error: 'DB error: ' + err.message }); }
 
-      // Refund all users
-      let processed = 0;
-      votes.forEach(vote => {
-        db.run('UPDATE users SET balance = balance + ? WHERE id = ?', [vote.points, vote.user_id], function(err2) {
-          processed += 1;
-          if (processed === votes.length) {
-            // All refunds done, delete votes and then the match
-            db.run('DELETE FROM votes WHERE match_id = ?', [id], function(err3) {
-              if (err3) {
-                db.close();
-                return res.status(500).json({ error: 'Failed to delete votes: ' + err3.message });
-              }
-              // Finally, delete the match
-              db.run('DELETE FROM matches WHERE id = ?', [id], function(err4) {
-                db.close();
-                if (err4) return res.status(500).json({ error: 'Failed to delete match: ' + err4.message });
-                if (this.changes === 0) return res.status(404).json({ error: 'Match not found' });
-                res.json({ ok: true, message: 'Match deleted and balances refunded', votesRefunded: votes.length });
-              });
+        const doDelete = () => {
+          db.run('DELETE FROM votes WHERE match_id = ?', [id], function(err3) {
+            if (err3) { db.close(); return res.status(500).json({ error: 'Failed to delete votes: ' + err3.message }); }
+            db.run('DELETE FROM matches WHERE id = ?', [id], function(err4) {
+              db.close();
+              if (err4) return res.status(500).json({ error: 'Failed to delete match: ' + err4.message });
+              res.json({ ok: true, message: 'Match deleted successfully' });
             });
-          }
-        });
+          });
+        };
+
+        // If winner was set, reverse the season balance changes first
+        if (matchRow.winner) {
+          const winner = matchRow.winner;
+          const seasonId = matchRow.season_id;
+          const winnerVotes = votes.filter(v => v.team === winner);
+          const loserVotes = votes.filter(v => v.team !== winner);
+          const totalWinner = winnerVotes.reduce((s, v) => s + v.points, 0);
+          const totalLoser = loserVotes.reduce((s, v) => s + v.points, 0);
+          let done = 0;
+          const total = winnerVotes.length + loserVotes.length;
+          if (total === 0) { doDelete(); return; }
+          winnerVotes.forEach(v => {
+            const gain = Math.round((v.points / totalWinner) * totalLoser);
+            db.run('UPDATE user_seasons SET balance = balance - ? WHERE user_id = ? AND season_id = ?',
+              [gain, v.user_id, seasonId], () => { done++; if (done === total) doDelete(); });
+          });
+          loserVotes.forEach(v => {
+            db.run('UPDATE user_seasons SET balance = balance + ? WHERE user_id = ? AND season_id = ?',
+              [v.points, v.user_id, seasonId], () => { done++; if (done === total) doDelete(); });
+          });
+        } else {
+          // No winner set — votes never touched balances, just delete
+          doDelete();
+        }
       });
     });
   });
 });
 
-// Admin set match winner and distribute points
+// Admin set match winner and distribute points (using season balances)
 app.post('/api/admin/matches/:id/winner', requireRole(['admin', 'superuser']), (req, res) => {
   const id = Number(req.params.id);
   const { winner } = req.body;
@@ -1641,6 +1948,7 @@ app.post('/api/admin/matches/:id/winner', requireRole(['admin', 'superuser']), (
       if (!match) { db.close(); return res.status(404).json({ error: 'Match not found' }); }
 
       const losingTeam = match.home_team === winner ? match.away_team : match.home_team;
+      const seasonId = match.season_id;
 
       // Get all users assigned to this season (non-admin, approved)
       db.all(`
@@ -1648,7 +1956,7 @@ app.post('/api/admin/matches/:id/winner', requireRole(['admin', 'superuser']), (
         FROM users u
         JOIN user_seasons us ON us.user_id = u.id
         WHERE us.season_id = ? AND u.role != 'admin' AND u.approved = 1
-      `, [match.season_id], (errUsers, assignedUsers) => {
+      `, [seasonId], (errUsers, assignedUsers) => {
         if (errUsers) { db.close(); return res.status(500).json({ error: 'DB error' }); }
 
         // Get all users who voted for this match
@@ -1669,32 +1977,67 @@ app.post('/api/admin/matches/:id/winner', requireRole(['admin', 'superuser']), (
               db.get('SELECT SUM(points) as total FROM votes WHERE match_id = ? AND team = ?', [id, winner], (err2, winnerRow) => {
                 if (err2) { db.close(); return res.status(500).json({ error: 'DB error' }); }
                 const totalWinner = winnerRow && winnerRow.total ? Number(winnerRow.total) : 0;
-                // update match winner
+
+                // update match winner first
                 db.run('UPDATE matches SET winner = ? WHERE id = ?', [winner, id], function(err3) {
                   if (err3) { db.close(); return res.status(500).json({ error: 'DB error' }); }
-                  if (totalLoser === 0 || totalWinner === 0) {
-                    // nothing to distribute (either no losers or no winners), just finish
-                    db.close();
-                    return res.json({ ok: true, distributed: 0, autoLoss: nonVotedUsers.length });
-                  }
-                  // For each winner vote, compute payout = stake + (stake/totalWinner)*totalLoser
-                  db.all('SELECT id, user_id, points FROM votes WHERE match_id = ? AND team = ?', [id, winner], (err4, winnerVotes) => {
-                    if (err4) { db.close(); return res.status(500).json({ error: 'DB error' }); }
-                    const payouts = winnerVotes.map(v => ({ user_id: v.user_id, stake: v.points, share: (v.points / totalWinner) * totalLoser }));
-                    // Apply payouts (add stake back + share), rounded to whole numbers
-                    const ops = payouts.length;
-                    let done = 0;
-                    payouts.forEach(p => {
-                      const amount = Math.round(p.stake + p.share); // return stake + winnings, rounded to whole number
-                      db.run('UPDATE users SET balance = balance + ? WHERE id = ?', [amount, p.user_id], function(err5) {
-                        if (err5) console.error('Error updating user balance', err5);
-                        done += 1;
-                        if (done === ops) {
-                          // finished
-                          db.close();
-                          return res.json({ ok: true, distributed: totalLoser, autoLoss: nonVotedUsers.length });
-                        }
+
+                  // Deduct loser season balances
+                  db.all('SELECT user_id, points FROM votes WHERE match_id = ? AND team != ?', [id, winner], (errLosers, loserVotes) => {
+                    if (errLosers) { db.close(); return res.status(500).json({ error: 'DB error' }); }
+
+                    if (totalLoser === 0 || totalWinner === 0) {
+                      // Deduct losers even if no winners (or no losers if no losers)
+                      if ((loserVotes || []).length === 0) {
+                        db.close();
+                        return res.json({ ok: true, distributed: 0, autoLoss: nonVotedUsers.length });
+                      }
+                      // Still deduct loser season balances
+                      let losersProcessed = 0;
+                      loserVotes.forEach(v => {
+                        db.run('UPDATE user_seasons SET balance = balance - ? WHERE user_id = ? AND season_id = ?',
+                          [v.points, v.user_id, seasonId], () => { losersProcessed++; if (losersProcessed === loserVotes.length) { db.close(); return res.json({ ok: true, distributed: 0, autoLoss: nonVotedUsers.length }); } });
                       });
+                      return;
+                    }
+
+                    // Deduct loser season balances
+                    let losersProcessed = 0;
+                    const afterLosersDeducted = () => {
+                      // For each winner vote, compute net gain = (stake/totalWinner)*totalLoser (rounded)
+                      db.all('SELECT id, user_id, points FROM votes WHERE match_id = ? AND team = ?', [id, winner], (err4, winnerVotes) => {
+                        if (err4) { db.close(); return res.status(500).json({ error: 'DB error' }); }
+                        const payouts = winnerVotes.map(v => ({
+                          user_id: v.user_id,
+                          gain: Math.round((v.points / totalWinner) * totalLoser)
+                        }));
+                        const ops = payouts.length;
+                        let done = 0;
+                        payouts.forEach(p => {
+                          // Add winner's gain to their season balance
+                          db.run('UPDATE user_seasons SET balance = balance + ? WHERE user_id = ? AND season_id = ?',
+                            [p.gain, p.user_id, seasonId], function(err5) {
+                              if (err5) console.error('Error updating season balance for winner', err5);
+                              done++;
+                              if (done === ops) {
+                                db.close();
+                                return res.json({ ok: true, distributed: totalLoser, autoLoss: nonVotedUsers.length });
+                              }
+                            });
+                        });
+                      });
+                    };
+
+                    if (loserVotes.length === 0) {
+                      afterLosersDeducted();
+                      return;
+                    }
+                    loserVotes.forEach(v => {
+                      db.run('UPDATE user_seasons SET balance = balance - ? WHERE user_id = ? AND season_id = ?',
+                        [v.points, v.user_id, seasonId], () => {
+                          losersProcessed++;
+                          if (losersProcessed === loserVotes.length) afterLosersDeducted();
+                        });
                     });
                   });
                 });
@@ -1707,22 +2050,19 @@ app.post('/api/admin/matches/:id/winner', requireRole(['admin', 'superuser']), (
             return;
           }
 
-          // Create auto-loss votes
+          // Create auto-loss votes and deduct season balances (allow negative)
           nonVotedUsers.forEach(user => {
             const autoPoints = 10;
-            // Deduct balance (allow negative)
-            db.run('UPDATE users SET balance = balance - ? WHERE id = ?', [autoPoints, user.id], (errBal) => {
-              if (errBal) console.error('Error deducting auto-loss balance:', errBal);
-              // Insert auto-loss vote
-              db.run('INSERT INTO votes (match_id, user_id, team, points) VALUES (?, ?, ?, ?)',
-                [id, user.id, losingTeam, autoPoints], (errVote) => {
-                  if (errVote) console.error('Error creating auto-loss vote:', errVote);
-                  autoVotesPending -= 1;
-                  if (autoVotesPending === 0) {
-                    continueWithDistribution();
-                  }
-                });
-            });
+            db.run('UPDATE user_seasons SET balance = balance - ? WHERE user_id = ? AND season_id = ?',
+              [autoPoints, user.id, seasonId], (errBal) => {
+                if (errBal) console.error('Error deducting auto-loss season balance:', errBal);
+                db.run('INSERT INTO votes (match_id, user_id, team, points) VALUES (?, ?, ?, ?)',
+                  [id, user.id, losingTeam, autoPoints], (errVote) => {
+                    if (errVote) console.error('Error creating auto-loss vote:', errVote);
+                    autoVotesPending--;
+                    if (autoVotesPending === 0) continueWithDistribution();
+                  });
+              });
           });
         });
       });
@@ -1730,69 +2070,88 @@ app.post('/api/admin/matches/:id/winner', requireRole(['admin', 'superuser']), (
   });
 });
 
-
-// Admin: Clear votes and odds for a specific match (returns user balances)
+// Admin: Clear votes and odds for a specific match
+// Since votes no longer deduct balance on placement, we just delete the vote records.
+// If the match already has a winner (balance was already settled), we also reverse the season balance changes.
 app.post('/api/admin/matches/:id/clear-votes', requireRole('admin'), (req, res) => {
   const matchId = Number(req.params.id);
   if (!matchId) return res.status(400).json({ error: 'matchId required' });
 
   const db = openDb();
   db.serialize(() => {
-    // Get all votes for this match to refund balances
-    db.all('SELECT user_id, points FROM votes WHERE match_id = ?', [matchId], (err1, votes) => {
-      if (err1) { db.close(); return res.status(500).json({ error: 'Failed to fetch votes: ' + err1.message }); }
+    // Get match info (to check if winner already set and get season)
+    db.get('SELECT season_id, winner FROM matches WHERE id = ?', [matchId], (errM, matchRow) => {
+      if (errM) { db.close(); return res.status(500).json({ error: 'DB error' }); }
+      if (!matchRow) { db.close(); return res.status(404).json({ error: 'Match not found' }); }
 
-      // If no votes, just return success
-      if (!votes || votes.length === 0) {
-        db.close();
-        return res.json({ ok: true, message: 'No votes to clear', refunded: 0 });
-      }
+      db.all('SELECT user_id, points, team FROM votes WHERE match_id = ?', [matchId], (err, votes) => {
+        if (err) { db.close(); return res.status(500).json({ error: 'DB error: ' + err.message }); }
 
-      // Refund all users for their votes on this match
-      let refundTotal = 0;
-      let processed = 0;
+        if (!votes || votes.length === 0) {
+          db.close();
+          return res.json({ ok: true, message: 'No votes to clear', refunded: 0 });
+        }
 
-      votes.forEach(vote => {
-        refundTotal += vote.points;
-        db.run('UPDATE users SET balance = balance + ? WHERE id = ?', [vote.points, vote.user_id], function(err2) {
-          processed += 1;
-          if (processed === votes.length) {
-            // All refunds done, now delete the votes
-            db.run('DELETE FROM votes WHERE match_id = ?', [matchId], function(err3) {
-              db.close();
-              if (err3) {
-                return res.status(500).json({ error: 'Failed to delete votes: ' + err3.message });
-              }
-              res.json({ ok: true, message: 'Votes cleared and balances refunded', refunded: refundTotal, votesCleared: votes.length });
-            });
-          }
-        });
+        const finishDelete = () => {
+          db.run('DELETE FROM votes WHERE match_id = ?', [matchId], function(err3) {
+            db.close();
+            if (err3) return res.status(500).json({ error: 'Failed to delete votes: ' + err3.message });
+            res.json({ ok: true, message: 'Votes cleared', refunded: 0, votesCleared: votes.length });
+          });
+        };
+
+        // If winner already set, reverse season balance changes first
+        if (matchRow.winner) {
+          const winner = matchRow.winner;
+          const seasonId = matchRow.season_id;
+          const winnerVotes = votes.filter(v => v.team === winner);
+          const loserVotes = votes.filter(v => v.team !== winner);
+          const totalWinner = winnerVotes.reduce((s, v) => s + v.points, 0);
+          const totalLoser = loserVotes.reduce((s, v) => s + v.points, 0);
+
+          let done = 0;
+          const total = winnerVotes.length + loserVotes.length;
+          if (total === 0) { finishDelete(); return; }
+
+          // Reverse winner gains
+          winnerVotes.forEach(v => {
+            const gain = Math.round((v.points / totalWinner) * totalLoser);
+            db.run('UPDATE user_seasons SET balance = balance - ? WHERE user_id = ? AND season_id = ?',
+              [gain, v.user_id, seasonId], () => { done++; if (done === total) finishDelete(); });
+          });
+          // Restore loser deductions
+          loserVotes.forEach(v => {
+            db.run('UPDATE user_seasons SET balance = balance + ? WHERE user_id = ? AND season_id = ?',
+              [v.points, v.user_id, seasonId], () => { done++; if (done === total) finishDelete(); });
+          });
+        } else {
+          // No winner yet — votes haven't affected balances, just delete them
+          finishDelete();
+        }
       });
     });
   });
 });
 
-// Admin: Clear winner for a match (revert winner selection and payout calculations)
+// Admin: Clear winner for a match (revert winner selection and season balance changes)
 app.post('/api/admin/matches/:id/clear-winner', requireRole(['admin', 'superuser']), (req, res) => {
   const matchId = Number(req.params.id);
   if (!matchId) return res.status(400).json({ error: 'matchId required' });
 
   const db = openDb();
   db.serialize(() => {
-    // First, get the match to check if it has a winner
-    db.get('SELECT id, winner FROM matches WHERE id = ?', [matchId], (err1, match) => {
+    db.get('SELECT id, winner, season_id FROM matches WHERE id = ?', [matchId], (err1, match) => {
       if (err1) { db.close(); return res.status(500).json({ error: 'DB error' }); }
       if (!match) { db.close(); return res.status(404).json({ error: 'Match not found' }); }
       if (!match.winner) { db.close(); return res.json({ ok: true, message: 'No winner set for this match' }); }
 
       const winner = match.winner;
+      const seasonId = match.season_id;
 
-      // Get all votes for this match
       db.all('SELECT user_id, team, points FROM votes WHERE match_id = ?', [matchId], (err2, votes) => {
         if (err2) { db.close(); return res.status(500).json({ error: 'Failed to fetch votes' }); }
 
         if (!votes || votes.length === 0) {
-          // No votes, just clear the winner
           db.run('UPDATE matches SET winner = NULL WHERE id = ?', [matchId], function(err3) {
             db.close();
             if (err3) return res.status(500).json({ error: 'Failed to clear winner' });
@@ -1801,64 +2160,42 @@ app.post('/api/admin/matches/:id/clear-winner', requireRole(['admin', 'superuser
           return;
         }
 
-        // Calculate totals
         const winnerVotes = votes.filter(v => v.team === winner);
         const loserVotes = votes.filter(v => v.team !== winner);
-
         const totalWinner = winnerVotes.reduce((sum, v) => sum + v.points, 0);
         const totalLoser = loserVotes.reduce((sum, v) => sum + v.points, 0);
 
-        // Revert winner payouts (they received stake + share, we need to take back just the share)
         let processed = 0;
-        const totalToRevert = winnerVotes.length + loserVotes.length;
+        const totalToProcess = winnerVotes.length + loserVotes.length;
 
-        if (totalToRevert === 0) {
-          // No votes to revert
-          db.run('UPDATE matches SET winner = NULL WHERE id = ?', [matchId], function(err3) {
-            db.close();
-            if (err3) return res.status(500).json({ error: 'Failed to clear winner' });
-            res.json({ ok: true, message: 'Winner cleared' });
-          });
-          return;
-        }
-
-        // For each winner, subtract the EXACT amount they received during set winner
-        // During set winner, they received: Math.round(stake + share)
-        // So we need to subtract: Math.round(stake + share), not just the share
-        winnerVotes.forEach(v => {
-          const share = totalWinner > 0 ? (v.points / totalWinner) * totalLoser : 0;
-          // Calculate the exact amount that was added: Math.round(stake + share)
-          const amountAdded = Math.round(v.points + share);
-          // Subtract the exact amount that was added
-          db.run('UPDATE users SET balance = balance - ? WHERE id = ?', [amountAdded, v.user_id], function(err4) {
-            processed += 1;
-            if (processed === totalToRevert) {
-              finishClearWinner();
-            }
-          });
-        });
-
-        // For losers, we don't need to do anything - they already lost their stake
-        loserVotes.forEach(v => {
-          processed += 1;
-          if (processed === totalToRevert) {
-            finishClearWinner();
-          }
-        });
-
-        function finishClearWinner() {
-          // Clear the winner field
+        const finishClearWinner = () => {
           db.run('UPDATE matches SET winner = NULL WHERE id = ?', [matchId], function(err5) {
             db.close();
             if (err5) return res.status(500).json({ error: 'Failed to clear winner' });
-            res.json({
-              ok: true,
-              message: 'Winner cleared and payouts reverted',
-              winnersReverted: winnerVotes.length,
-              totalReverted: totalLoser
-            });
+            res.json({ ok: true, message: 'Winner cleared and season balances reverted', winnersReverted: winnerVotes.length, totalReverted: totalLoser });
           });
-        }
+        };
+
+        if (totalToProcess === 0) { finishClearWinner(); return; }
+
+        // Reverse winner gains (subtract gain from their season balance)
+        winnerVotes.forEach(v => {
+          const gain = totalWinner > 0 ? Math.round((v.points / totalWinner) * totalLoser) : 0;
+          db.run('UPDATE user_seasons SET balance = balance - ? WHERE user_id = ? AND season_id = ?',
+            [gain, v.user_id, seasonId], () => {
+              processed++;
+              if (processed === totalToProcess) finishClearWinner();
+            });
+        });
+
+        // Restore loser season balances (add back the points they lost)
+        loserVotes.forEach(v => {
+          db.run('UPDATE user_seasons SET balance = balance + ? WHERE user_id = ? AND season_id = ?',
+            [v.points, v.user_id, seasonId], () => {
+              processed++;
+              if (processed === totalToProcess) finishClearWinner();
+            });
+        });
       });
     });
   });
@@ -2050,18 +2387,18 @@ app.put('/api/users/:id/profile', (req, res) => {
   }
 });
 
-// Admin: Get user's assigned seasons
+// Admin: Get user's assigned seasons (with per-season balance)
 app.get('/api/admin/users/:id/seasons', requireRole('admin'), (req, res) => {
   const userId = Number(req.params.id);
   const db = openDb();
-  db.all('SELECT season_id FROM user_seasons WHERE user_id = ?', [userId], (err, rows) => {
+  db.all('SELECT season_id, balance FROM user_seasons WHERE user_id = ?', [userId], (err, rows) => {
     db.close();
     if (err) return res.status(500).json({ error: 'DB error' });
     res.json((rows || []).map(r => r.season_id));
   });
 });
 
-// Admin: Update user's assigned seasons
+// Admin: Update user's assigned seasons (preserve existing season balances)
 app.put('/api/admin/users/:id/seasons', requireRole('admin'), (req, res) => {
   const userId = Number(req.params.id);
   const { season_ids } = req.body;
@@ -2074,58 +2411,83 @@ app.put('/api/admin/users/:id/seasons', requireRole('admin'), (req, res) => {
 
   const db = openDb();
   db.serialize(() => {
-    // First get the user's previously assigned seasons
-    db.all('SELECT season_id FROM user_seasons WHERE user_id = ?', [userId], (errOld, oldSeasons) => {
-      if (errOld) {
-        db.close();
-        return res.status(500).json({ error: 'DB error' });
-      }
+    // Get user's current balance and existing season assignments
+    db.get('SELECT balance FROM users WHERE id = ?', [userId], (errUser, userRow) => {
+      const defaultBalance = (userRow && userRow.balance) ? userRow.balance : 1000;
 
-      const oldSeasonIds = (oldSeasons || []).map(s => s.season_id);
-      // Find newly added seasons (in seasonIds but not in oldSeasonIds)
-      const newSeasonIds = seasonIds.filter(sid => !oldSeasonIds.includes(sid));
+      // Get previously assigned seasons with their balances
+      db.all('SELECT season_id, balance FROM user_seasons WHERE user_id = ?', [userId], (errOld, oldSeasons) => {
+        if (errOld) { db.close(); return res.status(500).json({ error: 'DB error' }); }
 
-      // Delete all existing assignments
-      db.run('DELETE FROM user_seasons WHERE user_id = ?', [userId], (err1) => {
-        if (err1) {
-          db.close();
-          return res.status(500).json({ error: 'DB error' });
-        }
+        const oldSeasonMap = {};
+        (oldSeasons || []).forEach(s => { oldSeasonMap[s.season_id] = s.balance; });
+        const oldSeasonIds = Object.keys(oldSeasonMap).map(Number);
+        // Find newly added seasons (in seasonIds but not in oldSeasonIds)
+        const newSeasonIds = seasonIds.filter(sid => !oldSeasonIds.includes(sid));
 
-        if (seasonIds.length === 0) {
-          db.close();
-          return res.json({ ok: true, message: 'Seasons updated' });
-        }
+        // Delete all existing assignments
+        db.run('DELETE FROM user_seasons WHERE user_id = ?', [userId], (err1) => {
+          if (err1) { db.close(); return res.status(500).json({ error: 'DB error' }); }
 
-        // Insert new assignments
-        let pending = seasonIds.length;
-        seasonIds.forEach(seasonId => {
-          db.run('INSERT INTO user_seasons (user_id, season_id) VALUES (?, ?)', [userId, seasonId], (err2) => {
-            if (err2) console.error('Error inserting season assignment:', err2);
-            pending -= 1;
-            if (pending === 0) {
-              db.close();
+          if (seasonIds.length === 0) {
+            db.close();
+            return res.json({ ok: true, message: 'Seasons updated' });
+          }
 
-              // If there are new seasons, process auto-loss for them
-              if (newSeasonIds.length > 0) {
-                processAutoLossForNewSeasons(userId, newSeasonIds, (autoLossErr) => {
-                  if (autoLossErr) {
-                    console.error('Error processing auto-loss for newly assigned seasons:', autoLossErr);
-                    // Don't fail the request, just log the error
+          // Re-insert season assignments, preserving existing balances for old seasons
+          let pending = seasonIds.length;
+          seasonIds.forEach(seasonId => {
+            const existingBalance = oldSeasonMap[seasonId] !== undefined ? oldSeasonMap[seasonId] : defaultBalance;
+            db.run('INSERT INTO user_seasons (user_id, season_id, balance) VALUES (?, ?, ?)',
+              [userId, seasonId, existingBalance], (err2) => {
+                if (err2) console.error('Error inserting season assignment:', err2);
+                pending--;
+                if (pending === 0) {
+                  db.close();
+                  // If there are new seasons, process auto-loss for them
+                  if (newSeasonIds.length > 0) {
+                    processAutoLossForNewSeasons(userId, newSeasonIds, (autoLossErr) => {
+                      if (autoLossErr) console.error('Error processing auto-loss for newly assigned seasons:', autoLossErr);
+                      res.json({ ok: true, message: 'Seasons updated' });
+                    });
                   } else {
-                    console.log(`✅ Auto-loss processing completed for user ${userId} in ${newSeasonIds.length} new season(s)`);
+                    res.json({ ok: true, message: 'Seasons updated' });
                   }
-                  res.json({ ok: true, message: 'Seasons updated' });
-                });
-              } else {
-                res.json({ ok: true, message: 'Seasons updated' });
-              }
-            }
+                }
+              });
           });
         });
       });
     });
   });
+});
+
+// Admin: Update a user's season-specific balance
+app.put('/api/admin/users/:userId/seasons/:seasonId/balance', requireRole('admin'), (req, res) => {
+  const userId = Number(req.params.userId);
+  const seasonId = Number(req.params.seasonId);
+  const { balance } = req.body;
+  if (balance === undefined || balance === null) return res.status(400).json({ error: 'balance required' });
+  const db = openDb();
+  db.run('UPDATE user_seasons SET balance = ? WHERE user_id = ? AND season_id = ?',
+    [balance, userId, seasonId], function(err) {
+      db.close();
+      if (err) return res.status(500).json({ error: 'DB error: ' + err.message });
+      if (this.changes === 0) return res.status(404).json({ error: 'Season assignment not found' });
+      res.json({ ok: true, message: 'Season balance updated' });
+    });
+});
+
+// Admin: Get all season balances for a user
+app.get('/api/admin/users/:userId/season-balances', requireRole('admin'), (req, res) => {
+  const userId = Number(req.params.userId);
+  const db = openDb();
+  db.all('SELECT us.season_id, us.balance, s.name as season_name FROM user_seasons us JOIN seasons s ON s.id = us.season_id WHERE us.user_id = ?',
+    [userId], (err, rows) => {
+      db.close();
+      if (err) return res.status(500).json({ error: 'DB error' });
+      res.json(rows || []);
+    });
 });
 
 // ========== Email Settings Management ==========
@@ -2295,10 +2657,585 @@ function waitForMigrations(callback) {
   });
 }
 
-// Start server after migrations
-waitForMigrations(() => {
-  app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
+// ──────────────────────────────────────────────────────────────────────────────
+// PREDICTIONS API
+// ──────────────────────────────────────────────────────────────────────────────
+
+// Small in-memory cache to reduce CricAPI calls for repeated UI refreshes
+const predictionPlayersCache = new Map();
+
+function getCachedPredictionPlayers(key) {
+  const hit = predictionPlayersCache.get(key);
+  if (!hit) return null;
+  // 10 minute cache
+  if (Date.now() - hit.ts > 10 * 60 * 1000) {
+    predictionPlayersCache.delete(key);
+    return null;
+  }
+  return hit.data;
+}
+
+function setCachedPredictionPlayers(key, data) {
+  predictionPlayersCache.set(key, { ts: Date.now(), data });
+}
+
+function fetchJson(url, cb) {
+  const https = require('https');
+  https.get(url, (apiRes) => {
+    let raw = '';
+    apiRes.on('data', chunk => { raw += chunk; });
+    apiRes.on('end', () => {
+      try {
+        cb(null, JSON.parse(raw));
+      } catch (e) {
+        cb(new Error('Invalid JSON response'));
+      }
+    });
+  }).on('error', (err) => cb(err));
+}
+
+function normalizeTeamName(name) {
+  return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function extractPlayersFromMatch(matchObj) {
+  const players = [];
+
+  // Some CricAPI responses include teamInfo[].players (array of objects or strings)
+  if (Array.isArray(matchObj.teamInfo)) {
+    matchObj.teamInfo.forEach(team => {
+      if (Array.isArray(team.players)) {
+        team.players.forEach(p => {
+          if (typeof p === 'string') players.push(p);
+          else if (p && p.name) players.push(p.name);
+        });
+      }
+    });
+  }
+
+  // Fallback shape seen in some responses
+  if (Array.isArray(matchObj.players)) {
+    matchObj.players.forEach(p => {
+      if (typeof p === 'string') players.push(p);
+      else if (p && p.name) players.push(p.name);
+    });
+  }
+
+  return [...new Set(players.filter(Boolean).map(x => String(x).trim()))];
+}
+
+// GET /api/predictions/players - Fetch likely player list for a match using CricAPI
+app.get('/api/predictions/players', requireRole('picker', 'superuser', 'admin'), (req, res) => {
+  const homeTeam = String(req.query.home_team || '').trim();
+  const awayTeam = String(req.query.away_team || '').trim();
+
+  if (!homeTeam || !awayTeam) {
+    return res.status(400).json({ error: 'home_team and away_team required' });
+  }
+
+  const cacheKey = `${normalizeTeamName(homeTeam)}__${normalizeTeamName(awayTeam)}`;
+  const cached = getCachedPredictionPlayers(cacheKey);
+  if (cached) return res.json(cached);
+
+  const homeKey = normalizeTeamName(homeTeam);
+  const awayKey = normalizeTeamName(awayTeam);
+
+  // Try matches feed first (usually has the freshest squads)
+  const url = `https://api.cricapi.com/v1/matches?apikey=${CRICAPI_KEY}&offset=0`;
+  fetchJson(url, (err, parsed) => {
+    if (err || !parsed) {
+      return res.json({ players: [], source: 'unavailable' });
+    }
+
+    const matches = Array.isArray(parsed.data) ? parsed.data : [];
+    let candidate = null;
+
+    for (const m of matches) {
+      const teams = Array.isArray(m.teams) ? m.teams : [];
+      const keys = teams.map(normalizeTeamName);
+      if (keys.includes(homeKey) && keys.includes(awayKey)) {
+        candidate = m;
+        break;
+      }
+    }
+
+    let players = candidate ? extractPlayersFromMatch(candidate) : [];
+
+    // Fallback: if squads are missing, query players search for each team name
+    const finish = (finalPlayers, source) => {
+      const data = { players: finalPlayers, source };
+      setCachedPredictionPlayers(cacheKey, data);
+      res.json(data);
+    };
+
+    if (players.length > 0) {
+      return finish(players, 'matches');
+    }
+
+    const teamSearch = (teamName, cb) => {
+      const searchUrl = `https://api.cricapi.com/v1/players?apikey=${CRICAPI_KEY}&offset=0&search=${encodeURIComponent(teamName)}`;
+      fetchJson(searchUrl, (e2, p2) => {
+        if (e2 || !p2 || !Array.isArray(p2.data)) return cb([]);
+        const names = p2.data
+          .map(x => x && x.name ? String(x.name).trim() : '')
+          .filter(Boolean)
+          .slice(0, 30);
+        cb(names);
+      });
+    };
+
+    teamSearch(homeTeam, (homePlayers) => {
+      teamSearch(awayTeam, (awayPlayers) => {
+        players = [...new Set([...(homePlayers || []), ...(awayPlayers || [])])];
+        return finish(players, 'players-search');
+      });
+    });
   });
+});
+
+// GET /api/predictions/players-by-season/:seasonId - Fetch player squad for a season using CricAPI series_squad
+// Optional query params: team1, team2 - to filter players by specific teams
+app.get('/api/predictions/players-by-season/:seasonId', requireRole('picker', 'superuser', 'admin'), (req, res) => {
+  const seasonId = Number(req.params.seasonId);
+  const team1 = req.query.team1 ? String(req.query.team1).trim() : null;
+  const team2 = req.query.team2 ? String(req.query.team2).trim() : null;
+
+  const db = openDb();
+
+  db.get('SELECT cricapi_series_id FROM seasons WHERE id = ?', [seasonId], (err, season) => {
+    db.close();
+    if (err) return res.status(500).json({ error: 'DB error' });
+    if (!season) return res.status(404).json({ error: 'Season not found' });
+    if (!season.cricapi_series_id) {
+      return res.json({ players: [], source: 'no_series_id', message: 'No CricAPI series ID stored for this season' });
+    }
+
+    const cacheKey = `season_squad_${seasonId}`;
+    const cached = getCachedPredictionPlayers(cacheKey);
+
+    // If we have cached data, filter by teams if provided
+    if (cached) {
+      if (team1 && team2) {
+        const filtered = filterPlayersByTeams(cached, team1, team2);
+        return res.json(filtered);
+      }
+      return res.json(cached);
+    }
+
+    const url = `https://api.cricapi.com/v1/series_squad?apikey=${CRICAPI_KEY}&id=${encodeURIComponent(season.cricapi_series_id)}`;
+    fetchJson(url, (fetchErr, parsed) => {
+      if (fetchErr || !parsed) {
+        return res.json({ players: [], source: 'api_error', message: 'Failed to fetch squad from CricAPI' });
+      }
+
+      const squads = Array.isArray(parsed.data) ? parsed.data : [];
+
+      // Store full squad data with team information and player details
+      const teamSquadMap = {};
+      squads.forEach(teamSquad => {
+        const teamName = teamSquad.teamName || teamSquad.name || '';
+        if (teamName && Array.isArray(teamSquad.players)) {
+          const players = [];
+          teamSquad.players.forEach(player => {
+            if (player && typeof player === 'object' && player.name) {
+              // Store full player object with image, role, etc.
+              players.push({
+                id: player.id || null,
+                name: String(player.name).trim(),
+                role: player.role || '',
+                playerImg: player.playerImg || '',
+                battingStyle: player.battingStyle || '',
+                bowlingStyle: player.bowlingStyle || '',
+                country: player.country || ''
+              });
+            }
+          });
+          teamSquadMap[teamName] = players;
+        }
+      });
+
+      // Create full player list
+      const allPlayers = [];
+      Object.values(teamSquadMap).forEach(players => {
+        allPlayers.push(...players);
+      });
+
+      const fullData = {
+        players: allPlayers,
+        source: 'series_squad',
+        season_id: seasonId,
+        teamSquads: teamSquadMap
+      };
+
+      setCachedPredictionPlayers(cacheKey, fullData);
+
+      // Filter by teams if provided
+      if (team1 && team2) {
+        const filtered = filterPlayersByTeams(fullData, team1, team2);
+        return res.json(filtered);
+      }
+
+      res.json(fullData);
+    });
+  });
+});
+
+// POST /api/admin/seasons/:id/refresh-squad - force refresh latest season squad from CricAPI
+app.post('/api/admin/seasons/:id/refresh-squad', requireRole('admin'), (req, res) => {
+  const seasonId = Number(req.params.id);
+  if (!Number.isFinite(seasonId)) {
+    return res.status(400).json({ error: 'Invalid season id' });
+  }
+
+  const db = openDb();
+  db.get('SELECT id, name, cricapi_series_id FROM seasons WHERE id = ?', [seasonId], (err, season) => {
+    db.close();
+    if (err) return res.status(500).json({ error: 'DB error' });
+    if (!season) return res.status(404).json({ error: 'Season not found' });
+    if (!season.cricapi_series_id) {
+      return res.status(400).json({ error: 'This season has no CricAPI series mapping. Re-import from CricAPI first.' });
+    }
+
+    const cacheKey = `season_squad_${seasonId}`;
+    predictionPlayersCache.delete(cacheKey);
+
+    const url = `https://api.cricapi.com/v1/series_squad?apikey=${CRICAPI_KEY}&id=${encodeURIComponent(season.cricapi_series_id)}`;
+    fetchJson(url, (fetchErr, parsed) => {
+      if (fetchErr || !parsed) {
+        return res.status(502).json({ error: 'Failed to fetch squad from CricAPI' });
+      }
+
+      const squads = Array.isArray(parsed.data) ? parsed.data : [];
+      const teamSquadMap = {};
+      squads.forEach(teamSquad => {
+        const teamName = teamSquad.teamName || teamSquad.name || '';
+        if (!teamName || !Array.isArray(teamSquad.players)) return;
+
+        const players = [];
+        teamSquad.players.forEach(player => {
+          if (player && typeof player === 'object' && player.name) {
+            players.push({
+              id: player.id || null,
+              name: String(player.name).trim(),
+              role: player.role || '',
+              playerImg: player.playerImg || '',
+              battingStyle: player.battingStyle || '',
+              bowlingStyle: player.bowlingStyle || '',
+              country: player.country || ''
+            });
+          }
+        });
+        teamSquadMap[teamName] = players;
+      });
+
+      const allPlayers = [];
+      Object.values(teamSquadMap).forEach(players => allPlayers.push(...players));
+
+      const fullData = {
+        players: allPlayers,
+        source: 'series_squad',
+        season_id: seasonId,
+        teamSquads: teamSquadMap
+      };
+
+      setCachedPredictionPlayers(cacheKey, fullData);
+
+      res.json({
+        ok: true,
+        season_id: seasonId,
+        season_name: season.name,
+        teams: Object.keys(teamSquadMap).length,
+        players: allPlayers.length,
+        refreshed_at: new Date().toISOString()
+      });
+    });
+  });
+});
+
+// Helper function to filter players by team names
+function filterPlayersByTeams(squadData, team1, team2) {
+  if (!squadData.teamSquads) {
+    // Fallback if teamSquads not available
+    return { ...squadData, players: squadData.players || [] };
+  }
+
+  const normalize = (name) => String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const team1Norm = normalize(team1);
+  const team2Norm = normalize(team2);
+
+  const matchedPlayers = [];
+
+  // Find matching teams by normalized name
+  Object.entries(squadData.teamSquads).forEach(([teamName, players]) => {
+    const teamNorm = normalize(teamName);
+    if (teamNorm.includes(team1Norm) || team1Norm.includes(teamNorm) ||
+        teamNorm.includes(team2Norm) || team2Norm.includes(teamNorm)) {
+      matchedPlayers.push(...players);
+    }
+  });
+
+  const uniqueFiltered = [...new Set(matchedPlayers)];
+
+  return {
+    ...squadData,
+    players: uniqueFiltered.length > 0 ? uniqueFiltered : squadData.players,
+    filtered: uniqueFiltered.length > 0,
+    matchedTeams: uniqueFiltered.length
+  };
+}
+
+// GET /api/predictions/upcoming - upcoming matches available for prediction
+app.get('/api/predictions/upcoming', requireRole('picker', 'superuser', 'admin'), (req, res) => {
+  const seasonId = req.query.season_id ? Number(req.query.season_id) : null;
+  const db = openDb();
+
+  const finish = (rows) => {
+    const now = new Date();
+    const data = (rows || [])
+      .map((m) => ({ ...m, _dt: parseMatchDateTime(m.scheduled_at) }))
+      .filter((m) => !m.winner)
+      .filter((m) => m._dt && !Number.isNaN(m._dt.getTime()) && m._dt >= now)
+      .sort((a, b) => a._dt - b._dt)
+      .map(({ _dt, ...rest }) => rest);
+
+    db.close();
+    res.json(data);
+  };
+
+  if (req.user.role === 'admin') {
+    const params = [];
+    let query = `
+      SELECT m.id, m.season_id, m.home_team, m.away_team, m.scheduled_at, m.venue, m.winner, s.name as season_name
+      FROM matches m
+      JOIN seasons s ON s.id = m.season_id
+    `;
+    if (seasonId) {
+      query += ' WHERE m.season_id = ?';
+      params.push(seasonId);
+    }
+    db.all(query, params, (err, rows) => {
+      if (err) {
+        db.close();
+        return res.status(500).json({ error: 'DB error' });
+      }
+      finish(rows);
+    });
+    return;
+  }
+
+  const params = [req.user.id];
+  let query = `
+    SELECT m.id, m.season_id, m.home_team, m.away_team, m.scheduled_at, m.venue, m.winner, s.name as season_name
+    FROM matches m
+    JOIN seasons s ON s.id = m.season_id
+    JOIN user_seasons us ON us.season_id = m.season_id
+    WHERE us.user_id = ?
+  `;
+  if (seasonId) {
+    query += ' AND m.season_id = ?';
+    params.push(seasonId);
+  }
+
+  db.all(query, params, (err, rows) => {
+    if (err) {
+      db.close();
+      return res.status(500).json({ error: 'DB error' });
+    }
+    finish(rows);
+  });
+});
+
+// GET /api/predictions/user-history - Get user's prediction history
+// ⚠️ MUST be defined BEFORE /api/predictions/:matchId to avoid Express matching "user-history" as a matchId
+app.get('/api/predictions/user-history', requireRole('picker', 'superuser', 'admin'), (req, res) => {
+  const username = req.headers['x-user'];
+  const { season_id } = req.query;
+  const db = openDb();
+
+  db.get('SELECT id FROM users WHERE LOWER(username) = ?', [username.toLowerCase()], (err, user) => {
+    if (err || !user) {
+      db.close();
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    let query = `
+      SELECT p.*, m.home_team, m.away_team, m.scheduled_at, m.winner, m.season_id,
+             s.name as season_name,
+             pr.toss_winner as actual_toss, pr.man_of_match as actual_mom, pr.best_bowler as actual_bowler
+      FROM predictions p
+      JOIN matches m ON p.match_id = m.id
+      JOIN seasons s ON m.season_id = s.id
+      LEFT JOIN prediction_results pr ON p.match_id = pr.match_id
+      WHERE p.user_id = ?
+    `;
+
+    const params = [user.id];
+
+    if (season_id) {
+      query += ' AND m.season_id = ?';
+      params.push(season_id);
+    }
+
+    query += ' ORDER BY m.scheduled_at DESC';
+
+    db.all(query, params, (err, predictions) => {
+      db.close();
+      if (err) return res.status(500).json({ error: 'Database error' });
+      res.json(predictions || []);
+    });
+  });
+});
+
+// GET /api/predictions/:matchId - Get user's prediction for a match
+app.get('/api/predictions/:matchId', requireRole('picker', 'superuser', 'admin'), (req, res) => {
+  const username = req.headers['x-user'];
+  const { matchId } = req.params;
+  const db = openDb();
+
+  db.get('SELECT id FROM users WHERE LOWER(username) = ?', [username.toLowerCase()], (err, user) => {
+    if (err || !user) {
+      db.close();
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    db.get('SELECT * FROM predictions WHERE match_id = ? AND user_id = ?', [matchId, user.id], (err, prediction) => {
+      db.close();
+      if (err) return res.status(500).json({ error: 'Database error' });
+      res.json(prediction || null);
+    });
+  });
+});
+
+// POST /api/predictions - Submit or update prediction
+app.post('/api/predictions', requireRole('picker', 'superuser', 'admin'), (req, res) => {
+  const username = req.headers['x-user'];
+  const { match_id, toss_winner, man_of_match, best_bowler, toss_points, mom_points, bowler_points } = req.body;
+
+  if (!match_id) {
+    return res.status(400).json({ error: 'Match ID required' });
+  }
+
+  const db = openDb();
+
+  db.get('SELECT id FROM users WHERE LOWER(username) = ?', [username.toLowerCase()], (err, user) => {
+    if (err || !user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // Check if match exists and prediction window is open (1 hour before match)
+    db.get('SELECT scheduled_at, winner FROM matches WHERE id = ?', [match_id], (err, match) => {
+      if (err) {
+        return res.status(500).json({ error: 'Database error' });
+      }
+      if (!match) {
+        return res.status(404).json({ error: 'Match not found' });
+      }
+      if (match.winner) {
+        return res.status(400).json({ error: 'Match winner has been set. Voting is now closed.' });
+      }
+
+      // Check voting window (1 hour cutoff)
+      const matchTime = parseMatchDateTime(match.scheduled_at);
+      if (!matchTime) { return res.status(400).json({ error: 'Invalid match schedule. Please contact admin.' }); }
+      const cutoffTime = new Date(matchTime.getTime() - 60 * 60 * 1000);
+      if (new Date() >= cutoffTime) { return res.status(400).json({ error: 'Prediction window closed (closes 1 hour before match)' }); }
+
+      // Upsert prediction with points
+      db.run(`
+        INSERT INTO predictions (match_id, user_id, toss_winner, man_of_match, best_bowler, toss_points, mom_points, bowler_points, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(match_id, user_id) DO UPDATE SET
+          toss_winner = excluded.toss_winner,
+          man_of_match = excluded.man_of_match,
+          best_bowler = excluded.best_bowler,
+          toss_points = excluded.toss_points,
+          mom_points = excluded.mom_points,
+          bowler_points = excluded.bowler_points,
+          updated_at = CURRENT_TIMESTAMP
+      `, [match_id, user.id, toss_winner, man_of_match, best_bowler, toss_points || 10, mom_points || 10, bowler_points || 10], function(err) {
+        if (err) return res.status(500).json({ error: 'Failed to save prediction' });
+        res.json({ ok: true, message: 'Prediction saved successfully' });
+      });
+    });
+  });
+});
+
+// GET /api/predictions/results/:matchId - Get prediction results for a match (admin only)
+app.get('/api/predictions/results/:matchId', requireRole('admin', 'superuser'), (req, res) => {
+  const { matchId } = req.params;
+  const db = openDb();
+
+  db.get('SELECT * FROM prediction_results WHERE match_id = ?', [matchId], (err, result) => {
+    db.close();
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json(result || null);
+  });
+});
+
+// GET /api/predictions/odds/:matchId - Get prediction odds for a match
+app.get('/api/predictions/odds/:matchId', (req, res) => {
+  const { matchId } = req.params;
+  const db = openDb();
+
+  // Get all predictions for this match with points
+  db.all('SELECT toss_winner, man_of_match, best_bowler, toss_points, mom_points, bowler_points FROM predictions WHERE match_id = ?', [matchId], (err, predictions) => {
+    db.close();
+    if (err) return res.status(500).json({ error: 'Database error' });
+
+    // Calculate odds for each category
+    const tossOdds = {};
+    const momOdds = {};
+    const bowlerOdds = {};
+
+    predictions.forEach(p => {
+      if (p.toss_winner) {
+        tossOdds[p.toss_winner] = (tossOdds[p.toss_winner] || 0) + (p.toss_points || 10);
+      }
+      if (p.man_of_match) {
+        momOdds[p.man_of_match] = (momOdds[p.man_of_match] || 0) + (p.mom_points || 10);
+      }
+      if (p.best_bowler) {
+        bowlerOdds[p.best_bowler] = (bowlerOdds[p.best_bowler] || 0) + (p.bowler_points || 10);
+      }
+    });
+
+    res.json({
+      toss: tossOdds,
+      mom: momOdds,
+      bowler: bowlerOdds,
+      totalPredictions: predictions.length
+    });
+  });
+});
+
+// POST /api/predictions/results - Set prediction results (admin only)
+app.post('/api/predictions/results', requireRole('admin', 'superuser'), (req, res) => {
+  const { match_id, toss_winner, man_of_match, best_bowler } = req.body;
+
+  if (!match_id) {
+    return res.status(400).json({ error: 'Match ID required' });
+  }
+
+  const db = openDb();
+
+  db.run(`
+    INSERT INTO prediction_results (match_id, toss_winner, man_of_match, best_bowler)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(match_id) DO UPDATE SET
+      toss_winner = excluded.toss_winner,
+      man_of_match = excluded.man_of_match,
+      best_bowler = excluded.best_bowler
+  `, [match_id, toss_winner, man_of_match, best_bowler], function(err) {
+    db.close();
+    if (err) return res.status(500).json({ error: 'Failed to save results' });
+    res.json({ ok: true, message: 'Prediction results saved successfully' });
+  });
+});
+
+
+// Start the server
+app.listen(port, () => {
+  console.log(`✅ Cricket Mela backend running on port ${port}`);
+  console.log(`📍 Database location: ${DB_PATH}`);
 });
 

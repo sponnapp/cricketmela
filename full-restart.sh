@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Full restart script for Cricket Mela
-# This script stops all servers, rebuilds frontend, and restarts everything
+#  This script stops all servers, rebuilds frontend, and restarts everything
 
 echo "🛑 Stopping all servers..."
 pkill -f "node index.js"
