@@ -78,7 +78,16 @@ if (process.env.NODE_ENV === 'production' && fs.existsSync(legacyDbPath) && !fs.
 }
 
 function openDb() {
-  return new sqlite3.Database(DB_PATH);
+  const db = require('./db');
+  // Return a proxy so existing db.close() calls throughout the code are safe no-ops.
+  // The real connection must stay open for the lifetime of the process.
+  return new Proxy(db, {
+    get(target, prop) {
+      if (prop === 'close') return () => {}; // no-op
+      const val = target[prop];
+      return typeof val === 'function' ? val.bind(target) : val;
+    }
+  });
 }
 
 // ── Startup migrations (run once on server start) ──────────────────────────
@@ -100,12 +109,20 @@ function openDb() {
       else console.log('✅ [MIGRATION] password_reset_tokens table ready');
     });
   });
-  setTimeout(() => db.close(), 500);
 })();
 
 function parseMatchDateTime(value) {
   if (!value) return null;
-  const direct = new Date(value);
+  const raw = String(value).trim();
+
+  // CricAPI commonly sends ISO without timezone (GMT). Interpret as UTC explicitly.
+  const isoNoTz = raw.match(/^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}(?::\d{2})?$/);
+  if (isoNoTz) {
+    const utc = new Date(`${raw}Z`);
+    if (!Number.isNaN(utc.getTime())) return utc;
+  }
+
+  const direct = new Date(raw);
   if (!Number.isNaN(direct.getTime())) return direct;
 
   const monthMap = {
@@ -113,7 +130,7 @@ function parseMatchDateTime(value) {
     jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
   };
 
-  const parts = String(value).split('T');
+  const parts = raw.split('T');
   if (parts.length < 2) return null;
   const [datePart, timePartRaw] = parts;
 
@@ -138,18 +155,23 @@ function parseMatchDateTime(value) {
   }
 
   const timePart = timePartRaw.trim();
-  const timeMatch = timePart.match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i);
+  const timeMatch = timePart.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*(AM|PM))?$/i);
   if (!timeMatch) return null;
   let hour = parseInt(timeMatch[1], 10);
   const minute = parseInt(timeMatch[2], 10);
-  const ampm = timeMatch[3] ? timeMatch[3].toUpperCase() : null;
+  const second = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0;
+  const ampm = timeMatch[4] ? timeMatch[4].toUpperCase() : null;
 
   if (ampm) {
     if (hour === 12) hour = 0;
     if (ampm === 'PM') hour += 12;
   }
 
-  return new Date(year, monthIndex, day, hour, minute, 0, 0);
+  // YYYY-MM-DD + 24h format is treated as UTC (CricAPI GMT); other formats stay local.
+  if (isoDate && !ampm) {
+    return new Date(Date.UTC(year, monthIndex, day, hour, minute, second, 0));
+  }
+  return new Date(year, monthIndex, day, hour, minute, second, 0);
 }
 
 // Initialize database schema (create tables if they don't exist, add missing columns)
@@ -371,8 +393,6 @@ function initializeDatabase() {
     });
     });
   });
-
-  setTimeout(() => db.close(), 1000); // Close after a longer delay to allow all operations
 }
 
 // Call initialization on startup
@@ -3089,7 +3109,7 @@ app.get('/api/predictions/:matchId', requireRole('picker', 'superuser', 'admin')
 // POST /api/predictions - Submit or update prediction
 app.post('/api/predictions', requireRole('picker', 'superuser', 'admin'), (req, res) => {
   const username = req.headers['x-user'];
-  const { match_id, toss_winner, man_of_match, best_bowler } = req.body;
+  const { match_id, toss_winner, man_of_match, best_bowler, toss_points, mom_points, bowler_points } = req.body;
 
   if (!match_id) {
     return res.status(400).json({ error: 'Match ID required' });
@@ -3099,42 +3119,40 @@ app.post('/api/predictions', requireRole('picker', 'superuser', 'admin'), (req, 
 
   db.get('SELECT id FROM users WHERE LOWER(username) = ?', [username.toLowerCase()], (err, user) => {
     if (err || !user) {
-      db.close();
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
     // Check if match exists and prediction window is open (1 hour before match)
     db.get('SELECT scheduled_at, winner FROM matches WHERE id = ?', [match_id], (err, match) => {
       if (err) {
-        db.close();
         return res.status(500).json({ error: 'Database error' });
       }
       if (!match) {
-        db.close();
         return res.status(404).json({ error: 'Match not found' });
       }
       if (match.winner) {
-        db.close();
         return res.status(400).json({ error: 'Match winner has been set. Voting is now closed.' });
       }
 
       // Check voting window (1 hour cutoff)
       const matchTime = parseMatchDateTime(match.scheduled_at);
-      if (!matchTime) { db.close(); return res.status(400).json({ error: 'Invalid match schedule. Please contact admin.' }); }
+      if (!matchTime) { return res.status(400).json({ error: 'Invalid match schedule. Please contact admin.' }); }
       const cutoffTime = new Date(matchTime.getTime() - 60 * 60 * 1000);
-      if (new Date() >= cutoffTime) { db.close(); return res.status(400).json({ error: 'Prediction window closed (closes 1 hour before match)' }); }
+      if (new Date() >= cutoffTime) { return res.status(400).json({ error: 'Prediction window closed (closes 1 hour before match)' }); }
 
-      // Upsert prediction
+      // Upsert prediction with points
       db.run(`
-        INSERT INTO predictions (match_id, user_id, toss_winner, man_of_match, best_bowler, updated_at)
-        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO predictions (match_id, user_id, toss_winner, man_of_match, best_bowler, toss_points, mom_points, bowler_points, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(match_id, user_id) DO UPDATE SET
           toss_winner = excluded.toss_winner,
           man_of_match = excluded.man_of_match,
           best_bowler = excluded.best_bowler,
+          toss_points = excluded.toss_points,
+          mom_points = excluded.mom_points,
+          bowler_points = excluded.bowler_points,
           updated_at = CURRENT_TIMESTAMP
-      `, [match_id, user.id, toss_winner, man_of_match, best_bowler], function(err) {
-        db.close();
+      `, [match_id, user.id, toss_winner, man_of_match, best_bowler, toss_points || 10, mom_points || 10, bowler_points || 10], function(err) {
         if (err) return res.status(500).json({ error: 'Failed to save prediction' });
         res.json({ ok: true, message: 'Prediction saved successfully' });
       });
@@ -3151,6 +3169,42 @@ app.get('/api/predictions/results/:matchId', requireRole('admin', 'superuser'), 
     db.close();
     if (err) return res.status(500).json({ error: 'Database error' });
     res.json(result || null);
+  });
+});
+
+// GET /api/predictions/odds/:matchId - Get prediction odds for a match
+app.get('/api/predictions/odds/:matchId', (req, res) => {
+  const { matchId } = req.params;
+  const db = openDb();
+
+  // Get all predictions for this match with points
+  db.all('SELECT toss_winner, man_of_match, best_bowler, toss_points, mom_points, bowler_points FROM predictions WHERE match_id = ?', [matchId], (err, predictions) => {
+    db.close();
+    if (err) return res.status(500).json({ error: 'Database error' });
+
+    // Calculate odds for each category
+    const tossOdds = {};
+    const momOdds = {};
+    const bowlerOdds = {};
+
+    predictions.forEach(p => {
+      if (p.toss_winner) {
+        tossOdds[p.toss_winner] = (tossOdds[p.toss_winner] || 0) + (p.toss_points || 10);
+      }
+      if (p.man_of_match) {
+        momOdds[p.man_of_match] = (momOdds[p.man_of_match] || 0) + (p.mom_points || 10);
+      }
+      if (p.best_bowler) {
+        bowlerOdds[p.best_bowler] = (bowlerOdds[p.best_bowler] || 0) + (p.bowler_points || 10);
+      }
+    });
+
+    res.json({
+      toss: tossOdds,
+      mom: momOdds,
+      bowler: bowlerOdds,
+      totalPredictions: predictions.length
+    });
   });
 });
 

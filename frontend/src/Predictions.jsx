@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import axios from 'axios'
+import { toast } from './Toast'
 
 // ── Reusable Glass Card ───────────────────────────────────────────────────────
 function GlassCard({ children, style = {} }) {
@@ -187,6 +188,51 @@ function PlayerCard({ player, selected, locked, accent, onClick }) {
   )
 }
 
+// ── Odds Display ──────────────────────────────────────────────────────────────
+function OddsDisplay({ odds, accent }) {
+  if (!odds || Object.keys(odds).length === 0) {
+    return (
+      <div style={{
+        marginTop: '10px', padding: '8px 12px',
+        background: 'rgba(0,0,0,0.03)', borderRadius: '8px',
+        fontSize: '11px', color: '#888', textAlign: 'center'
+      }}>
+        No predictions yet
+      </div>
+    )
+  }
+
+  const total = Object.values(odds).reduce((sum, pts) => sum + pts, 0)
+  const sortedEntries = Object.entries(odds).sort((a, b) => b[1] - a[1])
+
+  return (
+    <div style={{
+      marginTop: '10px', padding: '10px',
+      background: `${accent}08`, borderRadius: '8px',
+      border: `1px solid ${accent}22`
+    }}>
+      <div style={{
+        fontSize: '10px', fontWeight: '700', color: '#888',
+        textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '8px'
+      }}>📊 Current Odds</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        {sortedEntries.map(([choice, points]) => {
+          const percentage = total > 0 ? ((points / total) * 100).toFixed(1) : 0
+          return (
+            <div key={choice} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px' }}>
+              <div style={{ flex: 1, fontWeight: '600', color: '#1a1a1a' }}>{choice}</div>
+              <div style={{ width: '80px', height: '16px', background: 'rgba(0,0,0,0.05)', borderRadius: '8px', overflow: 'hidden', position: 'relative' }}>
+                <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${percentage}%`, background: `linear-gradient(90deg, ${accent}, ${accent}cc)`, transition: 'width 0.3s' }} />
+              </div>
+              <div style={{ width: '50px', textAlign: 'right', fontWeight: '700', color: accent }}>{percentage}%</div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -204,6 +250,7 @@ export default function Predictions({ user, refreshTrigger }) {
   const [expandedTiles, setExpandedTiles] = useState({})
   // Per-prediction points: { [matchId]: { toss: 10, mom: 10, bowler: 10 } }
   const [predPoints, setPredPoints] = useState({})
+  const [oddsData, setOddsData] = useState({})
 
   useEffect(() => { fetchSeasons() }, [refreshTrigger])
 
@@ -238,6 +285,16 @@ export default function Predictions({ user, refreshTrigger }) {
       r.data.forEach((m, idx) => { if (predResults[idx]?.data) predMap[m.id] = predResults[idx].data })
       setPredictions(predMap)
 
+      const savedPointsMap = {}
+      Object.entries(predMap).forEach(([matchId, p]) => {
+        savedPointsMap[matchId] = {
+          toss: Number(p.toss_points) || 10,
+          mom: Number(p.mom_points) || 10,
+          bowler: Number(p.bowler_points) || 10,
+        }
+      })
+      setPredPoints(savedPointsMap)
+
       const playerResults = await Promise.all(
         r.data.map(async m => {
           try {
@@ -252,6 +309,18 @@ export default function Predictions({ user, refreshTrigger }) {
       const playerMap = {}
       playerResults.forEach(item => { playerMap[item.matchId] = { players: item.players, teamSquads: item.teamSquads } })
       setPlayerOptionsByMatch(playerMap)
+
+      const oddsResults = await Promise.all(
+        r.data.map(async m => {
+          try {
+            const or = await axios.get(`/api/predictions/odds/${m.id}`, { headers: { 'x-user': user?.username } })
+            return { matchId: m.id, odds: or.data }
+          } catch { return { matchId: m.id, odds: {} } }
+        })
+      )
+      const oddsMap = {}
+      oddsResults.forEach(item => { oddsMap[item.matchId] = item.odds })
+      setOddsData(oddsMap)
     } catch (e) { console.error('Error fetching upcoming matches:', e) }
     finally { setLoading(false) }
   }
@@ -276,12 +345,18 @@ export default function Predictions({ user, refreshTrigger }) {
         toss_winner: pred.toss_winner || null,
         man_of_match: pred.man_of_match || null,
         best_bowler: pred.best_bowler || null,
+        toss_points: getPredPts(matchId, 'toss'),
+        mom_points: getPredPts(matchId, 'mom'),
+        bowler_points: getPredPts(matchId, 'bowler'),
       }, { headers: { 'x-user': user?.username } })
       setMessage('✅ Prediction saved!')
+      toast('success', 'Prediction Saved', 'Your prediction and points were updated')
       setTimeout(() => setMessage(''), 3000)
       fetchUpcomingMatches()
     } catch (e) {
-      setMessage(`❌ ${e.response?.data?.error || 'Failed to save prediction'}`)
+      const errMsg = e.response?.data?.error || 'Failed to save prediction'
+      setMessage(`❌ ${errMsg}`)
+      toast('error', 'Prediction Failed', errMsg)
       setTimeout(() => setMessage(''), 5000)
     }
   }
@@ -306,7 +381,15 @@ export default function Predictions({ user, refreshTrigger }) {
   }
 
   function getPredPts(matchId, tile) {
-    return predPoints[matchId]?.[tile] || 10
+    const selected = predPoints[matchId]?.[tile]
+    if (selected !== undefined && selected !== null) return Number(selected) || 10
+
+    const saved = predictions[matchId]
+    if (!saved) return 10
+    if (tile === 'toss') return Number(saved.toss_points) || 10
+    if (tile === 'mom') return Number(saved.mom_points) || 10
+    if (tile === 'bowler') return Number(saved.bowler_points) || 10
+    return 10
   }
 
   function parseMatchDateTime(value) {
@@ -522,6 +605,7 @@ export default function Predictions({ user, refreshTrigger }) {
                           locked={!isOpen}
                           accent="#667eea"
                         />
+                        <OddsDisplay odds={oddsData[match.id]?.toss || {}} accent="#667eea" />
                       </div>
                     </GlassCard>
 
@@ -590,6 +674,7 @@ export default function Predictions({ user, refreshTrigger }) {
                             locked={!isOpen}
                             accent="#f39c12"
                           />
+                          <OddsDisplay odds={oddsData[match.id]?.mom || {}} accent="#f39c12" />
                         </div>
                       )}
                     </GlassCard>
@@ -659,6 +744,7 @@ export default function Predictions({ user, refreshTrigger }) {
                             locked={!isOpen}
                             accent="#e74c3c"
                           />
+                          <OddsDisplay odds={oddsData[match.id]?.bowler || {}} accent="#e74c3c" />
                         </div>
                       )}
                     </GlassCard>

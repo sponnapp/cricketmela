@@ -99,6 +99,9 @@ db.serialize(() => {
       toss_winner TEXT,
       man_of_match TEXT,
       best_bowler TEXT,
+      toss_points INTEGER DEFAULT 10,
+      mom_points INTEGER DEFAULT 10,
+      bowler_points INTEGER DEFAULT 10,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(match_id, user_id),
@@ -291,12 +294,41 @@ db.serialize(() => {
     else console.log('✅ password_reset_tokens table ready');
   });
 
+  // Migration: Add points columns to predictions table
+  db.all(`PRAGMA table_info(predictions)`, (err, columns) => {
+    if (err) {
+      console.error('Error checking predictions table structure:', err);
+      return;
+    }
+
+    const hasTossPoints = columns && columns.some(c => c.name === 'toss_points');
+    const hasMomPoints = columns && columns.some(c => c.name === 'mom_points');
+    const hasBowlerPoints = columns && columns.some(c => c.name === 'bowler_points');
+
+    if (!hasTossPoints) {
+      db.run('ALTER TABLE predictions ADD COLUMN toss_points INTEGER DEFAULT 10', (err) => {
+        if (err) console.error('Error adding toss_points column:', err);
+        else console.log('✅ Added toss_points column to predictions table');
+      });
+    }
+    if (!hasMomPoints) {
+      db.run('ALTER TABLE predictions ADD COLUMN mom_points INTEGER DEFAULT 10', (err) => {
+        if (err) console.error('Error adding mom_points column:', err);
+        else console.log('✅ Added mom_points column to predictions table');
+      });
+    }
+    if (!hasBowlerPoints) {
+      db.run('ALTER TABLE predictions ADD COLUMN bowler_points INTEGER DEFAULT 10', (err) => {
+        if (err) console.error('Error adding bowler_points column:', err);
+        else console.log('✅ Added bowler_points column to predictions table');
+      });
+    }
+    if (hasTossPoints && hasMomPoints && hasBowlerPoints) {
+      console.log('✅ All prediction points columns already exist');
+    }
+  });
+
 });
 
-// close DB after a short delay to allow async seeds to finish
-setTimeout(() => {
-  db.close((err) => {
-    if (err) console.error('Error closing DB', err);
-    else console.log('DB migration finished and closed');
-  });
-}, 1200);
+// Export the database connection (don't close it - the app needs it to stay open)
+module.exports = db;

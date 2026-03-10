@@ -12,17 +12,24 @@ export default function VoteHistory({ user, refreshTrigger }) {
   function parseMatchDateTime(value) {
     if (!value) return null
     try {
-      let date;
+      let date
+      const raw = String(value).trim()
+
+      // CricAPI ISO without timezone is GMT; parse as UTC explicitly.
+      const isoNoTz = raw.match(/^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}(?::\d{2})?$/)
+      if (isoNoTz) {
+        date = new Date(`${raw}Z`)
+        return (!date || isNaN(date.getTime())) ? null : date
+      }
+
       // Handle format like "16-Feb-26T5:30 AM" from CSV upload
-      if (value.includes('T') && !value.match(/^\d{4}-/)) {
-        const [datePart, timePart] = value.split('T')
+      if (raw.includes('T') && !raw.match(/^\d{4}-/)) {
+        const [datePart, timePart] = raw.split('T')
         const dateStr = datePart.includes('-20') ? datePart : datePart.replace(/-(\d{2})$/, '-20$1')
         const fullDateStr = `${dateStr} ${timePart}`
         date = new Date(fullDateStr)
-      } else if (value.includes('T')) {
-        date = new Date(value)
       } else {
-        date = new Date(value)
+        date = new Date(raw)
       }
       return (!date || isNaN(date.getTime())) ? null : date
     } catch {
@@ -46,25 +53,21 @@ export default function VoteHistory({ user, refreshTrigger }) {
   function formatMatchDateTime(scheduledAt) {
     if (!scheduledAt) return 'TBD'
     try {
-      let date;
+      let date
+      const raw = String(scheduledAt).trim()
 
-      // Handle format like "16-Feb-26T5:30 AM" from CSV upload
-      if (scheduledAt.includes('T') && !scheduledAt.match(/^\d{4}-/)) {
-        // Split by T to get date and time parts
-        const [datePart, timePart] = scheduledAt.split('T')
-
-        // Parse date part (e.g., "16-Feb-26" or "01-Mar-2026")
+      // CricAPI ISO without timezone is GMT; parse as UTC explicitly.
+      const isoNoTz = raw.match(/^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}(?::\d{2})?$/)
+      if (isoNoTz) {
+        date = new Date(`${raw}Z`)
+      } else if (raw.includes('T') && !raw.match(/^\d{4}-/)) {
+        // Handle format like "16-Feb-26T5:30 AM" from CSV upload
+        const [datePart, timePart] = raw.split('T')
         const dateStr = datePart.includes('-20') ? datePart : datePart.replace(/-(\d{2})$/, '-20$1')
-
-        // Combine with time for parsing
         const fullDateStr = `${dateStr} ${timePart}`
         date = new Date(fullDateStr)
-      } else if (scheduledAt.includes('T')) {
-        // ISO format like "2026-03-01T14:30"
-        date = new Date(scheduledAt)
       } else {
-        // Try direct parsing
-        date = new Date(scheduledAt)
+        date = new Date(raw)
       }
 
       if (!date || isNaN(date.getTime())) {
