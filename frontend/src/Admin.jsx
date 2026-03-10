@@ -117,7 +117,16 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
   // Helper function to parse match date/time for sorting
   function parseMatchDateTime(value) {
     if (!value) return null
-    const direct = new Date(value)
+    const raw = String(value).trim()
+
+    // CricAPI timestamps without timezone are GMT; parse as UTC explicitly.
+    const isoNoTz = raw.match(/^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}(?::\d{2})?$/)
+    if (isoNoTz) {
+      const utc = new Date(`${raw}Z`)
+      if (!Number.isNaN(utc.getTime())) return utc
+    }
+
+    const direct = new Date(raw)
     if (!Number.isNaN(direct.getTime())) return direct
 
     const monthMap = {
@@ -125,7 +134,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
       jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
     }
 
-    const parts = String(value).split('T')
+    const parts = raw.split('T')
     if (parts.length < 2) return null
     const [datePart, timePartRaw] = parts
 
@@ -150,18 +159,22 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
     }
 
     const timePart = timePartRaw.trim()
-    const timeMatch = timePart.match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i)
+    const timeMatch = timePart.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*(AM|PM))?$/i)
     if (!timeMatch) return null
     let hour = parseInt(timeMatch[1], 10)
     const minute = parseInt(timeMatch[2], 10)
-    const ampm = timeMatch[3] ? timeMatch[3].toUpperCase() : null
+    const second = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0
+    const ampm = timeMatch[4] ? timeMatch[4].toUpperCase() : null
 
     if (ampm) {
       if (hour === 12) hour = 0
       if (ampm === 'PM') hour += 12
     }
 
-    return new Date(year, monthIndex, day, hour, minute, 0, 0)
+    if (isoDate && !ampm) {
+      return new Date(Date.UTC(year, monthIndex, day, hour, minute, second, 0))
+    }
+    return new Date(year, monthIndex, day, hour, minute, second, 0)
   }
 
   function formatMatchDateTime(value) {
@@ -1607,6 +1620,65 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                 style={{padding: '8px 16px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}
               >
                 Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {predictionResultsModal.show && (
+        <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000}}>
+          <div style={{background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', padding: '28px', borderRadius: '16px', maxWidth: '500px', width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.6)'}}>
+            <h3 style={{marginTop: 0, fontSize: '20px', fontWeight: '700'}}>🔮 Set Prediction Results</h3>
+            <p style={{margin: '5px 0 20px 0', fontSize: '13px', color: '#666'}}>{predictionResultsModal.matchName}</p>
+
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '8px', fontWeight: '600', fontSize: '13px', color: '#333'}}>🎯 Toss Winner:</label>
+              <input
+                type="text"
+                placeholder="e.g., India, New Zealand"
+                value={predictionResultsModal.formData.toss_winner}
+                onChange={e => setPredictionResultsModal({...predictionResultsModal, formData: {...predictionResultsModal.formData, toss_winner: e.target.value}})}
+                style={{width: '100%', padding: '10px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #ddd', fontSize: '13px'}}
+              />
+            </div>
+
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '8px', fontWeight: '600', fontSize: '13px', color: '#333'}}>⭐ Man of the Match:</label>
+              <input
+                type="text"
+                placeholder="e.g., Virat Kohli, Kane Williamson"
+                value={predictionResultsModal.formData.man_of_match}
+                onChange={e => setPredictionResultsModal({...predictionResultsModal, formData: {...predictionResultsModal.formData, man_of_match: e.target.value}})}
+                style={{width: '100%', padding: '10px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #ddd', fontSize: '13px'}}
+              />
+            </div>
+
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '8px', fontWeight: '600', fontSize: '13px', color: '#333'}}>🎳 Best Bowler:</label>
+              <input
+                type="text"
+                placeholder="e.g., Jasprit Bumrah, Trent Boult"
+                value={predictionResultsModal.formData.best_bowler}
+                onChange={e => setPredictionResultsModal({...predictionResultsModal, formData: {...predictionResultsModal.formData, best_bowler: e.target.value}})}
+                style={{width: '100%', padding: '10px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #ddd', fontSize: '13px'}}
+              />
+            </div>
+
+            <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '24px'}}>
+              <button
+                onClick={() => setPredictionResultsModal({show: false, matchId: null, matchName: '', formData: {toss_winner: '', man_of_match: '', best_bowler: ''}})}
+                style={{padding: '10px 20px', backgroundColor: '#e0e0e0', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px'}}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitPredictionResults}
+                style={{padding: '10px 20px', backgroundColor: '#9b59b6', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px', boxShadow: '0 2px 8px rgba(155,89,182,0.3)'}}
+                onMouseOver={(e) => e.target.style.backgroundColor = '#8e44ad'}
+                onMouseOut={(e) => e.target.style.backgroundColor = '#9b59b6'}
+              >
+                Save Results
               </button>
             </div>
           </div>

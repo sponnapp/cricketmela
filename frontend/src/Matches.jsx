@@ -139,7 +139,17 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
   }
 
   function parseMatchDateTime(value) {
-    const direct = new Date(value)
+    if (!value) return null
+    const raw = String(value).trim()
+
+    // CricAPI timestamps without timezone are GMT; parse as UTC explicitly.
+    const isoNoTz = raw.match(/^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}(?::\d{2})?$/)
+    if (isoNoTz) {
+      const utc = new Date(`${raw}Z`)
+      if (!Number.isNaN(utc.getTime())) return utc
+    }
+
+    const direct = new Date(raw)
     if (!Number.isNaN(direct.getTime())) return direct
 
     const monthMap = {
@@ -147,7 +157,7 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
       jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
     }
 
-    const parts = String(value).split('T')
+    const parts = raw.split('T')
     if (parts.length < 2) return null
     const [datePart, timePartRaw] = parts
 
@@ -172,18 +182,34 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
     }
 
     const timePart = timePartRaw.trim()
-    const timeMatch = timePart.match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i)
+    const timeMatch = timePart.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*(AM|PM))?$/i)
     if (!timeMatch) return null
     let hour = parseInt(timeMatch[1], 10)
     const minute = parseInt(timeMatch[2], 10)
-    const ampm = timeMatch[3] ? timeMatch[3].toUpperCase() : null
+    const second = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0
+    const ampm = timeMatch[4] ? timeMatch[4].toUpperCase() : null
 
     if (ampm) {
       if (hour === 12) hour = 0
       if (ampm === 'PM') hour += 12
     }
 
-    return new Date(year, monthIndex, day, hour, minute, 0, 0)
+    if (isoDate && !ampm) {
+      return new Date(Date.UTC(year, monthIndex, day, hour, minute, second, 0))
+    }
+    return new Date(year, monthIndex, day, hour, minute, second, 0)
+  }
+
+  function formatMatchDatePart(value) {
+    const dt = parseMatchDateTime(value)
+    if (!dt) return 'N/A'
+    return dt.toLocaleDateString('en-CA')
+  }
+
+  function formatMatchTimePart(value) {
+    const dt = parseMatchDateTime(value)
+    if (!dt) return 'N/A'
+    return dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
   }
 
   // Sort matches by date and time (earliest first)
@@ -352,7 +378,7 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                     <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '13px', fontWeight: '600', color: '#2d3748'}}>{m.away_team}</td>
                     <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#718096'}}>{m.venue || 'N/A'}</td>
                     <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>
-                      <div>{m.scheduled_at ? m.scheduled_at.split('T')[0] : 'N/A'}</div>
+                      <div>{formatMatchDatePart(m.scheduled_at)}</div>
                       {!m.winner && !isVotingClosed(m.scheduled_at) && (
                         <div style={{marginTop:'4px'}}>
                           <CountdownTimer scheduledAt={m.scheduled_at} parseMatchDateTime={parseMatchDateTime}/>
@@ -363,7 +389,7 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                       )}
                     </td>
                     <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>
-                      {m.scheduled_at ? m.scheduled_at.split('T')[1] || 'N/A' : 'N/A'}
+                      {formatMatchTimePart(m.scheduled_at)}
                     </td>
                     <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0'}}>
                       {votingDisabled ? (
