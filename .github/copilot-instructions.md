@@ -227,6 +227,36 @@ cd backend && flyctl deploy --remote-only
 | Blank admin page on season change | `userRole` undefined in Matches render | Always pass `user?.role` not a local variable |
 | Data disappears in production | Fly.io machine restart without volume | Data is on persistent volume `/app/data` |
 | Vote not showing pre-selected | `user-vote` API not called on load | `GET /api/matches/:id/user-vote` on component mount |
+| **Overall balance incorrect** | **Orphaned user_seasons records** | **MUST JOIN with seasons table when summing balances** |
+
+### ⚠️ CRITICAL: Balance Calculation Pattern
+When calculating overall/total balance, **ALWAYS JOIN with seasons table**:
+
+**❌ WRONG:**
+```sql
+SELECT SUM(balance) FROM user_seasons WHERE user_id = ?
+```
+
+**✅ CORRECT:**
+```sql
+SELECT SUM(us.balance) 
+FROM user_seasons us 
+JOIN seasons s ON s.id = us.season_id 
+WHERE us.user_id = ?
+```
+
+**Why:** When seasons are deleted, `user_seasons` records remain. Without the JOIN, orphaned balances from deleted seasons are still counted.
+
+**Season Deletion Must Clean Up:**
+```javascript
+// Always delete user_seasons when deleting a season
+db.run('DELETE FROM user_seasons WHERE season_id = ?', [seasonId])
+db.run('DELETE FROM matches WHERE season_id = ?', [seasonId])
+db.run('DELETE FROM votes WHERE match_id IN (...)', [seasonId])
+db.run('DELETE FROM seasons WHERE id = ?', [seasonId])
+```
+
+See: `BALANCE-CALCULATION-FIX.md` for full details.
 
 ---
 

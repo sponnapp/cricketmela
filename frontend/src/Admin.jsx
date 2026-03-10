@@ -20,18 +20,34 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
   const [allMatches, setAllMatches] = useState([])
   const [users, setUsers] = useState([])
   const [pendingUsers, setPendingUsers] = useState([])
+  const [userSeasonBalances, setUserSeasonBalances] = useState({})
+  const [seasonBalancesLoading, setSeasonBalancesLoading] = useState({})
+  const [expandedUserRows, setExpandedUserRows] = useState({})
   const [newSeason, setNewSeason] = useState('')
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'picker', balance: 500, display_name: '', email: '', season_ids: [] })
   const [csvInput, setCsvInput] = useState('')
   const [selectedSeason, setSelectedSeason] = useState('')
   const [winnerModal, setWinnerModal] = useState({show: false, matchId: null, team1: '', team2: '', selectedTeam: ''})
   const [editModal, setEditModal] = useState({show: false, match: null, formData: {}})
-  const [editUserModal, setEditUserModal] = useState({show: false, user: null, formData: {}, assignedSeasons: [], authMethod: null})
+  const [editUserModal, setEditUserModal] = useState({show: false, user: null, formData: {}, assignedSeasons: [], authMethod: null, seasonBalances: {}})
   const [passwordResetModal, setPasswordResetModal] = useState({show: false, userId: null, username: '', newPassword: ''})
   const [approveUserModal, setApproveUserModal] = useState({show: false, user: null, formData: {balance: 1000}, selectedSeasons: []})
   const [editSeasonModal, setEditSeasonModal] = useState({show: false, season: null, formData: {}})
   const [emailSettings, setEmailSettings] = useState({ user: '', password: '', from: '' })
   const [emailMessage, setEmailMessage] = useState('')
+  const [cricApiModal, setCricApiModal] = useState({
+    show: false,
+    step: 'series', // 'series' | 'matches' | 'importing'
+    loading: false,
+    error: '',
+    searchQuery: '',
+    seriesList: [],
+    selectedSeries: null,
+    matchesList: [],
+    selectedMatches: [], // set of match ids or indices
+    seasonName: '',
+    hasFetched: false
+  })
 
   useEffect(() => {
     fetchSeasons()
@@ -60,6 +76,25 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
     }
   }
 
+  async function toggleUserSeasonBreakdown(userId) {
+    const isOpen = !!expandedUserRows[userId]
+    setExpandedUserRows(prev => ({ ...prev, [userId]: !isOpen }))
+    if (isOpen) return
+    if (userSeasonBalances[userId]) return
+
+    try {
+      setSeasonBalancesLoading(prev => ({ ...prev, [userId]: true }))
+      const r = await axios.get(`/api/admin/users/${userId}/season-balances`, {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      setUserSeasonBalances(prev => ({ ...prev, [userId]: r.data || [] }))
+    } catch (e) {
+      setUserSeasonBalances(prev => ({ ...prev, [userId]: [] }))
+    } finally {
+      setSeasonBalancesLoading(prev => ({ ...prev, [userId]: false }))
+    }
+  }
+
   async function fetchPendingUsers() {
     try {
       const r = await axios.get('/api/admin/pending-users', {
@@ -82,7 +117,16 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
   // Helper function to parse match date/time for sorting
   function parseMatchDateTime(value) {
     if (!value) return null
-    const direct = new Date(value)
+    const raw = String(value).trim()
+
+    // CricAPI timestamps without timezone are GMT; parse as UTC explicitly.
+    const isoNoTz = raw.match(/^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}(?::\d{2})?$/)
+    if (isoNoTz) {
+      const utc = new Date(`${raw}Z`)
+      if (!Number.isNaN(utc.getTime())) return utc
+    }
+
+    const direct = new Date(raw)
     if (!Number.isNaN(direct.getTime())) return direct
 
     const monthMap = {
@@ -90,7 +134,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
       jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
     }
 
-    const parts = String(value).split('T')
+    const parts = raw.split('T')
     if (parts.length < 2) return null
     const [datePart, timePartRaw] = parts
 
@@ -115,18 +159,33 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
     }
 
     const timePart = timePartRaw.trim()
-    const timeMatch = timePart.match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i)
+    const timeMatch = timePart.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*(AM|PM))?$/i)
     if (!timeMatch) return null
     let hour = parseInt(timeMatch[1], 10)
     const minute = parseInt(timeMatch[2], 10)
-    const ampm = timeMatch[3] ? timeMatch[3].toUpperCase() : null
+    const second = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0
+    const ampm = timeMatch[4] ? timeMatch[4].toUpperCase() : null
 
     if (ampm) {
       if (hour === 12) hour = 0
       if (ampm === 'PM') hour += 12
     }
 
-    return new Date(year, monthIndex, day, hour, minute, 0, 0)
+    if (isoDate && !ampm) {
+      return new Date(Date.UTC(year, monthIndex, day, hour, minute, second, 0))
+    }
+    return new Date(year, monthIndex, day, hour, minute, second, 0)
+  }
+
+  function formatMatchDateTime(value) {
+    if (!value) return 'TBD'
+    const d = parseMatchDateTime(value)
+    if (!d || isNaN(d.getTime())) return value
+    const dd = String(d.getDate()).padStart(2, '0')
+    const mon = d.toLocaleString('en-US', { month: 'short' })
+    const yr = d.getFullYear()
+    const t = d.toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+    return dd + '-' + mon + '-' + yr + ' | ' + t
   }
 
   // Sort matches by date and time
@@ -162,6 +221,113 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
       setEmailSettings(r.data)
     } catch (e) {
       console.log('Error fetching email settings:', e)
+    }
+  }
+
+  // ── CricAPI Functions ─────────────────────────────────────────────────────
+
+  function openCricApiModal() {
+    setCricApiModal({
+      show: true, step: 'series', loading: false, error: '',
+      searchQuery: '', seriesList: [], selectedSeries: null,
+      matchesList: [], selectedMatches: [], seasonName: '', hasFetched: false
+    })
+  }
+
+  async function fetchCricApiSeries(searchQuery = '') {
+    setCricApiModal(prev => ({...prev, loading: true, error: ''}))
+    try {
+      const r = await axios.get('/api/admin/cricapi/series?search=' + encodeURIComponent(searchQuery), {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      setCricApiModal(prev => ({...prev, loading: false, seriesList: r.data.series || [], step: 'series', hasFetched: true}))
+    } catch (e) {
+      setCricApiModal(prev => ({...prev, loading: false, hasFetched: true, error: (e.response && e.response.data && e.response.data.error) || 'Failed to fetch series'}))
+    }
+  }
+
+  async function fetchCricApiMatches(series) {
+    setCricApiModal(prev => ({
+      ...prev,
+      loading: true,
+      error: '',
+      selectedSeries: series,
+      seasonName: series.name || series.title || '',
+      step: 'matches',
+      matchesList: [],
+      selectedMatches: []
+    }))
+    try {
+      const r = await axios.get(`/api/admin/cricapi/series/${encodeURIComponent(series.id)}/matches?name=${encodeURIComponent(series.name || '')}`, {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      const rawMatches = r.data.matches || []
+      const mapped = rawMatches.map((m, idx) => {
+        const teams = m.teams || []
+        const home_team = teams[0] || 'TBD'
+        const away_team = teams[1] || 'TBD'
+        const scheduled_at = m.dateTimeGMT || m.date || ''
+        return {
+          _idx: idx,
+          _id: m.id,
+          home_team,
+          away_team,
+          venue: m.venue || '',
+          scheduled_at,
+          matchType: m.matchType || '',
+          name: m.name || `${home_team} vs ${away_team}`
+        }
+      })
+      const allIdxs = mapped.map(m => m._idx)
+      setCricApiModal(prev => ({...prev, loading: false, matchesList: mapped, selectedMatches: allIdxs}))
+    } catch (e) {
+      setCricApiModal(prev => ({
+        ...prev,
+        loading: false,
+        error: e.response?.data?.error || 'Failed to fetch matches for this series'
+      }))
+    }
+  }
+
+  async function importCricApiSeason() {
+    const { seasonName, matchesList, selectedMatches } = cricApiModal
+    if (!seasonName.trim()) {
+      setCricApiModal(prev => ({...prev, error: 'Please enter a season name'}))
+      return
+    }
+    if (selectedMatches.length === 0) {
+      setCricApiModal(prev => ({...prev, error: 'Please select at least one match'}))
+      return
+    }
+    setCricApiModal(prev => ({...prev, step: 'importing', loading: true, error: ''}))
+    const matchesToImport = matchesList
+      .filter(m => selectedMatches.includes(m._idx))
+      .map(m => ({
+        home_team: m.home_team,
+        away_team: m.away_team,
+        venue: m.venue,
+        scheduled_at: m.scheduled_at
+      }))
+    try {
+      const r = await axios.post('/api/admin/cricapi/import-season',
+        {
+          seasonName: seasonName.trim(),
+          matches: matchesToImport,
+          seriesId: cricApiModal.selectedSeries?.id || null
+        },
+        { headers: { 'x-user': user?.username || 'admin' } }
+      )
+      setCricApiModal(prev => ({...prev, show: false, loading: false}))
+      fetchSeasons()
+      fetchAllMatches()
+      alert(`✅ Season "${seasonName}" created with ${r.data.inserted} match(es) imported successfully!`)
+    } catch (e) {
+      setCricApiModal(prev => ({
+        ...prev,
+        step: 'matches',
+        loading: false,
+        error: e.response?.data?.error || 'Failed to import season'
+      }))
     }
   }
 
@@ -401,6 +567,19 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
       fetchSeasons()
     } catch (e) {
       toast('error', 'Error', e.response?.data?.error || 'Failed to update season')
+    }
+  }
+
+  async function refreshSeasonSquad(season) {
+    try {
+      const r = await axios.post(`/api/admin/seasons/${season.id}/refresh-squad`, {}, {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      const teams = r.data?.teams ?? 0
+      const players = r.data?.players ?? 0
+      toast('success', 'Squad Refreshed', `${season.name}: ${teams} teams, ${players} players loaded`)
+    } catch (e) {
+      toast('error', 'Refresh Failed', e.response?.data?.error || 'Could not refresh squad data')
     }
   }
 
@@ -701,6 +880,19 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
       {activeTab === 'season' && (
         <>
           <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
+            <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '10px', fontSize: '18px', fontWeight: 'bold'}}>📡 Fetch Seasons from CricAPI</h3>
+            <p style={{color: '#666', fontSize: '13px', marginBottom: '14px', marginTop: 0}}>Pull upcoming cricket series (next 6 months) from CricAPI and import matches directly into a new season.</p>
+            <button
+              onClick={() => { openCricApiModal(); fetchCricApiSeries('') }}
+              style={{padding: '12px 30px', background: 'linear-gradient(135deg,#667eea,#764ba2)', color: 'white', border: 'none', borderRadius: '25px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', boxShadow: '0 4px 14px rgba(102,126,234,0.35)'}}
+              onMouseOver={e => e.currentTarget.style.opacity = '0.9'}
+              onMouseOut={e => e.currentTarget.style.opacity = '1'}
+            >
+              🏏 Fetch Available Series
+            </button>
+          </section>
+
+          <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
             <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Create Season</h3>
             <div style={{display: 'flex', gap: '10px'}}>
               <input value={newSeason} onChange={e => setNewSeason(e.target.value)} placeholder="Season name" style={{flex: 1, padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none'}} onFocus={(e) => e.target.style.borderColor = '#2ecc71'} onBlur={(e) => e.target.style.borderColor = '#ddd'} />
@@ -783,6 +975,24 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                               onMouseOut={(e) => e.target.style.backgroundColor = '#e74c3c'}
                             >
                               Delete
+                            </button>
+                            <button
+                              onClick={() => refreshSeasonSquad(s)}
+                              style={{
+                                padding: '6px 12px',
+                                fontSize: '11px',
+                                backgroundColor: '#2ecc71',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontWeight: '600',
+                                transition: 'all 0.2s ease'
+                              }}
+                              onMouseOver={(e) => e.target.style.backgroundColor = '#27ae60'}
+                              onMouseOut={(e) => e.target.style.backgroundColor = '#2ecc71'}
+                            >
+                              Refresh Squad
                             </button>
                           </div>
                         </td>
@@ -896,7 +1106,6 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                 onBlur={(e) => e.target.style.borderColor = '#ddd'}
               />
               <select
-                          onClick={() => approveUser(u.id)}
                 onChange={e => setNewUser({...newUser, role: e.target.value})}
                 style={{padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none', cursor: 'pointer'}}
               >
@@ -977,68 +1186,133 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                       <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Display Name</th>
                       <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Email</th>
                       <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Role</th>
-                      <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Balance</th>
                       <th style={{padding: '14px 12px', textAlign: 'center', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {users.map((u, idx) => (
-                      <tr key={u.id} style={{
-                        borderBottom: '1px solid #f0f0f0',
-                        backgroundColor: idx % 2 === 0 ? '#fafbfc' : 'white',
-                        transition: 'all 0.2s ease'
-                      }}
-                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f7fa'}
-                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#fafbfc' : 'white'}
-                      >
-                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '13px', fontWeight: '500'}}><strong>{u.username}</strong></td>
-                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{u.display_name || u.username}</td>
-                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{u.email || 'xyz@xyz.com'}</td>
-                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px'}}>
-                          <span style={{backgroundColor: u.role === 'admin' ? '#dc3545' : u.role === 'superuser' ? '#ff9800' : '#28a745', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600'}}>{u.role}</span>
-                        </td>
-                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', fontWeight: '500'}}>{Math.round(u.balance)}</td>
-                        <td style={{padding: '14px 12px', textAlign: 'center'}}>
-                          <div style={{display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap'}}>
-                            <button
-                              onClick={() => editUser(u)}
-                              style={{
-                                padding: '6px 12px',
-                                fontSize: '11px',
-                                backgroundColor: '#667eea',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '6px',
-                                cursor: 'pointer',
-                                fontWeight: '600',
-                                transition: 'all 0.2s ease'
-                              }}
-                              onMouseOver={(e) => e.target.style.backgroundColor = '#5568d3'}
-                              onMouseOut={(e) => e.target.style.backgroundColor = '#667eea'}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => deleteUser(u.id, u.username)}
-                              style={{
-                                padding: '6px 12px',
-                                fontSize: '11px',
-                                backgroundColor: '#e74c3c',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '6px',
-                                cursor: 'pointer',
-                                fontWeight: '600',
-                                transition: 'all 0.2s ease'
-                              }}
-                              onMouseOver={(e) => e.target.style.backgroundColor = '#c0392b'}
-                              onMouseOut={(e) => e.target.style.backgroundColor = '#e74c3c'}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
+                      <React.Fragment key={u.id}>
+                        <tr style={{
+                          borderBottom: '1px solid #f0f0f0',
+                          backgroundColor: idx % 2 === 0 ? '#fafbfc' : 'white',
+                          transition: 'all 0.2s ease'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f7fa'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#fafbfc' : 'white'}
+                        >
+                          <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '13px', fontWeight: '500'}}><strong>{u.username}</strong></td>
+                          <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{u.display_name || u.username}</td>
+                          <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{u.email || 'xyz@xyz.com'}</td>
+                          <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px'}}>
+                            <span style={{backgroundColor: u.role === 'admin' ? '#dc3545' : u.role === 'superuser' ? '#ff9800' : '#28a745', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600'}}>{u.role}</span>
+                          </td>
+                          <td style={{padding: '14px 12px', textAlign: 'center'}}>
+                            <div style={{display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap'}}>
+                              <button
+                                onClick={() => toggleUserSeasonBreakdown(u.id)}
+                                style={{
+                                  padding: '6px 10px',
+                                  fontSize: '11px',
+                                  backgroundColor: expandedUserRows[u.id] ? '#6c757d' : '#00a86b',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  fontWeight: '600',
+                                  transition: 'all 0.2s ease'
+                                }}
+                              >
+                                {expandedUserRows[u.id] ? 'Hide Seasons' : 'Season Balance'}
+                              </button>
+                              <button
+                                onClick={() => editUser(u)}
+                                style={{
+                                  padding: '6px 12px',
+                                  fontSize: '11px',
+                                  backgroundColor: '#667eea',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  fontWeight: '600',
+                                  transition: 'all 0.2s ease'
+                                }}
+                                onMouseOver={(e) => e.target.style.backgroundColor = '#5568d3'}
+                                onMouseOut={(e) => e.target.style.backgroundColor = '#667eea'}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => deleteUser(u.id, u.username)}
+                                style={{
+                                  padding: '6px 12px',
+                                  fontSize: '11px',
+                                  backgroundColor: '#e74c3c',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  fontWeight: '600',
+                                  transition: 'all 0.2s ease'
+                                }}
+                                onMouseOver={(e) => e.target.style.backgroundColor = '#c0392b'}
+                                onMouseOut={(e) => e.target.style.backgroundColor = '#e74c3c'}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+
+                        {expandedUserRows[u.id] && (
+                          <tr style={{backgroundColor: '#f6f8ff'}}>
+                            <td colSpan={5} style={{padding: '10px 14px', borderBottom: '1px solid #e9edf7'}}>
+                              {seasonBalancesLoading[u.id] ? (
+                                <span style={{fontSize: '12px', color: '#667'}}>Loading season balances...</span>
+                              ) : (userSeasonBalances[u.id] || []).length === 0 ? (
+                                <span style={{fontSize: '12px', color: '#999'}}>No season assignments found for this user.</span>
+                              ) : (
+                                <div style={{display: 'flex', flexWrap: 'wrap', gap: '8px'}}>
+                                  <span style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    padding: '5px 10px',
+                                    borderRadius: '999px',
+                                    border: '1px solid #b8c6ff',
+                                    backgroundColor: '#eef3ff',
+                                    fontSize: '11px',
+                                    color: '#2f3d7e',
+                                    fontWeight: '700'
+                                  }}>
+                                    <span>Σ Season Total</span>
+                                    <span style={{color: '#1d5bd1'}}>
+                                      {Math.round((userSeasonBalances[u.id] || []).reduce((sum, sb) => sum + (Number(sb.balance) || 0), 0))} pts
+                                    </span>
+                                  </span>
+                                  {(userSeasonBalances[u.id] || []).map(sb => (
+                                    <span key={`${u.id}-${sb.season_id}`} style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '6px',
+                                      padding: '5px 10px',
+                                      borderRadius: '999px',
+                                      border: '1px solid #cdd7ff',
+                                      backgroundColor: 'white',
+                                      fontSize: '11px',
+                                      color: '#2f3d7e',
+                                      fontWeight: '600'
+                                    }}>
+                                      <span>{sb.season_name}</span>
+                                      <span style={{color: '#00a86b'}}>{Math.round(sb.balance)} pts</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -1123,32 +1397,30 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                       >
                         <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '13px', fontWeight: '500'}}><strong>{m.home_team}</strong> vs <strong>{m.away_team}</strong></td>
                         <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{m.venue || 'N/A'}</td>
-                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{m.scheduled_at || 'N/A'}</td>
+                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{formatMatchDateTime(m.scheduled_at)}</td>
                         <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px'}}>
                           {m.winner ? <span style={{backgroundColor: '#2ecc71', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600'}}>{m.winner}</span> : <span style={{color: '#a0aec0', fontSize: '12px', fontWeight: '600'}}>TBD</span>}
                         </td>
                         <td style={{padding: '14px 12px', textAlign: 'center'}}>
                           <div style={{display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap'}}>
-                            {!isSuperuser && (
-                              <button
-                                onClick={() => editMatch(m)}
-                                style={{
-                                  padding: '6px 12px',
-                                  fontSize: '11px',
-                                  backgroundColor: '#667eea',
-                                  color: 'white',
-                                  border: 'none',
-                                  borderRadius: '6px',
-                                  cursor: 'pointer',
-                                  fontWeight: '600',
-                                  transition: 'all 0.2s ease'
-                                }}
-                                onMouseOver={(e) => e.target.style.backgroundColor = '#5568d3'}
-                                onMouseOut={(e) => e.target.style.backgroundColor = '#667eea'}
-                              >
-                                Edit
-                              </button>
-                            )}
+                            <button
+                              onClick={() => editMatch(m)}
+                              style={{
+                                padding: '6px 12px',
+                                fontSize: '11px',
+                                backgroundColor: '#667eea',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontWeight: '600',
+                                transition: 'all 0.2s ease'
+                              }}
+                              onMouseOver={(e) => e.target.style.backgroundColor = '#5568d3'}
+                              onMouseOut={(e) => e.target.style.backgroundColor = '#667eea'}
+                            >
+                              Edit
+                            </button>
                             {(isSuperuser || user?.role === 'admin') && (
                               <button
                                 onClick={() => setWinner(m.id, m.home_team, m.away_team)}
@@ -1354,6 +1626,65 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
         </div>
       )}
 
+      {predictionResultsModal.show && (
+        <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000}}>
+          <div style={{background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', padding: '28px', borderRadius: '16px', maxWidth: '500px', width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.6)'}}>
+            <h3 style={{marginTop: 0, fontSize: '20px', fontWeight: '700'}}>🔮 Set Prediction Results</h3>
+            <p style={{margin: '5px 0 20px 0', fontSize: '13px', color: '#666'}}>{predictionResultsModal.matchName}</p>
+
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '8px', fontWeight: '600', fontSize: '13px', color: '#333'}}>🎯 Toss Winner:</label>
+              <input
+                type="text"
+                placeholder="e.g., India, New Zealand"
+                value={predictionResultsModal.formData.toss_winner}
+                onChange={e => setPredictionResultsModal({...predictionResultsModal, formData: {...predictionResultsModal.formData, toss_winner: e.target.value}})}
+                style={{width: '100%', padding: '10px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #ddd', fontSize: '13px'}}
+              />
+            </div>
+
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '8px', fontWeight: '600', fontSize: '13px', color: '#333'}}>⭐ Man of the Match:</label>
+              <input
+                type="text"
+                placeholder="e.g., Virat Kohli, Kane Williamson"
+                value={predictionResultsModal.formData.man_of_match}
+                onChange={e => setPredictionResultsModal({...predictionResultsModal, formData: {...predictionResultsModal.formData, man_of_match: e.target.value}})}
+                style={{width: '100%', padding: '10px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #ddd', fontSize: '13px'}}
+              />
+            </div>
+
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '8px', fontWeight: '600', fontSize: '13px', color: '#333'}}>🎳 Best Bowler:</label>
+              <input
+                type="text"
+                placeholder="e.g., Jasprit Bumrah, Trent Boult"
+                value={predictionResultsModal.formData.best_bowler}
+                onChange={e => setPredictionResultsModal({...predictionResultsModal, formData: {...predictionResultsModal.formData, best_bowler: e.target.value}})}
+                style={{width: '100%', padding: '10px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #ddd', fontSize: '13px'}}
+              />
+            </div>
+
+            <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '24px'}}>
+              <button
+                onClick={() => setPredictionResultsModal({show: false, matchId: null, matchName: '', formData: {toss_winner: '', man_of_match: '', best_bowler: ''}})}
+                style={{padding: '10px 20px', backgroundColor: '#e0e0e0', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px'}}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitPredictionResults}
+                style={{padding: '10px 20px', backgroundColor: '#9b59b6', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px', boxShadow: '0 2px 8px rgba(155,89,182,0.3)'}}
+                onMouseOver={(e) => e.target.style.backgroundColor = '#8e44ad'}
+                onMouseOut={(e) => e.target.style.backgroundColor = '#9b59b6'}
+              >
+                Save Results
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {editModal.show && (
         <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000}}>
           <div style={{backgroundColor: 'white', padding: '30px', borderRadius: '8px', maxWidth: '500px', width: '90%', boxShadow: '0 4px 20px rgba(0,0,0,0.3)'}}>
@@ -1453,7 +1784,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
               </div>
             </div>
             <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px', flexWrap: 'wrap'}}>
-              <button onClick={() => setEditUserModal({show: false, user: null, formData: {}, assignedSeasons: [], authMethod: null})} style={{padding: '8px 16px', backgroundColor: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Cancel</button>
+              <button onClick={() => setEditUserModal({show: false, user: null, formData: {}, assignedSeasons: [], authMethod: null, seasonBalances: {}})} style={{padding: '8px 16px', backgroundColor: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Cancel</button>
 
               {/* Only show Reset Password button if user can have password (not Google-only) */}
               {(!editUserModal.authMethod || editUserModal.authMethod.canChangePassword) && (
@@ -1540,18 +1871,207 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
           </div>
         </div>
       )}
+
+      {/* ── CricAPI Import Modal ── */}
+      {cricApiModal.show && (
+        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,backgroundColor:'rgba(0,0,0,0.6)',display:'flex',justifyContent:'center',alignItems:'center',zIndex:2000}}>
+          <div style={{background:'rgba(255,255,255,0.97)',backdropFilter:'blur(20px)',padding:'28px',borderRadius:'18px',maxWidth:'700px',width:'95%',boxShadow:'0 24px 64px rgba(0,0,0,0.4)',border:'1px solid rgba(255,255,255,0.7)',maxHeight:'90vh',display:'flex',flexDirection:'column'}}>
+
+            {/* Header */}
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'18px'}}>
+              <div>
+                <h3 style={{margin:0,fontSize:'18px',fontWeight:'800',color:'#1a1a1a'}}>
+                  {cricApiModal.step === 'series' ? '📡 Available Cricket Series' : cricApiModal.step === 'importing' ? '⏳ Importing Season…' : `🏏 Matches – ${cricApiModal.selectedSeries?.name || ''}`}
+                </h3>
+                <p style={{margin:'4px 0 0 0',fontSize:'12px',color:'#666'}}>
+                  {cricApiModal.step === 'series' ? 'Select a series to view and import its matches' : cricApiModal.step === 'matches' ? 'Choose matches to include. Uncheck any you want to skip.' : 'Creating season and inserting matches…'}
+                </p>
+              </div>
+              <button onClick={() => setCricApiModal(prev => ({...prev, show: false}))} style={{background:'none',border:'none',fontSize:'22px',cursor:'pointer',color:'#666',lineHeight:1}}>✕</button>
+            </div>
+
+            {/* Error */}
+            {cricApiModal.error && (
+              <div style={{padding:'10px 14px',background:'#ffebee',color:'#c62828',borderRadius:'8px',fontSize:'13px',marginBottom:'14px',border:'1px solid #ef5350'}}>
+                ❌ {cricApiModal.error}
+              </div>
+            )}
+
+            {/* ── Step: Series ── */}
+            {cricApiModal.step === 'series' && (
+              <>
+                <div style={{display:'flex',gap:'10px',marginBottom:'14px'}}>
+                  <input
+                    type="text"
+                    value={cricApiModal.searchQuery}
+                    onChange={e => setCricApiModal(prev => ({...prev, searchQuery: e.target.value}))}
+                    onKeyDown={e => { if (e.key === 'Enter') fetchCricApiSeries(cricApiModal.searchQuery) }}
+                    placeholder="Search series (e.g. IPL, India, T20)"
+                    style={{flex:1,padding:'10px 15px',border:'1px solid #ddd',borderRadius:'25px',fontSize:'14px',outline:'none'}}
+                    onFocus={e => e.target.style.borderColor='#667eea'}
+                    onBlur={e => e.target.style.borderColor='#ddd'}
+                  />
+                  <button
+                    onClick={() => fetchCricApiSeries(cricApiModal.searchQuery)}
+                    disabled={cricApiModal.loading}
+                    style={{padding:'10px 22px',background:'linear-gradient(135deg,#667eea,#764ba2)',color:'white',border:'none',borderRadius:'25px',cursor:'pointer',fontWeight:'bold',fontSize:'13px',opacity:cricApiModal.loading?0.6:1}}
+                  >
+                    {cricApiModal.loading ? '🔄 Loading...' : '🔍 Search'}
+                  </button>
+                </div>
+
+                {cricApiModal.loading ? (
+                  <div style={{textAlign:'center',padding:'40px',color:'#667eea',fontSize:'14px'}}>🔄 Fetching series from CricAPI...</div>
+                ) : !cricApiModal.hasFetched ? (
+                  <div style={{textAlign:'center',padding:'40px',color:'#999',fontSize:'14px'}}>
+                    Press <strong>Search</strong> to list upcoming series, or type a keyword first (e.g. India, IPL).
+                  </div>
+                ) : (
+                  <SeriesResultList
+                    seriesList={cricApiModal.seriesList}
+                    searchQuery={cricApiModal.searchQuery}
+                    onSelect={fetchCricApiMatches}
+                  />
+                )}
+              </>
+            )}
+
+            {/* ── Step: Matches ── */}
+            {cricApiModal.step === 'matches' && (
+              <>
+                {/* Season name input */}
+                <div style={{marginBottom:'14px',display:'flex',gap:'10px',alignItems:'center'}}>
+                  <label style={{fontWeight:'700',fontSize:'13px',color:'#333',whiteSpace:'nowrap'}}>Season Name:</label>
+                  <input
+                    type="text"
+                    value={cricApiModal.seasonName}
+                    onChange={e => setCricApiModal(prev => ({...prev, seasonName: e.target.value}))}
+                    style={{flex:1,padding:'10px 15px',border:'1px solid #ddd',borderRadius:'25px',fontSize:'14px',outline:'none'}}
+                    onFocus={e => e.target.style.borderColor='#667eea'}
+                    onBlur={e => e.target.style.borderColor='#ddd'}
+                  />
+                </div>
+
+                {/* Select all / none */}
+                <div style={{display:'flex',gap:'10px',marginBottom:'10px',alignItems:'center'}}>
+                  <span style={{fontSize:'12px',color:'#666'}}>{cricApiModal.selectedMatches.length} of {cricApiModal.matchesList.length} selected</span>
+                  <button onClick={() => setCricApiModal(prev => ({...prev, selectedMatches: prev.matchesList.map(m => m._idx)}))} style={{padding:'4px 12px',fontSize:'11px',backgroundColor:'#667eea',color:'white',border:'none',borderRadius:'20px',cursor:'pointer',fontWeight:'600'}}>Select All</button>
+                  <button onClick={() => setCricApiModal(prev => ({...prev, selectedMatches: []}))} style={{padding:'4px 12px',fontSize:'11px',backgroundColor:'#bdc3c7',color:'white',border:'none',borderRadius:'20px',cursor:'pointer',fontWeight:'600'}}>Clear All</button>
+                  <button onClick={() => setCricApiModal(prev => ({...prev, step:'series'}))} style={{padding:'4px 12px',fontSize:'11px',background:'transparent',color:'#667eea',border:'1px solid #667eea',borderRadius:'20px',cursor:'pointer',fontWeight:'600',marginLeft:'auto'}}>← Back</button>
+                </div>
+
+                {cricApiModal.loading ? (
+                  <div style={{textAlign:'center',padding:'40px',color:'#667eea',fontSize:'14px'}}>🔄 Fetching matches…</div>
+                ) : cricApiModal.matchesList.length === 0 ? (
+                  <div style={{textAlign:'center',padding:'40px',color:'#999',fontSize:'14px'}}>No matches found for this series.</div>
+                ) : (
+                  <div style={{overflowY:'auto',flex:1,border:'1px solid #e8e8e8',borderRadius:'10px'}}>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontFamily:'Inter,sans-serif',fontSize:'12px'}}>
+                      <thead>
+                        <tr style={{background:'linear-gradient(135deg,#667eea,#764ba2)',color:'white'}}>
+                          <th style={{padding:'10px 12px',textAlign:'center',width:'40px'}}>✓</th>
+                          <th style={{padding:'10px 12px',textAlign:'left'}}>Match</th>
+                          <th style={{padding:'10px 12px',textAlign:'left'}}>Date/Time</th>
+                          <th style={{padding:'10px 12px',textAlign:'left'}}>Venue</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cricApiModal.matchesList.map((m, idx) => {
+                          const isSelected = cricApiModal.selectedMatches.includes(m._idx)
+                          return (
+                            <tr key={m._idx}
+                              style={{borderBottom:'1px solid #f0f0f0',backgroundColor:isSelected?(idx%2===0?'#eef1ff':'#f0f3ff'):(idx%2===0?'#fafbfc':'white'),cursor:'pointer'}}
+                              onClick={() => {
+                                setCricApiModal(prev => ({
+                                  ...prev,
+                                  selectedMatches: isSelected
+                                    ? prev.selectedMatches.filter(i => i !== m._idx)
+                                    : [...prev.selectedMatches, m._idx]
+                                }))
+                              }}
+                            >
+                              <td style={{padding:'10px 12px',textAlign:'center'}}>
+                                <input type="checkbox" checked={isSelected} onChange={() => {}} style={{cursor:'pointer',width:'15px',height:'15px'}} />
+                              </td>
+                              <td style={{padding:'10px 12px',fontWeight:'600',color:'#1a1a1a'}}>
+                                {m.home_team} <span style={{color:'#888',fontWeight:'400'}}>vs</span> {m.away_team}
+                              </td>
+                              <td style={{padding:'10px 12px',color:'#4a5568'}}>
+                                {m.scheduled_at ? new Date(m.scheduled_at).toLocaleString('en-IN', {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : 'TBD'}
+                              </td>
+                              <td style={{padding:'10px 12px',color:'#4a5568'}}>{m.venue || '—'}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Footer buttons */}
+                <div style={{display:'flex',gap:'10px',justifyContent:'flex-end',marginTop:'16px'}}>
+                  <button onClick={() => setCricApiModal(prev => ({...prev, show: false}))} style={{padding:'10px 20px',backgroundColor:'#ccc',border:'none',borderRadius:'25px',cursor:'pointer',fontWeight:'600'}}>Cancel</button>
+                  <button
+                    onClick={importCricApiSeason}
+                    disabled={cricApiModal.selectedMatches.length === 0 || !cricApiModal.seasonName.trim()}
+                    style={{padding:'10px 26px',background:'linear-gradient(135deg,#2ecc71,#27ae60)',color:'white',border:'none',borderRadius:'25px',cursor:'pointer',fontWeight:'700',fontSize:'14px',opacity:(cricApiModal.selectedMatches.length===0||!cricApiModal.seasonName.trim())?0.5:1}}
+                  >
+                    ✅ Import {cricApiModal.selectedMatches.length} Match{cricApiModal.selectedMatches.length !== 1 ? 'es' : ''}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* ── Step: Importing ── */}
+            {cricApiModal.step === 'importing' && (
+              <div style={{textAlign:'center',padding:'50px 20px'}}>
+                <div style={{fontSize:'48px',marginBottom:'16px'}}>⏳</div>
+                <p style={{fontSize:'16px',fontWeight:'700',color:'#333'}}>Creating season and importing matches…</p>
+                <p style={{fontSize:'13px',color:'#666'}}>Please wait</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
+// ── SeriesResultList ─────────────────────────────────────────────────────────
+function SeriesResultList({ seriesList, searchQuery, onSelect }) {
+  const q = (searchQuery || '').trim().toLowerCase()
+  const displayed = q
+    ? seriesList.filter(s => (s.name || s.title || '').toLowerCase().includes(q))
+    : seriesList
 
+  if (displayed.length === 0) {
+    return (
+      <div style={{textAlign:'center',padding:'40px',color:'#999',fontSize:'14px'}}>
+        {q ? 'No series match your search. Try a broader term.' : 'No upcoming series found.'}
+      </div>
+    )
+  }
 
-
-
-
-
-
-
-
-
+  return (
+    <div style={{overflowY:'auto',flex:1}}>
+      {displayed.map((s, idx) => (
+        <div
+          key={s.id || idx}
+          onClick={() => onSelect(s)}
+          style={{padding:'13px 15px',marginBottom:'8px',borderRadius:'10px',border:'1px solid #e8e8e8',cursor:'pointer',transition:'all 0.2s',backgroundColor:'#fafbfc'}}
+          onMouseEnter={e => { e.currentTarget.style.backgroundColor='#eef1ff'; e.currentTarget.style.borderColor='#667eea' }}
+          onMouseLeave={e => { e.currentTarget.style.backgroundColor='#fafbfc'; e.currentTarget.style.borderColor='#e8e8e8' }}
+        >
+          <div style={{fontWeight:'700',fontSize:'14px',color:'#1a1a1a'}}>{s.name || s.title}</div>
+          <div style={{fontSize:'12px',color:'#666',marginTop:'4px',display:'flex',gap:'14px',flexWrap:'wrap'}}>
+            {s.startDate && <span>Date: {s.startDate}{s.endDate ? ' to ' + s.endDate : ''}</span>}
+            {(s.odi > 0) && <span>ODI: {s.odi}</span>}
+            {(s.t20 > 0) && <span>T20: {s.t20}</span>}
+            {(s.test > 0) && <span>Test: {s.test}</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
 

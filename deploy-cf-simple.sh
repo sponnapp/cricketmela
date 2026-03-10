@@ -34,14 +34,17 @@ fi
 
 echo "✅ Build completed successfully!"
 
-# Step 1.5: Copy _redirects to dist for API routing
+# Step 1.5: Ensure _redirects is present in dist for SPA fallback/proxy rules
 echo ""
-echo "📋 Step 1.5: Copying _redirects configuration..."
-if [ -f "_redirects" ]; then
-    cp _redirects dist/
-    echo "✅ _redirects copied to dist/"
+echo "📋 Step 1.5: Ensuring _redirects configuration..."
+if [ -f "public/_redirects" ]; then
+    cp public/_redirects dist/_redirects
+    echo "✅ public/_redirects copied to dist/_redirects"
+elif [ -f "_redirects" ]; then
+    cp _redirects dist/_redirects
+    echo "✅ _redirects copied to dist/_redirects"
 else
-    echo "⚠️  Warning: _redirects file not found"
+    echo "⚠️  Warning: No _redirects file found"
 fi
 
 # Step 1.6: Copy _headers to dist for cache-control
@@ -93,5 +96,3 @@ echo "🎉 All done! Your Cricket Mela app is now updated in production!"
 echo "=========================================="
 
 cd ..
-
-
