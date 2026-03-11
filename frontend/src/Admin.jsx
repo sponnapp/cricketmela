@@ -33,6 +33,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
   const [passwordResetModal, setPasswordResetModal] = useState({show: false, userId: null, username: '', newPassword: ''})
   const [approveUserModal, setApproveUserModal] = useState({show: false, user: null, formData: {balance: 1000}, selectedSeasons: []})
   const [editSeasonModal, setEditSeasonModal] = useState({show: false, season: null, formData: {}})
+  const [predictionResultsModal, setPredictionResultsModal] = useState({show: false, matchId: null, matchName: '', formData: {toss_winner: '', man_of_match: '', best_bowler: ''}})
   const [emailSettings, setEmailSettings] = useState({ user: '', password: '', from: '' })
   const [emailMessage, setEmailMessage] = useState('')
   const [cricApiModal, setCricApiModal] = useState({
@@ -331,6 +332,108 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
     }
   }
 
+  // ── Cricbuzz Functions ────────────────────────────────────────────────────
+
+  function openCricbuzzModal() {
+    setCricApiModal({
+      show: true, step: 'series', loading: false, error: '',
+      searchQuery: '', seriesList: [], selectedSeries: null,
+      matchesList: [], selectedMatches: [], seasonName: '', hasFetched: false,
+      source: 'cricbuzz', // Add source flag to distinguish from CricAPI
+      seriesType: 'international' // 'international' or 'league'
+    })
+  }
+
+  async function fetchCricbuzzSeries(searchQuery = '', seriesType = null) {
+    const type = seriesType || cricApiModal.seriesType || 'international';
+    setCricApiModal(prev => ({...prev, loading: true, error: '', seriesType: type}))
+    try {
+      const params = new URLSearchParams();
+      params.append('type', type);
+      if (searchQuery) params.append('search', searchQuery);
+      
+      const r = await axios.get(`/api/admin/cricbuzz/series?${params.toString()}`, {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      setCricApiModal(prev => ({...prev, loading: false, seriesList: r.data.series || [], step: 'series', hasFetched: true}))
+    } catch (e) {
+      setCricApiModal(prev => ({...prev, loading: false, hasFetched: true, error: (e.response && e.response.data && e.response.data.error) || 'Failed to fetch series from Cricbuzz'}))
+    }
+  }
+
+  async function fetchCricbuzzMatches(series) {
+    setCricApiModal(prev => ({
+      ...prev,
+      loading: true,
+      error: '',
+      selectedSeries: series,
+      seasonName: series.name || '',
+      step: 'matches',
+      matchesList: [],
+      selectedMatches: []
+    }))
+    try {
+      const r = await axios.get(`/api/admin/cricbuzz/series/${encodeURIComponent(series.id)}/matches`, {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      const matches = r.data.matches || []
+      const mapped = matches.map((m, idx) => ({
+        ...m,
+        _idx: idx
+      }))
+      const allIdxs = mapped.map(m => m._idx)
+      setCricApiModal(prev => ({...prev, loading: false, matchesList: mapped, selectedMatches: allIdxs}))
+    } catch (e) {
+      setCricApiModal(prev => ({
+        ...prev,
+        loading: false,
+        error: e.response?.data?.error || 'Failed to fetch matches from Cricbuzz'
+      }))
+    }
+  }
+
+  async function importCricbuzzSeason() {
+    const { seasonName, matchesList, selectedMatches } = cricApiModal
+    if (!seasonName.trim()) {
+      setCricApiModal(prev => ({...prev, error: 'Please enter a season name'}))
+      return
+    }
+    if (selectedMatches.length === 0) {
+      setCricApiModal(prev => ({...prev, error: 'Please select at least one match'}))
+      return
+    }
+    setCricApiModal(prev => ({...prev, step: 'importing', loading: true, error: ''}))
+    const matchesToImport = matchesList
+      .filter(m => selectedMatches.includes(m._idx))
+      .map(m => ({
+        home_team: m.home_team,
+        away_team: m.away_team,
+        venue: m.venue,
+        scheduled_at: m.scheduled_at
+      }))
+    try {
+      const r = await axios.post('/api/admin/cricbuzz/import-season',
+        {
+          seasonName: seasonName.trim(),
+          matches: matchesToImport,
+          seriesId: cricApiModal.selectedSeries?.id || null
+        },
+        { headers: { 'x-user': user?.username || 'admin' } }
+      )
+      setCricApiModal(prev => ({...prev, show: false, loading: false}))
+      fetchSeasons()
+      fetchAllMatches()
+      toast('success', 'Success', `Season "${seasonName}" created with ${r.data.inserted} match(es) imported from Cricbuzz!`)
+    } catch (e) {
+      setCricApiModal(prev => ({
+        ...prev,
+        step: 'matches',
+        loading: false,
+        error: e.response?.data?.error || 'Failed to import season from Cricbuzz'
+      }))
+    }
+  }
+
   async function saveEmailSettings() {
     if (!emailSettings.user || !emailSettings.password) {
       return setEmailMessage('Email user and password are required')
@@ -411,6 +514,17 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
         headers: { 'x-user': user?.username || 'admin' }
       })
 
+      // Fetch season-specific balances
+      const balancesRes = await axios.get(`/api/admin/users/${userObj.id}/season-balances`, {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+
+      // Convert balances array to object keyed by season_id
+      const balancesMap = {}
+      balancesRes.data.forEach(sb => {
+        balancesMap[sb.season_id] = { balance: sb.balance, season_name: sb.season_name }
+      })
+
       setEditUserModal({
         show: true,
         user: userObj,
@@ -421,7 +535,8 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
           email: userObj.email || 'xyz@xyz.com'
         },
         assignedSeasons: seasonsRes.data || [],
-        authMethod: authRes.data || null
+        authMethod: authRes.data || null,
+        seasonBalances: balancesMap
       })
     } catch (e) {
       console.error('Error loading user data:', e)
@@ -435,7 +550,8 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
           email: userObj.email || 'xyz@xyz.com'
         },
         assignedSeasons: [],
-        authMethod: null
+        authMethod: null,
+        seasonBalances: {}
       })
     }
   }
@@ -452,8 +568,17 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
         { season_ids: editUserModal.assignedSeasons },
         { headers: { 'x-user': user?.username || 'admin' } }
       )
+      // Update season-specific balances
+      const balanceUpdates = Object.entries(editUserModal.seasonBalances).map(([seasonId, data]) => {
+        return axios.put(`/api/admin/users/${editUserModal.user.id}/seasons/${seasonId}/balance`,
+          { balance: data.balance },
+          { headers: { 'x-user': user?.username || 'admin' } }
+        )
+      })
+      await Promise.all(balanceUpdates)
+      
       toast('success', 'Success', 'User updated successfully')
-      setEditUserModal({show: false, user: null, formData: {}, assignedSeasons: []})
+      setEditUserModal({show: false, user: null, formData: {}, assignedSeasons: [], seasonBalances: {}})
       fetchUsers()
     } catch (e) {
       toast('error', 'Error', e.response?.data?.error || 'Failed to update user')
@@ -717,6 +842,23 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
     }
   }
 
+  async function submitPredictionResults() {
+    const { matchId, formData } = predictionResultsModal
+    if (!matchId) return
+
+    try {
+      await axios.post(`/api/admin/matches/${matchId}/prediction-results`,
+        formData,
+        { headers: { 'x-user': user?.username || 'admin' } }
+      )
+      toast('success', 'Success', 'Prediction results saved successfully')
+      setPredictionResultsModal({show: false, matchId: null, matchName: '', formData: {toss_winner: '', man_of_match: '', best_bowler: ''}})
+      fetchMatches(selectedSeason)
+    } catch (e) {
+      toast('error', 'Error', e.response?.data?.error || 'Failed to save prediction results')
+    }
+  }
+
   const tabButtonStyle = (isActive) => ({
     backgroundColor: isActive ? '#2ecc71' : '#bdc3c7',
     color: 'white',
@@ -880,16 +1022,29 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
       {activeTab === 'season' && (
         <>
           <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
-            <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '10px', fontSize: '18px', fontWeight: 'bold'}}>📡 Fetch Seasons from CricAPI</h3>
-            <p style={{color: '#666', fontSize: '13px', marginBottom: '14px', marginTop: 0}}>Pull upcoming cricket series (next 6 months) from CricAPI and import matches directly into a new season.</p>
-            <button
-              onClick={() => { openCricApiModal(); fetchCricApiSeries('') }}
-              style={{padding: '12px 30px', background: 'linear-gradient(135deg,#667eea,#764ba2)', color: 'white', border: 'none', borderRadius: '25px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', boxShadow: '0 4px 14px rgba(102,126,234,0.35)'}}
-              onMouseOver={e => e.currentTarget.style.opacity = '0.9'}
-              onMouseOut={e => e.currentTarget.style.opacity = '1'}
-            >
-              🏏 Fetch Available Series
-            </button>
+            <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '10px', fontSize: '18px', fontWeight: 'bold'}}>📡 Import Seasons from Cricket APIs</h3>
+            <p style={{color: '#666', fontSize: '13px', marginBottom: '14px', marginTop: 0}}>
+              Import upcoming cricket series and matches from Cricbuzz (recommended) or CricAPI. 
+              <br /><strong>Note:</strong> Cricbuzz provides more reliable data; CricAPI-imported seasons support squad data for predictions.
+            </p>
+            <div style={{display: 'flex', gap: '12px', flexWrap: 'wrap'}}>
+              <button
+                onClick={() => { openCricbuzzModal(); fetchCricbuzzSeries() }}
+                style={{padding: '12px 30px', background: 'linear-gradient(135deg,#2ecc71,#27ae60)', color: 'white', border: 'none', borderRadius: '25px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', boxShadow: '0 4px 14px rgba(46,204,113,0.35)'}}
+                onMouseOver={e => e.currentTarget.style.opacity = '0.9'}
+                onMouseOut={e => e.currentTarget.style.opacity = '1'}
+              >
+                🏏 Import from Cricbuzz (Recommended)
+              </button>
+              <button
+                onClick={() => { openCricApiModal(); fetchCricApiSeries('') }}
+                style={{padding: '12px 30px', background: 'linear-gradient(135deg,#667eea,#764ba2)', color: 'white', border: 'none', borderRadius: '25px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', boxShadow: '0 4px 14px rgba(102,126,234,0.35)'}}
+                onMouseOver={e => e.currentTarget.style.opacity = '0.9'}
+                onMouseOut={e => e.currentTarget.style.opacity = '1'}
+              >
+                🔮 Import from CricAPI (For Squads)
+              </button>
+            </div>
           </section>
 
           <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
@@ -1753,8 +1908,38 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
               </select>
             </div>
             <div style={{margin: '15px 0'}}>
-              <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Balance:</label>
-              <input type="number" value={editUserModal.formData.balance} onChange={e => setEditUserModal({...editUserModal, formData: {...editUserModal.formData, balance: parseInt(e.target.value) || 0}})} style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd'}} />
+              <label style={{display: 'block', marginBottom: '10px', fontWeight: 'bold'}}>Season Balances:</label>
+              {editUserModal.assignedSeasons.length === 0 ? (
+                <p style={{margin: 0, color: '#999', fontSize: '14px'}}>No seasons assigned yet</p>
+              ) : (
+                <div style={{border: '1px solid #ddd', borderRadius: '4px', padding: '12px', maxHeight: '200px', overflow: 'auto'}}>
+                  {editUserModal.assignedSeasons.map(seasonId => {
+                    const seasonData = editUserModal.seasonBalances[seasonId] || {}
+                    const seasonName = seasonData.season_name || seasons.find(s => s.id === seasonId)?.name || `Season ${seasonId}`
+                    const balance = seasonData.balance !== undefined ? seasonData.balance : 1000
+                    return (
+                      <div key={seasonId} style={{marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px solid #eee'}}>
+                        <label style={{display: 'block', marginBottom: '5px', fontWeight: '600', fontSize: '14px', color: '#333'}}>{seasonName}</label>
+                        <input
+                          type="number"
+                          value={balance}
+                          onChange={e => {
+                            const newBalance = parseInt(e.target.value) || 0
+                            setEditUserModal({
+                              ...editUserModal,
+                              seasonBalances: {
+                                ...editUserModal.seasonBalances,
+                                [seasonId]: { ...seasonData, balance: newBalance }
+                              }
+                            })
+                          }}
+                          style={{width: '100%', padding: '6px 10px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ccc', fontSize: '14px'}}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
             <div style={{margin: '15px 0'}}>
               <label style={{display: 'block', marginBottom: '10px', fontWeight: 'bold'}}>Assigned Seasons:</label>
@@ -1773,7 +1958,20 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                           const newAssignedSeasons = isChecked
                             ? [...editUserModal.assignedSeasons, season.id]
                             : editUserModal.assignedSeasons.filter(sid => sid !== season.id)
-                          setEditUserModal({...editUserModal, assignedSeasons: newAssignedSeasons})
+                          
+                          // When adding a season, add default balance; when removing, clean up
+                          const newSeasonBalances = {...editUserModal.seasonBalances}
+                          if (isChecked && !newSeasonBalances[season.id]) {
+                            newSeasonBalances[season.id] = { balance: 1000, season_name: season.name }
+                          } else if (!isChecked) {
+                            delete newSeasonBalances[season.id]
+                          }
+                          
+                          setEditUserModal({
+                            ...editUserModal, 
+                            assignedSeasons: newAssignedSeasons,
+                            seasonBalances: newSeasonBalances
+                          })
                         }}
                         style={{marginRight: '8px', cursor: 'pointer'}}
                       />
@@ -1881,10 +2079,18 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'18px'}}>
               <div>
                 <h3 style={{margin:0,fontSize:'18px',fontWeight:'800',color:'#1a1a1a'}}>
-                  {cricApiModal.step === 'series' ? '📡 Available Cricket Series' : cricApiModal.step === 'importing' ? '⏳ Importing Season…' : `🏏 Matches – ${cricApiModal.selectedSeries?.name || ''}`}
+                  {cricApiModal.step === 'series' 
+                    ? `📡 Available Cricket Series ${cricApiModal.source === 'cricbuzz' ? '(Cricbuzz)' : '(CricAPI)'}` 
+                    : cricApiModal.step === 'importing' 
+                    ? '⏳ Importing Season…' 
+                    : `🏏 Matches – ${cricApiModal.selectedSeries?.name || ''}`}
                 </h3>
                 <p style={{margin:'4px 0 0 0',fontSize:'12px',color:'#666'}}>
-                  {cricApiModal.step === 'series' ? 'Select a series to view and import its matches' : cricApiModal.step === 'matches' ? 'Choose matches to include. Uncheck any you want to skip.' : 'Creating season and inserting matches…'}
+                  {cricApiModal.step === 'series' 
+                    ? `Select a series to view and import its matches${cricApiModal.source === 'cricbuzz' ? ' (Recommended source)' : ' (Supports squad data)'}` 
+                    : cricApiModal.step === 'matches' 
+                    ? 'Choose matches to include. Uncheck any you want to skip.' 
+                    : 'Creating season and inserting matches…'}
                 </p>
               </div>
               <button onClick={() => setCricApiModal(prev => ({...prev, show: false}))} style={{background:'none',border:'none',fontSize:'22px',cursor:'pointer',color:'#666',lineHeight:1}}>✕</button>
@@ -1900,19 +2106,68 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
             {/* ── Step: Series ── */}
             {cricApiModal.step === 'series' && (
               <>
+                {/* Series Type Toggle (Cricbuzz only) */}
+                {cricApiModal.source === 'cricbuzz' && (
+                  <div style={{display:'flex',gap:'8px',marginBottom:'14px',justifyContent:'center'}}>
+                    <button
+                      onClick={() => {
+                        setCricApiModal(prev => ({...prev, seriesType: 'international', searchQuery: ''}));
+                        fetchCricbuzzSeries('', 'international');
+                      }}
+                      style={{
+                        padding:'8px 20px',
+                        background: cricApiModal.seriesType === 'international' ? 'linear-gradient(135deg,#2ecc71,#27ae60)' : 'rgba(255,255,255,0.5)',
+                        color: cricApiModal.seriesType === 'international' ? 'white' : '#666',
+                        border: cricApiModal.seriesType === 'international' ? 'none' : '1px solid #ddd',
+                        borderRadius:'20px',
+                        cursor:'pointer',
+                        fontWeight:'600',
+                        fontSize:'13px',
+                        transition:'all 0.2s'
+                      }}
+                    >
+                      🌍 International
+                    </button>
+                    <button
+                      onClick={() => {
+                        setCricApiModal(prev => ({...prev, seriesType: 'league', searchQuery: ''}));
+                        fetchCricbuzzSeries('', 'league');
+                      }}
+                      style={{
+                        padding:'8px 20px',
+                        background: cricApiModal.seriesType === 'league' ? 'linear-gradient(135deg,#667eea,#764ba2)' : 'rgba(255,255,255,0.5)',
+                        color: cricApiModal.seriesType === 'league' ? 'white' : '#666',
+                        border: cricApiModal.seriesType === 'league' ? 'none' : '1px solid #ddd',
+                        borderRadius:'20px',
+                        cursor:'pointer',
+                        fontWeight:'600',
+                        fontSize:'13px',
+                        transition:'all 0.2s'
+                      }}
+                    >
+                      🏏 League
+                    </button>
+                  </div>
+                )}
+
                 <div style={{display:'flex',gap:'10px',marginBottom:'14px'}}>
                   <input
                     type="text"
                     value={cricApiModal.searchQuery}
                     onChange={e => setCricApiModal(prev => ({...prev, searchQuery: e.target.value}))}
-                    onKeyDown={e => { if (e.key === 'Enter') fetchCricApiSeries(cricApiModal.searchQuery) }}
-                    placeholder="Search series (e.g. IPL, India, T20)"
+                    onKeyDown={e => { 
+                      if (e.key === 'Enter') {
+                        if (cricApiModal.source === 'cricbuzz') fetchCricbuzzSeries(cricApiModal.searchQuery);
+                        else fetchCricApiSeries(cricApiModal.searchQuery);
+                      }
+                    }}
+                    placeholder={"Search series (e.g. IPL, India, Pakistan)"}
                     style={{flex:1,padding:'10px 15px',border:'1px solid #ddd',borderRadius:'25px',fontSize:'14px',outline:'none'}}
                     onFocus={e => e.target.style.borderColor='#667eea'}
                     onBlur={e => e.target.style.borderColor='#ddd'}
                   />
                   <button
-                    onClick={() => fetchCricApiSeries(cricApiModal.searchQuery)}
+                    onClick={() => cricApiModal.source === 'cricbuzz' ? fetchCricbuzzSeries(cricApiModal.searchQuery) : fetchCricApiSeries(cricApiModal.searchQuery)}
                     disabled={cricApiModal.loading}
                     style={{padding:'10px 22px',background:'linear-gradient(135deg,#667eea,#764ba2)',color:'white',border:'none',borderRadius:'25px',cursor:'pointer',fontWeight:'bold',fontSize:'13px',opacity:cricApiModal.loading?0.6:1}}
                   >
@@ -1921,16 +2176,18 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                 </div>
 
                 {cricApiModal.loading ? (
-                  <div style={{textAlign:'center',padding:'40px',color:'#667eea',fontSize:'14px'}}>🔄 Fetching series from CricAPI...</div>
+                  <div style={{textAlign:'center',padding:'40px',color:'#667eea',fontSize:'14px'}}>🔄 Fetching series from {cricApiModal.source === 'cricbuzz' ? 'Cricbuzz' : 'CricAPI'}...</div>
                 ) : !cricApiModal.hasFetched ? (
                   <div style={{textAlign:'center',padding:'40px',color:'#999',fontSize:'14px'}}>
-                    Press <strong>Search</strong> to list upcoming series, or type a keyword first (e.g. India, IPL).
+                    {cricApiModal.source === 'cricbuzz' 
+                      ? 'Loading series from Cricbuzz...'
+                      : 'Press <strong>Search</strong> to list upcoming series, or type a keyword first (e.g. India, IPL).'}
                   </div>
                 ) : (
                   <SeriesResultList
                     seriesList={cricApiModal.seriesList}
                     searchQuery={cricApiModal.searchQuery}
-                    onSelect={fetchCricApiMatches}
+                    onSelect={cricApiModal.source === 'cricbuzz' ? fetchCricbuzzMatches : fetchCricApiMatches}
                   />
                 )}
               </>
@@ -2012,7 +2269,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                 <div style={{display:'flex',gap:'10px',justifyContent:'flex-end',marginTop:'16px'}}>
                   <button onClick={() => setCricApiModal(prev => ({...prev, show: false}))} style={{padding:'10px 20px',backgroundColor:'#ccc',border:'none',borderRadius:'25px',cursor:'pointer',fontWeight:'600'}}>Cancel</button>
                   <button
-                    onClick={importCricApiSeason}
+                    onClick={cricApiModal.source === 'cricbuzz' ? importCricbuzzSeason : importCricApiSeason}
                     disabled={cricApiModal.selectedMatches.length === 0 || !cricApiModal.seasonName.trim()}
                     style={{padding:'10px 26px',background:'linear-gradient(135deg,#2ecc71,#27ae60)',color:'white',border:'none',borderRadius:'25px',cursor:'pointer',fontWeight:'700',fontSize:'14px',opacity:(cricApiModal.selectedMatches.length===0||!cricApiModal.seasonName.trim())?0.5:1}}
                   >
