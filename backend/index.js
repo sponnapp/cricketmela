@@ -362,6 +362,17 @@ function initializeDatabase() {
       } else {
         console.log('✅ seasons.cricapi_series_id column already exists');
       }
+      
+      // Migration: Add cricbuzz_series_id column to seasons if it doesn't exist
+      const hasCricbuzzId = columns && columns.some(c => c.name === 'cricbuzz_series_id');
+      if (!hasCricbuzzId) {
+        db.run(`ALTER TABLE seasons ADD COLUMN cricbuzz_series_id INTEGER`, (alterErr) => {
+          if (alterErr) console.log('Note: Could not add cricbuzz_series_id to seasons:', alterErr.message);
+          else console.log('✅ Added cricbuzz_series_id column to seasons table');
+        });
+      } else {
+        console.log('✅ seasons.cricbuzz_series_id column already exists');
+      }
     });
 
     // Clean up duplicate votes: keep only the latest vote per user per match
@@ -520,10 +531,12 @@ app.use((req, res, next) => {
   });
 });
 
-function requireRole(roles) {
+function requireRole(...roles) {
+  // Flatten in case called as requireRole(['admin','superuser']) or requireRole('admin','superuser')
+  const allowed = roles.flat();
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'Unauthorized: missing user header' });
-    if (Array.isArray(roles) ? roles.includes(req.user.role) : req.user.role === roles) return next();
+    if (allowed.includes(req.user.role)) return next();
     return res.status(403).json({ error: 'Forbidden' });
   };
 }
@@ -775,9 +788,14 @@ app.post('/api/matches/:id/vote', (req, res) => {
   });
 });
 
-// ── CricAPI proxy endpoints ───────────────────────────────────────────────────
+// ── Cricket API Configuration ───────────────────────────────────────────────────
 
+// CricAPI (used only for squad data)
 const CRICAPI_KEY = '491b7c88-16e4-428d-b2c9-99b687267947';
+
+// Cricbuzz via RapidAPI (primary source for series and matches)
+const CRICBUZZ_API_KEY = '3c2eeb1734mshfa4037c65f7b196p1afc2bjsn8d7c6446a89e';
+const CRICBUZZ_API_HOST = 'cricbuzz-cricket.p.rapidapi.com';
 
 // Prefer known-good series IDs when CricAPI returns duplicate names with inconsistent IDs.
 const CRICAPI_SERIES_ID_OVERRIDES = {
@@ -866,6 +884,8 @@ app.get('/api/admin/cricapi/series', requireRole('admin', 'superuser'), (req, re
 });
 
 // GET /api/admin/cricapi/series/:id/matches  – fetch matches for a specific series
+// KEY FIX: CricAPI duplicates series with same name across multiple IDs, each ID only
+// contains SOME of the matches. We must collect from ALL duplicate IDs and merge.
 app.get('/api/admin/cricapi/series/:id/matches', requireRole('admin', 'superuser'), (req, res) => {
   const https = require('https');
   const seriesId = req.params.id;
@@ -876,15 +896,13 @@ app.get('/api/admin/cricapi/series/:id/matches', requireRole('admin', 'superuser
       let data = '';
       apiRes.on('data', chunk => data += chunk);
       apiRes.on('end', () => {
-        try {
-          done(null, JSON.parse(data));
-        } catch (e) {
-          done(e);
-        }
+        try { done(null, JSON.parse(data)); }
+        catch (e) { done(e); }
       });
     }).on('error', done);
   }
 
+  // Fetch matchList for one series ID
   function fetchSeriesInfo(id, done) {
     const url = `https://api.cricapi.com/v1/series_info?apikey=${CRICAPI_KEY}&id=${encodeURIComponent(id)}`;
     getJson(url, (err, parsed) => {
@@ -895,14 +913,15 @@ app.get('/api/admin/cricapi/series/:id/matches', requireRole('admin', 'superuser
     });
   }
 
-  function findAlternateSeriesIds(done) {
-    if (!seriesName) return done(null, []);
+  // Find ALL series IDs (including the selected one) that share the same name
+  function findAllSeriesIds(done) {
+    const allIds = [seriesId]; // always include the selected one
+    if (!seriesName) return done(null, allIds);
     const url = `https://api.cricapi.com/v1/series?apikey=${CRICAPI_KEY}&offset=0&search=${encodeURIComponent(seriesName)}`;
     getJson(url, (err, parsed) => {
-      if (err) return done(null, []);
+      if (err) return done(null, allIds);
       const list = Array.isArray(parsed && parsed.data) ? parsed.data : [];
       const nameKey = seriesName.toLowerCase();
-      const ids = [];
       const seen = new Set([seriesId]);
       for (const s of list) {
         const sName = String((s && s.name) || '').trim().toLowerCase();
@@ -910,76 +929,62 @@ app.get('/api/admin/cricapi/series/:id/matches', requireRole('admin', 'superuser
         if (!sId || seen.has(sId)) continue;
         if (sName === nameKey) {
           seen.add(sId);
-          ids.push(sId);
+          allIds.push(sId);
         }
       }
-      done(null, ids.slice(0, 10));
+      console.log(`[CricAPI] Found ${allIds.length} total series IDs for "${seriesName}": ${allIds.join(', ')}`);
+      done(null, allIds);
     });
   }
 
-  function fetchFromMatchesApi(seriesInfo) {
-    // Fallback: use /matches endpoint filtered by series_id
+  // Fetch matchList from ALL series IDs in parallel, merge and deduplicate by match name+date
+  function fetchAllSeriesMatches(allIds, done) {
+    let completed = 0;
     let allMatches = [];
-    let offset = 0;
-    const fetchPage = () => {
-      const url = `https://api.cricapi.com/v1/matches?apikey=${CRICAPI_KEY}&offset=${offset}`;
-      https.get(url, (apiRes) => {
-        let data = '';
-        apiRes.on('data', chunk => data += chunk);
-        apiRes.on('end', () => {
-          try {
-            const parsed = JSON.parse(data);
-            const pageData = parsed.data || [];
-            const filtered = pageData.filter(m => m.series_id === seriesId);
-            allMatches = allMatches.concat(filtered);
-            // If there are more pages and we found some, try next (max 3 pages)
-            if (pageData.length > 0 && offset < 40) {
-              offset += 25;
-              fetchPage();
-            } else {
-              res.json({ matches: allMatches, seriesInfo: seriesInfo || {} });
-            }
-          } catch (e) {
-            res.json({ matches: allMatches, seriesInfo: seriesInfo || {} });
-          }
-        });
-      }).on('error', () => {
-        res.json({ matches: allMatches, seriesInfo: seriesInfo || {} });
-      });
-    };
-    fetchPage();
-  }
+    const seenMatchKeys = new Set();
 
-  function tryAlternateIds(ids, baseSeriesInfo, idx) {
-    if (!ids || idx >= ids.length) {
-      return fetchFromMatchesApi(baseSeriesInfo);
-    }
-    fetchSeriesInfo(ids[idx], (errAlt, alt) => {
-      if (!errAlt && alt && alt.matchList.length > 0) {
-        return res.json({
-          matches: alt.matchList,
-          seriesInfo: alt.info || baseSeriesInfo || {},
-          resolvedSeriesId: ids[idx]
-        });
-      }
-      tryAlternateIds(ids, baseSeriesInfo, idx + 1);
+    if (allIds.length === 0) return done(null, [], null);
+
+    let primaryInfo = null;
+
+    allIds.forEach((id, idx) => {
+      fetchSeriesInfo(id, (err, result) => {
+        completed++;
+        if (!err && result && result.matchList.length > 0) {
+          console.log(`[CricAPI] Series ID ${id}: ${result.matchList.length} matches`);
+          if (idx === 0) primaryInfo = result.info; // keep info from first (selected) series
+          result.matchList.forEach(m => {
+            // Deduplicate by match name + date combo
+            const key = `${(m.name || '').trim().toLowerCase()}|${(m.dateTimeGMT || m.date || '').trim()}`;
+            if (!seenMatchKeys.has(key)) {
+              seenMatchKeys.add(key);
+              allMatches.push(m);
+            }
+          });
+        } else {
+          console.log(`[CricAPI] Series ID ${id}: 0 matches`);
+        }
+
+        if (completed === allIds.length) {
+          // Sort merged matches by date
+          allMatches.sort((a, b) => {
+            const da = new Date(a.dateTimeGMT || a.date || 0);
+            const db = new Date(b.dateTimeGMT || b.date || 0);
+            return da - db;
+          });
+          console.log(`[CricAPI] ✅ Merged total unique matches: ${allMatches.length}`);
+          done(null, allMatches, primaryInfo);
+        }
+      });
     });
   }
 
-  fetchSeriesInfo(seriesId, (err, primary) => {
-    if (err) {
-      return res.status(500).json({ error: 'Failed to connect to CricAPI: ' + err.message });
-    }
-
-    if (primary && primary.matchList.length > 0) {
-      return res.json({ matches: primary.matchList, seriesInfo: primary.info || {} });
-    }
-
-    findAlternateSeriesIds((_, altIds) => {
-      if (altIds && altIds.length > 0) {
-        return tryAlternateIds(altIds, primary ? primary.info : null, 0);
+  findAllSeriesIds((_, allIds) => {
+    fetchAllSeriesMatches(allIds, (err, mergedMatches, seriesInfo) => {
+      if (err) {
+        return res.status(500).json({ error: 'Failed to fetch series matches: ' + err.message });
       }
-      return fetchFromMatchesApi(primary ? primary.info : null);
+      res.json({ matches: mergedMatches, seriesInfo: seriesInfo || {} });
     });
   });
 });
@@ -1024,6 +1029,216 @@ app.post('/api/admin/cricapi/import-season', requireRole('admin'), (req, res) =>
 });
 
 // ── End CricAPI proxy endpoints ───────────────────────────────────────────────
+
+// ── Cricbuzz API endpoints (Primary source for series & matches) ──────────────
+
+// Helper function to make Cricbuzz API requests
+function fetchCricbuzz(endpoint, callback) {
+  const https = require('https');
+  const options = {
+    hostname: CRICBUZZ_API_HOST,
+    path: endpoint,
+    method: 'GET',
+    headers: {
+      'x-rapidapi-host': CRICBUZZ_API_HOST,
+      'x-rapidapi-key': CRICBUZZ_API_KEY
+    }
+  };
+  
+  const req = https.request(options, (apiRes) => {
+    let data = '';
+    apiRes.on('data', chunk => data += chunk);
+    apiRes.on('end', () => {
+      try {
+        const parsed = JSON.parse(data);
+        callback(null, parsed);
+      } catch (e) {
+        callback(e);
+      }
+    });
+  });
+  
+  req.on('error', callback);
+  req.end();
+}
+
+// GET /api/player-image/:imageId - Proxy player images from Cricbuzz
+app.get('/api/player-image/:imageId', (req, res) => {
+  const https = require('https');
+  const imageId = req.params.imageId;
+  
+  // Validate imageId format (should be 'c' followed by digits)
+  if (!imageId || !/^c\d+$/.test(imageId)) {
+    return res.status(400).json({ error: 'Invalid image ID format' });
+  }
+
+  const options = {
+    hostname: CRICBUZZ_API_HOST,
+    path: `/img/v1/i1/${imageId}/i.jpg`,
+    method: 'GET',
+    headers: {
+      'x-rapidapi-host': CRICBUZZ_API_HOST,
+      'x-rapidapi-key': CRICBUZZ_API_KEY
+    }
+  };
+
+  const apiReq = https.request(options, (apiRes) => {
+    // Set content type for image
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+    
+    // Pipe the image data directly to response
+    apiRes.pipe(res);
+  });
+
+  apiReq.on('error', (err) => {
+    res.status(500).json({ error: 'Failed to fetch image' });
+  });
+
+  apiReq.end();
+});
+
+// GET /api/admin/cricbuzz/series – fetch international and league series from Cricbuzz
+app.get('/api/admin/cricbuzz/series', requireRole('admin', 'superuser'), (req, res) => {
+  const requestedType = req.query.type || 'international';
+  const searchQuery = req.query.search || '';
+  
+  // Validate seriesType to prevent path traversal
+  const allowedTypes = ['international', 'league'];
+  const seriesType = allowedTypes.includes(requestedType) ? requestedType : 'international';
+  
+  fetchCricbuzz(`/series/v1/${seriesType}`, (err, data) => {
+    if (err) {
+      return res.status(500).json({ error: 'Failed to fetch series from Cricbuzz: ' + err.message });
+    }
+    
+    if (!data || !data.seriesMapProto) {
+      return res.json({ series: [] });
+    }
+    
+    // Flatten series from all months and filter by date range (next 6 months)
+    const now = new Date();
+    const sixMonthsLater = new Date(now);
+    sixMonthsLater.setMonth(sixMonthsLater.getMonth() + 6);
+    const thirtyDaysAgo = new Date(now);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const allSeries = [];
+    data.seriesMapProto.forEach(monthGroup => {
+      if (Array.isArray(monthGroup.series)) {
+        monthGroup.series.forEach(s => {
+          // Filter by date range
+          const startDate = s.startDt ? new Date(parseInt(s.startDt)) : null;
+          if (startDate && startDate >= thirtyDaysAgo && startDate <= sixMonthsLater) {
+            const seriesItem = {
+              id: s.id,
+              name: s.name,
+              startDate: startDate.toISOString().split('T')[0],
+              endDate: s.endDt ? new Date(parseInt(s.endDt)).toISOString().split('T')[0] : null,
+              isLiveStreamEnabled: s.isLiveStreamEnabled || false
+            };
+            
+            // Apply search filter if provided
+            if (!searchQuery || seriesItem.name.toLowerCase().includes(searchQuery.toLowerCase())) {
+              allSeries.push(seriesItem);
+            }
+          }
+        });
+      }
+    });
+    
+    res.json({ series: allSeries });
+  });
+});
+
+// GET /api/admin/cricbuzz/series/:id/matches – fetch matches for a Cricbuzz series
+app.get('/api/admin/cricbuzz/series/:id/matches', requireRole('admin', 'superuser'), (req, res) => {
+  const seriesId = req.params.id;
+  
+  fetchCricbuzz(`/series/v1/${seriesId}`, (err, data) => {
+    if (err) {
+      return res.status(500).json({ error: 'Failed to fetch matches from Cricbuzz: ' + err.message });
+    }
+    
+    if (!data || !data.matchDetails) {
+      return res.json({ matches: [] });
+    }
+    
+    const matches = [];
+    data.matchDetails.forEach(detail => {
+      if (detail.matchDetailsMap && Array.isArray(detail.matchDetailsMap.match)) {
+        detail.matchDetailsMap.match.forEach(m => {
+          const matchInfo = m.matchInfo;
+          if (!matchInfo) return;
+          
+          // Format date from timestamp to readable format
+          const scheduledAt = matchInfo.startDate 
+            ? new Date(parseInt(matchInfo.startDate)).toISOString()
+            : null;
+          
+          matches.push({
+            id: matchInfo.matchId,
+            name: `${matchInfo.team1.teamName} vs ${matchInfo.team2.teamName}`,
+            matchDesc: matchInfo.matchDesc,
+            matchFormat: matchInfo.matchFormat,
+            home_team: matchInfo.team1.teamName,
+            away_team: matchInfo.team2.teamName,
+            scheduled_at: scheduledAt,
+            venue: matchInfo.venueInfo ? `${matchInfo.venueInfo.ground}, ${matchInfo.venueInfo.city}` : '',
+            state: matchInfo.state,
+            seriesName: matchInfo.seriesName
+          });
+        });
+      }
+    });
+    
+    res.json({ matches, seriesInfo: { name: matches[0]?.seriesName || '' } });
+  });
+});
+
+// POST /api/admin/cricbuzz/import-season – create season from Cricbuzz + import matches
+app.post('/api/admin/cricbuzz/import-season', requireRole('admin'), (req, res) => {
+  const { seasonName, matches: matchesToImport, seriesId } = req.body;
+  if (!seasonName) return res.status(400).json({ error: 'seasonName required' });
+  if (!Array.isArray(matchesToImport) || matchesToImport.length === 0) {
+    return res.status(400).json({ error: 'At least one match required' });
+  }
+
+  const db = openDb();
+  db.serialize(() => {
+    // Create the season with cricbuzz_series_id
+    db.run('INSERT INTO seasons (name, cricbuzz_series_id) VALUES (?, ?)', [seasonName, seriesId || null], function(err) {
+      if (err) {
+        db.close();
+        return res.status(500).json({ error: 'Failed to create season: ' + err.message });
+      }
+      const seasonId = this.lastID;
+      const stmt = db.prepare(
+        'INSERT INTO matches (season_id, home_team, away_team, scheduled_at, venue) VALUES (?, ?, ?, ?, ?)'
+      );
+      let inserted = 0;
+      let errors = [];
+      for (const m of matchesToImport) {
+        try {
+          // Keep ISO format to preserve timezone - frontend will convert to local time for display
+          const scheduledAt = m.scheduled_at || '';
+          
+          stmt.run([seasonId, m.home_team, m.away_team, scheduledAt, m.venue || '']);
+          inserted++;
+        } catch (e) {
+          errors.push(e.message);
+        }
+      }
+      stmt.finalize(err2 => {
+        db.close();
+        if (err2) return res.status(500).json({ error: 'Failed to insert matches: ' + err2.message });
+        res.status(201).json({ ok: true, seasonId, seasonName, inserted, errors });
+      });
+    });
+  });
+});
+
+// ── End Cricbuzz API endpoints ─────────────────────────────────────────────────
 
 // Admin endpoints: create season
 app.post('/api/admin/seasons', requireRole('admin'), (req, res) => {
@@ -1805,6 +2020,7 @@ app.get('/api/standings', (req, res) => {
 app.get('/api/users/:userId/votes', (req, res) => {
   const userId = Number(req.params.userId);
   const db = openDb();
+  // Only show votes for seasons the user currently has access to
   db.all(`
     SELECT v.id, v.match_id, v.team, v.points, v.created_at,
            m.home_team, m.away_team, m.winner, m.scheduled_at,
@@ -1812,6 +2028,7 @@ app.get('/api/users/:userId/votes', (req, res) => {
     FROM votes v
     JOIN matches m ON v.match_id = m.id
     LEFT JOIN seasons s ON s.id = m.season_id
+    JOIN user_seasons us ON us.season_id = m.season_id AND us.user_id = v.user_id
     WHERE v.user_id = ?
     ORDER BY m.scheduled_at ASC
   `, [userId], (err, rows) => {
@@ -2802,12 +3019,104 @@ app.get('/api/predictions/players-by-season/:seasonId', requireRole('picker', 's
 
   const db = openDb();
 
-  db.get('SELECT cricapi_series_id FROM seasons WHERE id = ?', [seasonId], (err, season) => {
+  db.get('SELECT cricapi_series_id, cricbuzz_series_id FROM seasons WHERE id = ?', [seasonId], (err, season) => {
     db.close();
     if (err) return res.status(500).json({ error: 'DB error' });
     if (!season) return res.status(404).json({ error: 'Season not found' });
+    
+    // Prefer Cricbuzz squad data if available
+    if (season.cricbuzz_series_id) {
+      const cacheKey = `cricbuzz_squad_${seasonId}`;
+      const cached = getCachedPredictionPlayers(cacheKey);
+
+      // Return cached data if available
+      if (cached) {
+        if (team1 && team2) {
+          const filtered = filterPlayersByTeams(cached, team1, team2);
+          return res.json(filtered);
+        }
+        return res.json(cached);
+      }
+
+      // Fetch from Cricbuzz
+      fetchCricbuzz(`/series/v1/${season.cricbuzz_series_id}/squads`, (cbErr, cbData) => {
+        if (cbErr || !cbData || !cbData.squads) {
+          return res.json({ players: [], source: 'cricbuzz_error', message: 'Failed to fetch squad from Cricbuzz' });
+        }
+
+        // Get all squad IDs for actual teams (not headers)
+        const teamSquads = cbData.squads.filter(s => s.squadId && !s.isHeader);
+        
+        if (teamSquads.length === 0) {
+          return res.json({ players: [], source: 'cricbuzz_no_squads', message: 'No squads available for this series' });
+        }
+
+        // Fetch player details for each team squad
+        let completed = 0;
+        const teamSquadMap = {};
+        const allPlayers = [];
+
+        teamSquads.forEach(squad => {
+          fetchCricbuzz(`/series/v1/${season.cricbuzz_series_id}/squads/${squad.squadId}`, (err, playerData) => {
+            completed++;
+            
+            if (!err && playerData && Array.isArray(playerData.player)) {
+              const teamName = squad.squadType || `Team ${squad.teamId}`;
+              const players = [];
+              
+              playerData.player.forEach(p => {
+                // Skip header rows
+                if (p.isHeader || !p.id) return;
+                
+                players.push({
+                  id: p.id,
+                  name: p.name,
+                  role: p.role || '',
+                  imageId: p.imageId || null,
+                  imageUrl: p.imageId ? `/api/player-image/c${p.imageId}` : null,
+                  battingStyle: p.battingStyle || '',
+                  bowlingStyle: p.bowlingStyle || '',
+                  captain: p.captain || false
+                });
+                allPlayers.push(players[players.length - 1]);
+              });
+              
+              teamSquadMap[teamName] = players;
+            }
+
+            // When all squads fetched, cache and return
+            if (completed === teamSquads.length) {
+              const fullData = {
+                players: allPlayers,
+                source: 'cricbuzz',
+                season_id: seasonId,
+                teamSquads: teamSquadMap
+              };
+
+              setCachedPredictionPlayers(cacheKey, fullData);
+
+              // Filter by teams if provided
+              if (team1 && team2) {
+                const filtered = filterPlayersByTeams(fullData, team1, team2);
+                return res.json(filtered);
+              }
+
+              res.json(fullData);
+            }
+          });
+        });
+      });
+      return; // Exit early for Cricbuzz path
+    }
+    
+    // Fallback to CricAPI if season has cricapi_series_id
     if (!season.cricapi_series_id) {
-      return res.json({ players: [], source: 'no_series_id', message: 'No CricAPI series ID stored for this season' });
+      // Manually created season
+      return res.json({ 
+        players: [], 
+        source: 'no_series_id', 
+        message: 'No squad data available for this season. Import from Cricbuzz or CricAPI to get player squads, or use the "Other" option for predictions.' 
+      });
     }
 
     const cacheKey = `season_squad_${seasonId}`;
@@ -2880,7 +3189,7 @@ app.get('/api/predictions/players-by-season/:seasonId', requireRole('picker', 's
   });
 });
 
-// POST /api/admin/seasons/:id/refresh-squad - force refresh latest season squad from CricAPI
+// POST /api/admin/seasons/:id/refresh-squad - force refresh latest season squad from Cricbuzz or CricAPI
 app.post('/api/admin/seasons/:id/refresh-squad', requireRole('admin'), (req, res) => {
   const seasonId = Number(req.params.id);
   if (!Number.isFinite(seasonId)) {
@@ -2888,12 +3197,87 @@ app.post('/api/admin/seasons/:id/refresh-squad', requireRole('admin'), (req, res
   }
 
   const db = openDb();
-  db.get('SELECT id, name, cricapi_series_id FROM seasons WHERE id = ?', [seasonId], (err, season) => {
+  db.get('SELECT id, name, cricapi_series_id, cricbuzz_series_id FROM seasons WHERE id = ?', [seasonId], (err, season) => {
     db.close();
     if (err) return res.status(500).json({ error: 'DB error' });
     if (!season) return res.status(404).json({ error: 'Season not found' });
+    
+    // Prefer Cricbuzz if available
+    if (season.cricbuzz_series_id) {
+      const cacheKey = `cricbuzz_squad_${seasonId}`;
+      predictionPlayersCache.delete(cacheKey);
+
+      // First get squad IDs
+      fetchCricbuzz(`/series/v1/${season.cricbuzz_series_id}/squads`, (cbErr, cbData) => {
+        if (cbErr || !cbData || !cbData.squads) {
+          return res.status(502).json({ error: 'Failed to fetch squads from Cricbuzz' });
+        }
+
+        const teamSquads = cbData.squads.filter(s => s.squadId && !s.isHeader);
+        if (teamSquads.length === 0) {
+          return res.status(404).json({ error: 'No squads available for this series on Cricbuzz' });
+        }
+
+        // Fetch player details for each team
+        let completed = 0;
+        const teamSquadMap = {};
+        const allPlayers = [];
+
+        teamSquads.forEach(squad => {
+          fetchCricbuzz(`/series/v1/${season.cricbuzz_series_id}/squads/${squad.squadId}`, (err2, playerData) => {
+            completed++;
+            
+            if (!err2 && playerData && Array.isArray(playerData.player)) {
+              const teamName = squad.squadType || `Team ${squad.teamId}`;
+              const players = [];
+              
+              playerData.player.forEach(p => {
+                if (p.isHeader || !p.id) return;
+                players.push({
+                  id: p.id,
+                  name: p.name,
+                  role: p.role || '',
+                  imageId: p.imageId || null,
+                  imageUrl: p.imageId ? `/api/player-image/c${p.imageId}` : null,
+                  battingStyle: p.battingStyle || '',
+                  bowlingStyle: p.bowlingStyle || '',
+                  captain: p.captain || false
+                });
+                allPlayers.push(players[players.length - 1]);
+              });
+              
+              teamSquadMap[teamName] = players;
+            }
+
+            if (completed === teamSquads.length) {
+              const fullData = {
+                players: allPlayers,
+                source: 'cricbuzz',
+                season_id: seasonId,
+                teamSquads: teamSquadMap
+              };
+
+              setCachedPredictionPlayers(cacheKey, fullData);
+
+              res.json({
+                ok: true,
+                season_id: seasonId,
+                season_name: season.name,
+                teams: Object.keys(teamSquadMap).length,
+                players: allPlayers.length,
+                source: 'cricbuzz',
+                refreshed_at: new Date().toISOString()
+              });
+            }
+          });
+        });
+      });
+      return; // Exit early for Cricbuzz
+    }
+    
+    // Fallback to CricAPI
     if (!season.cricapi_series_id) {
-      return res.status(400).json({ error: 'This season has no CricAPI series mapping. Re-import from CricAPI first.' });
+      return res.status(400).json({ error: 'This season has no Cricbuzz or CricAPI series mapping. Re-import from Cricbuzz or CricAPI first.' });
     }
 
     const cacheKey = `season_squad_${seasonId}`;
@@ -2933,7 +3317,7 @@ app.post('/api/admin/seasons/:id/refresh-squad', requireRole('admin'), (req, res
 
       const fullData = {
         players: allPlayers,
-        source: 'series_squad',
+        source: 'cricapi',
         season_id: seasonId,
         teamSquads: teamSquadMap
       };
@@ -2946,6 +3330,7 @@ app.post('/api/admin/seasons/:id/refresh-squad', requireRole('admin'), (req, res
         season_name: season.name,
         teams: Object.keys(teamSquadMap).length,
         players: allPlayers.length,
+        source: 'cricapi',
         refreshed_at: new Date().toISOString()
       });
     });
@@ -2991,17 +3376,37 @@ app.get('/api/predictions/upcoming', requireRole('picker', 'superuser', 'admin')
 
   const finish = (rows) => {
     const now = new Date();
-    const data = (rows || [])
+    // Show matches that haven't started yet OR started within the last 30 minutes (still votable window)
+    // Use a 30-min buffer so matches don't disappear right at kickoff
+    const cutoff = new Date(now.getTime() - 30 * 60 * 1000);
+    
+    // Only show matches within the next 2 days to improve performance
+    const twoDaysFromNow = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
+    
+    // First, try to get matches within next 2 days
+    let data = (rows || [])
       .map((m) => ({ ...m, _dt: parseMatchDateTime(m.scheduled_at) }))
       .filter((m) => !m.winner)
-      .filter((m) => m._dt && !Number.isNaN(m._dt.getTime()) && m._dt >= now)
+      .filter((m) => m._dt && !Number.isNaN(m._dt.getTime()) && m._dt >= cutoff && m._dt <= twoDaysFromNow)
       .sort((a, b) => a._dt - b._dt)
       .map(({ _dt, ...rest }) => rest);
+    
+    // If no matches in next 2 days, show next 2 upcoming matches regardless of date
+    if (data.length === 0) {
+      data = (rows || [])
+        .map((m) => ({ ...m, _dt: parseMatchDateTime(m.scheduled_at) }))
+        .filter((m) => !m.winner)
+        .filter((m) => m._dt && !Number.isNaN(m._dt.getTime()) && m._dt >= cutoff)
+        .sort((a, b) => a._dt - b._dt)
+        .slice(0, 2)
+        .map(({ _dt, ...rest }) => rest);
+    }
 
     db.close();
     res.json(data);
   };
 
+  // Only admin sees all seasons (no user_seasons filter needed)
   if (req.user.role === 'admin') {
     const params = [];
     let query = `
@@ -3023,6 +3428,7 @@ app.get('/api/predictions/upcoming', requireRole('picker', 'superuser', 'admin')
     return;
   }
 
+  // Regular pickers and superusers: only see matches for seasons they are assigned to
   const params = [req.user.id];
   let query = `
     SELECT m.id, m.season_id, m.home_team, m.away_team, m.scheduled_at, m.venue, m.winner, s.name as season_name
@@ -3134,11 +3540,11 @@ app.post('/api/predictions', requireRole('picker', 'superuser', 'admin'), (req, 
         return res.status(400).json({ error: 'Match winner has been set. Voting is now closed.' });
       }
 
-      // Check voting window (1 hour cutoff)
+      // Check voting window (30 minutes cutoff - same as team voting)
       const matchTime = parseMatchDateTime(match.scheduled_at);
       if (!matchTime) { return res.status(400).json({ error: 'Invalid match schedule. Please contact admin.' }); }
-      const cutoffTime = new Date(matchTime.getTime() - 60 * 60 * 1000);
-      if (new Date() >= cutoffTime) { return res.status(400).json({ error: 'Prediction window closed (closes 1 hour before match)' }); }
+      const cutoffTime = new Date(matchTime.getTime() - 30 * 60 * 1000);
+      if (new Date() >= cutoffTime) { return res.status(400).json({ error: 'Prediction window closed (closes 30 minutes before match)' }); }
 
       // Upsert prediction with points
       db.run(`

@@ -158,9 +158,9 @@ function PlayerCard({ player, selected, locked, accent, onClick }) {
         transform: selected ? 'scale(1.04)' : 'scale(1)',
       }}
     >
-      {playerObj.playerImg ? (
+      {(playerObj.imageUrl || playerObj.playerImg) ? (
         <img
-          src={playerObj.playerImg}
+          src={playerObj.imageUrl || playerObj.playerImg}
           alt={playerKey}
           style={{ width: '100%', height: '65px', objectFit: 'cover' }}
           onError={e => { e.target.style.display = 'none' }}
@@ -433,6 +433,7 @@ export default function Predictions({ user, refreshTrigger }) {
   function isPredictionOpen(scheduledAt) {
     const mt = parseMatchDateTime(scheduledAt)
     if (!mt || Number.isNaN(mt.getTime())) return false
+    // Close predictions 30 minutes before match start (same as team voting)
     return new Date() < new Date(mt.getTime() - 60 * 60 * 1000)
   }
 
@@ -527,6 +528,27 @@ export default function Predictions({ user, refreshTrigger }) {
       {/* ── PREDICT TAB ── */}
       {activeTab === 'predict' && (
         <>
+          {/* Info banner about 2-day window */}
+          {!loading && upcomingMatches.length > 0 && (
+            <div style={{
+              padding: '10px 16px',
+              background: 'linear-gradient(135deg, #667eea22, #764ba222)',
+              border: '1px solid #667eea33',
+              borderRadius: '10px',
+              marginBottom: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              fontSize: '13px',
+              color: '#555'
+            }}>
+              <span style={{ fontSize: '18px' }}>ℹ️</span>
+              <span>
+                Showing matches for the <strong>next 2 days</strong> (or next 2 upcoming matches if none available)
+              </span>
+            </div>
+          )}
+
           {loading ? (
             <div style={{ textAlign: 'center', padding: '40px', color: '#667eea', fontSize: '14px' }}>⏳ Loading matches...</div>
           ) : upcomingMatches.length === 0 ? (
