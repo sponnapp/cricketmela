@@ -79,13 +79,17 @@ export default function VoteHistory({ user, refreshTrigger }) {
         return scheduledAt // Return raw value for debugging
       }
 
-      // Format: "01-Mar-2026 | 2:30 AM"
+      // Format: "01-Mar-2026 | 2:30 AM" in user's local timezone
       const day = String(date.getDate()).padStart(2, '0')
-      const month = date.toLocaleString('en-US', { month: 'short' })
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+      const month = months[date.getMonth()]
       const year = date.getFullYear()
-      const time = date.toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+      let hour = date.getHours()
+      const ampm = hour >= 12 ? 'PM' : 'AM'
+      hour = hour % 12 || 12
+      const minute = String(date.getMinutes()).padStart(2, '0')
 
-      return `${day}-${month}-${year} | ${time}`
+      return `${day}-${month}-${year} | ${hour}:${minute} ${ampm}`
     } catch (e) {
       console.log('Error formatting date:', scheduledAt, e)
       return scheduledAt // Return raw value for debugging
