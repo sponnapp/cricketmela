@@ -142,7 +142,7 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
     if (!value) return null
     const raw = String(value).trim()
 
-    // CricAPI timestamps without timezone are GMT; parse as UTC explicitly.
+    // Cricbuzz API sends ISO timestamps in GMT/UTC - parse as UTC explicitly
     const isoNoTz = raw.match(/^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}(?::\d{2})?$/)
     if (isoNoTz) {
       const utc = new Date(`${raw}Z`)

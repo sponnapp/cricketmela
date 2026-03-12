@@ -15,12 +15,16 @@ export default function VoteHistory({ user, refreshTrigger }) {
       let date
       const raw = String(value).trim()
 
-      // CricAPI ISO without timezone is GMT; parse as UTC explicitly.
+      // Cricbuzz API sends ISO timestamps in GMT/UTC - parse as UTC explicitly
       const isoNoTz = raw.match(/^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}(?::\d{2})?$/)
       if (isoNoTz) {
         date = new Date(`${raw}Z`)
         return (!date || isNaN(date.getTime())) ? null : date
       }
+
+      // Try direct parsing first
+      const direct = new Date(raw)
+      if (!Number.isNaN(direct.getTime())) return direct
 
       // Handle format like "16-Feb-26T5:30 AM" from CSV upload
       if (raw.includes('T') && !raw.match(/^\d{4}-/)) {
