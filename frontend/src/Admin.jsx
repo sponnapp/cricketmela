@@ -177,10 +177,14 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
     const d = parseMatchDateTime(value)
     if (!d || isNaN(d.getTime())) return value
     const dd = String(d.getDate()).padStart(2, '0')
-    const mon = d.toLocaleString('en-US', { month: 'short' })
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    const mon = months[d.getMonth()]
     const yr = d.getFullYear()
-    const t = d.toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
-    return dd + '-' + mon + '-' + yr + ' | ' + t
+    let h = d.getHours()
+    const ampm = h >= 12 ? 'PM' : 'AM'
+    h = h % 12 || 12
+    const min = String(d.getMinutes()).padStart(2, '0')
+    return dd + '-' + mon + '-' + yr + ' | ' + h + ':' + min + ' ' + ampm
   }
 
   // Sort matches by date and time
@@ -2248,7 +2252,18 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                                 {m.home_team} <span style={{color:'#888',fontWeight:'400'}}>vs</span> {m.away_team}
                               </td>
                               <td style={{padding:'10px 12px',color:'#4a5568'}}>
-                                {m.scheduled_at ? new Date(m.scheduled_at).toLocaleString('en-IN', {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : 'TBD'}
+                                {m.scheduled_at ? (() => {
+                                  const d = parseMatchDateTime(m.scheduled_at)
+                                  if (!d) return 'TBD'
+                                  const dd = String(d.getDate()).padStart(2,'0')
+                                  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+                                  const mon = months[d.getMonth()]
+                                  let h = d.getHours()
+                                  const ampm = h >= 12 ? 'PM' : 'AM'
+                                  h = h % 12 || 12
+                                  const min = String(d.getMinutes()).padStart(2,'0')
+                                  return `${dd}-${mon}-${d.getFullYear()} | ${h}:${min} ${ampm}`
+                                })() : 'TBD'}
                               </td>
                               <td style={{padding:'10px 12px',color:'#4a5568'}}>{m.venue || '—'}</td>
                             </tr>

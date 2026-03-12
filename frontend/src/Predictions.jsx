@@ -425,9 +425,12 @@ export default function Predictions({ user, refreshTrigger }) {
     const d = parseMatchDateTime(value)
     if (!d || Number.isNaN(d.getTime())) return value
     const dd = String(d.getDate()).padStart(2,'0')
-    const mon = d.toLocaleString('en-US',{month:'short'})
-    const t = d.toLocaleString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})
-    return `${dd}-${mon}-${d.getFullYear()} | ${t}`
+    const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]
+    let h = d.getHours()
+    const ampm = h >= 12 ? 'PM' : 'AM'
+    h = h % 12 || 12
+    const min = String(d.getMinutes()).padStart(2,'0')
+    return `${dd}-${mon}-${d.getFullYear()} | ${h}:${min} ${ampm}`
   }
 
   function isPredictionOpen(scheduledAt) {
@@ -540,7 +543,7 @@ export default function Predictions({ user, refreshTrigger }) {
               alignItems: 'center',
               gap: '10px',
               fontSize: '13px',
-              color: '#555'
+              color: 'white'
             }}>
               <span style={{ fontSize: '18px' }}>ℹ️</span>
               <span>

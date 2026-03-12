@@ -203,13 +203,21 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
   function formatMatchDatePart(value) {
     const dt = parseMatchDateTime(value)
     if (!dt) return 'N/A'
-    return dt.toLocaleDateString('en-CA')
+    // Format in user's local timezone: YYYY-MM-DD
+    const year = dt.getFullYear()
+    const month = String(dt.getMonth() + 1).padStart(2, '0')
+    const day = String(dt.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
   }
 
   function formatMatchTimePart(value) {
     const dt = parseMatchDateTime(value)
     if (!dt) return 'N/A'
-    return dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+    // Format in user's local timezone (browser automatically converts)
+    const hours = String(dt.getHours()).padStart(2, '0')
+    const minutes = String(dt.getMinutes()).padStart(2, '0')
+    const seconds = String(dt.getSeconds()).padStart(2, '0')
+    return `${hours}:${minutes}:${seconds}`
   }
 
   // Sort matches by date and time (earliest first)
