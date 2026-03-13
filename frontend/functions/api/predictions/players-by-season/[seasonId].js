@@ -49,6 +49,8 @@ export async function onRequest(context) {
     // Clone request headers
     const headers = new Headers(request.headers);
     headers.delete('host');
+    // Ensure we get uncompressed JSON
+    headers.set('Accept-Encoding', 'identity');
 
     const backendResponse = await fetch(backendUrl, {
       method: 'GET',
@@ -59,14 +61,28 @@ export async function onRequest(context) {
       throw new Error(`Backend returned ${backendResponse.status}`);
     }
 
-    const data = await backendResponse.json();
+    // Get response as text first to check for corruption
+    const responseText = await backendResponse.text();
+    
+    // Try to parse JSON
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('JSON parse error. First 100 chars:', responseText.substring(0, 100));
+      throw new Error('Invalid JSON response from backend');
+    }
 
     // Store in KV cache for future requests (if available)
     if (env.SQUAD_CACHE) {
-      await env.SQUAD_CACHE.put(cacheKey, JSON.stringify(data), {
-        expirationTtl: CACHE_TTL,
-      });
-      console.log(`Stored in KV cache: season ${seasonId}`);
+      try {
+        await env.SQUAD_CACHE.put(cacheKey, JSON.stringify(data), {
+          expirationTtl: CACHE_TTL,
+        });
+        console.log(`Stored in KV cache: season ${seasonId}`);
+      } catch (kvError) {
+        console.warn('KV cache store failed:', kvError.message);
+      }
     }
 
     return new Response(JSON.stringify(data), {
