@@ -2920,8 +2920,8 @@ const predictionPlayersCache = new Map();
 function getCachedPredictionPlayers(key) {
   const hit = predictionPlayersCache.get(key);
   if (!hit) return null;
-  // 10 minute cache
-  if (Date.now() - hit.ts > 10 * 60 * 1000) {
+  // 2 hour cache (squad data rarely changes during season)
+  if (Date.now() - hit.ts > 2 * 60 * 60 * 1000) {
     predictionPlayersCache.delete(key);
     return null;
   }
