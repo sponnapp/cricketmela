@@ -695,12 +695,26 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
 
   async function refreshSeasonSquad(season) {
     try {
+      // Step 1: Clear KV cache
+      try {
+        await axios.delete(`/api/predictions/players-by-season/${season.id}/cache`, {
+          headers: { 'x-user': user?.username || 'admin' }
+        })
+        console.log('KV cache cleared for season', season.id)
+      } catch (kvErr) {
+        console.warn('KV cache clear failed (non-critical):', kvErr.message)
+      }
+
+      // Step 2: Clear backend cache and fetch fresh data
       const r = await axios.post(`/api/admin/seasons/${season.id}/refresh-squad`, {}, {
         headers: { 'x-user': user?.username || 'admin' }
       })
       const teams = r.data?.teams ?? 0
       const players = r.data?.players ?? 0
-      toast('success', 'Squad Refreshed', `${season.name}: ${teams} teams, ${players} players loaded`)
+      toast('success', 'Squad Refreshed', `${season.name}: ${teams} teams, ${players} players loaded. Cache cleared, images will refresh on next page load.`)
+      
+      // Refresh the seasons list to trigger re-fetch with new timestamps
+      fetchSeasons()
     } catch (e) {
       toast('error', 'Refresh Failed', e.response?.data?.error || 'Could not refresh squad data')
     }

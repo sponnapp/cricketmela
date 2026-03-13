@@ -16,6 +16,13 @@ console.log(`Using database at: ${DB_PATH}`);
 const db = new sqlite3.Database(DB_PATH, (err) => {
   if (err) return console.error('Failed to open DB', err);
   console.log('Database connected successfully');
+  
+  // Enable performance optimizations
+  db.run('PRAGMA journal_mode = WAL;'); // Write-Ahead Logging for better concurrency
+  db.run('PRAGMA synchronous = NORMAL;'); // Balance between safety and speed
+  db.run('PRAGMA cache_size = -64000;'); // 64MB cache
+  db.run('PRAGMA temp_store = MEMORY;'); // Store temp tables in memory
+  console.log('✅ SQLite performance optimizations enabled');
 });
 
 function hasColumn(table, column, cb) {
@@ -326,6 +333,68 @@ db.serialize(() => {
     if (hasTossPoints && hasMomPoints && hasBowlerPoints) {
       console.log('✅ All prediction points columns already exist');
     }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // PERFORMANCE: Create database indexes for faster queries
+  // ═══════════════════════════════════════════════════════════════════
+  console.log('Creating database indexes for performance...');
+  
+  // Indexes for matches table (queried by season_id frequently)
+  db.run('CREATE INDEX IF NOT EXISTS idx_matches_season_id ON matches(season_id)', (err) => {
+    if (err) console.error('Error creating idx_matches_season_id:', err);
+    else console.log('✅ Index on matches(season_id) ready');
+  });
+  
+  // Indexes for votes table (queried by match_id and user_id very frequently)
+  db.run('CREATE INDEX IF NOT EXISTS idx_votes_match_id ON votes(match_id)', (err) => {
+    if (err) console.error('Error creating idx_votes_match_id:', err);
+    else console.log('✅ Index on votes(match_id) ready');
+  });
+  
+  db.run('CREATE INDEX IF NOT EXISTS idx_votes_user_id ON votes(user_id)', (err) => {
+    if (err) console.error('Error creating idx_votes_user_id:', err);
+    else console.log('✅ Index on votes(user_id) ready');
+  });
+  
+  // Composite index for common vote lookups (WHERE match_id = ? AND user_id = ?)
+  db.run('CREATE INDEX IF NOT EXISTS idx_votes_match_user ON votes(match_id, user_id)', (err) => {
+    if (err) console.error('Error creating idx_votes_match_user:', err);
+    else console.log('✅ Composite index on votes(match_id, user_id) ready');
+  });
+  
+  // Indexes for predictions table
+  db.run('CREATE INDEX IF NOT EXISTS idx_predictions_match_id ON predictions(match_id)', (err) => {
+    if (err) console.error('Error creating idx_predictions_match_id:', err);
+    else console.log('✅ Index on predictions(match_id) ready');
+  });
+  
+  db.run('CREATE INDEX IF NOT EXISTS idx_predictions_user_id ON predictions(user_id)', (err) => {
+    if (err) console.error('Error creating idx_predictions_user_id:', err);
+    else console.log('✅ Index on predictions(user_id) ready');
+  });
+  
+  // Composite index for prediction lookups
+  db.run('CREATE INDEX IF NOT EXISTS idx_predictions_match_user ON predictions(match_id, user_id)', (err) => {
+    if (err) console.error('Error creating idx_predictions_match_user:', err);
+    else console.log('✅ Composite index on predictions(match_id, user_id) ready');
+  });
+  
+  // Indexes for user_seasons table (queried for season access checks)
+  db.run('CREATE INDEX IF NOT EXISTS idx_user_seasons_user_id ON user_seasons(user_id)', (err) => {
+    if (err) console.error('Error creating idx_user_seasons_user_id:', err);
+    else console.log('✅ Index on user_seasons(user_id) ready');
+  });
+  
+  db.run('CREATE INDEX IF NOT EXISTS idx_user_seasons_season_id ON user_seasons(season_id)', (err) => {
+    if (err) console.error('Error creating idx_user_seasons_season_id:', err);
+    else console.log('✅ Index on user_seasons(season_id) ready');
+  });
+  
+  // Composite index for user-season lookups
+  db.run('CREATE INDEX IF NOT EXISTS idx_user_seasons_user_season ON user_seasons(user_id, season_id)', (err) => {
+    if (err) console.error('Error creating idx_user_seasons_user_season:', err);
+    else console.log('✅ Composite index on user_seasons(user_id, season_id) ready');
   });
 
 });
