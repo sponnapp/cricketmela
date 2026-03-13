@@ -77,10 +77,12 @@ fi
 # Deploy using wrangler
 # Run from inside frontend/ so wrangler automatically picks up:
 #   dist/       → static built assets
-#   functions/  → Cloudflare Pages Functions (API + auth proxy)
+#   functions/  → Cloudflare Pages Functions (API + auth proxy + KV caching)
 # Both folders must be siblings for Cloudflare Pages Functions to work.
+# wrangler.toml in project root provides KV namespace bindings.
 echo "🚀 Deploying to Cloudflare Pages..."
-npx wrangler pages deploy dist --project-name=cricketmela
+npx wrangler pages deploy dist --project-name=cricketmela --commit-dirty=true
+cd .. && npx wrangler pages deploy frontend/dist --project-name=cricketmela --commit-dirty=true
 
 echo ""
 echo "=========================================="
@@ -94,5 +96,3 @@ echo "   https://cricketmela-api.fly.dev"
 echo ""
 echo "🎉 All done! Your Cricket Mela app is now updated in production!"
 echo "=========================================="
-
-cd ..

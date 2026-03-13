@@ -456,6 +456,14 @@ export default function Predictions({ user, refreshTrigger }) {
     if (teamSquads && Object.keys(teamSquads).length > 0) {
       const normalize = n => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '')
       const teamNorm = normalize(team)
+      
+      // First try exact match
+      for (const [tName, tPlayers] of Object.entries(teamSquads)) {
+        const tNorm = normalize(tName)
+        if (tNorm === teamNorm) return tPlayers
+      }
+      
+      // Then try partial match
       for (const [tName, tPlayers] of Object.entries(teamSquads)) {
         const tNorm = normalize(tName)
         if (tNorm.includes(teamNorm) || teamNorm.includes(tNorm)) return tPlayers

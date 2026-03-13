@@ -1,0 +1,7 @@
+name = "cricketmela"
+compatibility_date = "2024-01-01"
+
+# KV Namespace binding for squad data caching
+[[kv_namespaces]]
+binding = "SQUAD_CACHE"
+id = "cd86a3f47591439caae84ec5bfe42b8a"

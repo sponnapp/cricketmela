@@ -1062,16 +1062,40 @@ function fetchCricbuzz(endpoint, callback) {
   req.end();
 }
 
-// GET /api/player-image/:imageId - Proxy player images from Cricbuzz
+// GET /api/player-image/:imageId - Proxy player images from Cricbuzz with server-side caching
 app.get('/api/player-image/:imageId', (req, res) => {
   const https = require('https');
+  const fs = require('fs');
+  const path = require('path');
   const imageId = req.params.imageId;
+  const refresh = req.query.refresh === '1'; // Force refresh from API
   
   // Validate imageId format (should be 'c' followed by digits)
   if (!imageId || !/^c\d+$/.test(imageId)) {
     return res.status(400).json({ error: 'Invalid image ID format' });
   }
 
+  // Setup cache directory (use persistent volume in production)
+  const CACHE_DIR = process.env.NODE_ENV === 'production' 
+    ? '/app/data/images' 
+    : path.join(__dirname, 'cache', 'images');
+  
+  if (!fs.existsSync(CACHE_DIR)) {
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+  }
+
+  const cachedImagePath = path.join(CACHE_DIR, `${imageId}.jpg`);
+
+  // Check if image exists in cache and not forcing refresh
+  if (!refresh && fs.existsSync(cachedImagePath)) {
+    // Serve from cache
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=2592000'); // Cache for 30 days
+    res.setHeader('X-Image-Source', 'cache');
+    return fs.createReadStream(cachedImagePath).pipe(res);
+  }
+
+  // Fetch from Cricbuzz API
   const options = {
     hostname: CRICBUZZ_API_HOST,
     path: `/img/v1/i1/${imageId}/i.jpg`,
@@ -1083,15 +1107,27 @@ app.get('/api/player-image/:imageId', (req, res) => {
   };
 
   const apiReq = https.request(options, (apiRes) => {
+    if (apiRes.statusCode !== 200) {
+      return res.status(apiRes.statusCode).json({ error: 'Failed to fetch image from Cricbuzz' });
+    }
+
     // Set content type for image
     res.setHeader('Content-Type', 'image/jpeg');
-    res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
-    
-    // Pipe the image data directly to response
+    res.setHeader('Cache-Control', 'public, max-age=2592000'); // Cache for 30 days
+    res.setHeader('X-Image-Source', 'cricbuzz-api');
+
+    // Save to cache and pipe to response simultaneously
+    const writeStream = fs.createWriteStream(cachedImagePath);
+    apiRes.pipe(writeStream);
     apiRes.pipe(res);
+
+    writeStream.on('error', (err) => {
+      console.error('Error writing image to cache:', err);
+    });
   });
 
   apiReq.on('error', (err) => {
+    console.error('Error fetching image:', err);
     res.status(500).json({ error: 'Failed to fetch image' });
   });
 
@@ -3010,6 +3046,25 @@ app.get('/api/predictions/players', requireRole('picker', 'superuser', 'admin'),
   });
 });
 
+// DELETE /api/predictions/players-by-season/:seasonId/cache - Clear squad cache for a season
+app.delete('/api/predictions/players-by-season/:seasonId/cache', requireRole('admin'), (req, res) => {
+  const seasonId = Number(req.params.seasonId);
+  
+  // Clear both Cricbuzz and CricAPI cache keys
+  const cricbuzzKey = `cricbuzz_squad_${seasonId}`;
+  const cricapiKey = `season_squad_${seasonId}`;
+  
+  predictionPlayersCache.delete(cricbuzzKey);
+  predictionPlayersCache.delete(cricapiKey);
+  
+  console.log(`✅ Cleared squad cache for season ${seasonId}`);
+  res.json({ 
+    success: true, 
+    message: 'Squad cache cleared. Next request will fetch fresh data from API.',
+    clearedKeys: [cricbuzzKey, cricapiKey]
+  });
+});
+
 // GET /api/predictions/players-by-season/:seasonId - Fetch player squad for a season using CricAPI series_squad
 // Optional query params: team1, team2 - to filter players by specific teams
 app.get('/api/predictions/players-by-season/:seasonId', requireRole('picker', 'superuser', 'admin'), (req, res) => {
@@ -3230,6 +3285,7 @@ app.post('/api/admin/seasons/:id/refresh-squad', requireRole('admin'), (req, res
             if (!err2 && playerData && Array.isArray(playerData.player)) {
               const teamName = squad.squadType || `Team ${squad.teamId}`;
               const players = [];
+              const refreshTimestamp = Date.now(); // Force image refresh
               
               playerData.player.forEach(p => {
                 if (p.isHeader || !p.id) return;
@@ -3238,7 +3294,7 @@ app.post('/api/admin/seasons/:id/refresh-squad', requireRole('admin'), (req, res
                   name: p.name,
                   role: p.role || '',
                   imageId: p.imageId || null,
-                  imageUrl: p.imageId ? `/api/player-image/c${p.imageId}` : null,
+                  imageUrl: p.imageId ? `/api/player-image/c${p.imageId}?refresh=1&t=${refreshTimestamp}` : null,
                   battingStyle: p.battingStyle || '',
                   bowlingStyle: p.bowlingStyle || '',
                   captain: p.captain || false
@@ -3348,13 +3404,17 @@ function filterPlayersByTeams(squadData, team1, team2) {
   const team1Norm = normalize(team1);
   const team2Norm = normalize(team2);
 
+  const filteredTeamSquads = {};
   const matchedPlayers = [];
 
-  // Find matching teams by normalized name
+  // Find matching teams by normalized name and keep them separate
   Object.entries(squadData.teamSquads).forEach(([teamName, players]) => {
     const teamNorm = normalize(teamName);
-    if (teamNorm.includes(team1Norm) || team1Norm.includes(teamNorm) ||
-        teamNorm.includes(team2Norm) || team2Norm.includes(teamNorm)) {
+    const matchesTeam1 = teamNorm.includes(team1Norm) || team1Norm.includes(teamNorm);
+    const matchesTeam2 = teamNorm.includes(team2Norm) || team2Norm.includes(teamNorm);
+    
+    if (matchesTeam1 || matchesTeam2) {
+      filteredTeamSquads[teamName] = players;
       matchedPlayers.push(...players);
     }
   });
@@ -3364,8 +3424,9 @@ function filterPlayersByTeams(squadData, team1, team2) {
   return {
     ...squadData,
     players: uniqueFiltered.length > 0 ? uniqueFiltered : squadData.players,
+    teamSquads: Object.keys(filteredTeamSquads).length > 0 ? filteredTeamSquads : squadData.teamSquads,
     filtered: uniqueFiltered.length > 0,
-    matchedTeams: uniqueFiltered.length
+    matchedTeams: Object.keys(filteredTeamSquads).length
   };
 }
 
