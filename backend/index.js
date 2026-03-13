@@ -3407,19 +3407,27 @@ function filterPlayersByTeams(squadData, team1, team2) {
   const filteredTeamSquads = {};
   const matchedPlayers = [];
 
+  console.log(`[filterPlayersByTeams] Looking for: "${team1}" (${team1Norm}) and "${team2}" (${team2Norm})`);
+  console.log(`[filterPlayersByTeams] Available teams:`, Object.keys(squadData.teamSquads));
+
   // Find matching teams by normalized name and keep them separate
   Object.entries(squadData.teamSquads).forEach(([teamName, players]) => {
     const teamNorm = normalize(teamName);
     const matchesTeam1 = teamNorm.includes(team1Norm) || team1Norm.includes(teamNorm);
     const matchesTeam2 = teamNorm.includes(team2Norm) || team2Norm.includes(teamNorm);
     
+    console.log(`  - "${teamName}" (${teamNorm}): matches T1=${matchesTeam1}, T2=${matchesTeam2}`);
+    
     if (matchesTeam1 || matchesTeam2) {
       filteredTeamSquads[teamName] = players;
       matchedPlayers.push(...players);
+      console.log(`    ✓ Matched! Added ${players.length} players`);
     }
   });
 
   const uniqueFiltered = [...new Set(matchedPlayers)];
+
+  console.log(`[filterPlayersByTeams] Result: ${Object.keys(filteredTeamSquads).length} teams, ${uniqueFiltered.length} total players`);
 
   return {
     ...squadData,

@@ -82,7 +82,7 @@ fi
 # wrangler.toml in project root provides KV namespace bindings.
 echo "🚀 Deploying to Cloudflare Pages..."
 npx wrangler pages deploy dist --project-name=cricketmela --commit-dirty=true
-cd .. && npx wrangler pages deploy frontend/dist --project-name=cricketmela --commit-dirty=true
+cd ..
 
 echo ""
 echo "=========================================="
