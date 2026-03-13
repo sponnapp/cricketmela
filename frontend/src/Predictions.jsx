@@ -453,6 +453,8 @@ export default function Predictions({ user, refreshTrigger }) {
     const data = playerOptionsByMatch[matchId]
     if (!data) return []
     const { players, teamSquads } = data
+    
+    // If teamSquads is available and has teams, try to find the matching team
     if (teamSquads && Object.keys(teamSquads).length > 0) {
       const normalize = n => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '')
       const teamNorm = normalize(team)
@@ -468,12 +470,14 @@ export default function Predictions({ user, refreshTrigger }) {
         const tNorm = normalize(tName)
         if (tNorm.includes(teamNorm) || teamNorm.includes(tNorm)) return tPlayers
       }
+      
+      // No match found - squad data not available for this team yet
+      console.log(`Squad data not available for ${team}`)
+      return []
     }
-    // fallback: split in half
-    const half = Math.ceil(players.length / 2)
-    const idx = Object.keys(playerOptionsByMatch[matchId]?.teamSquads || {}).length === 0
-      ? (players.indexOf(team) < half ? 0 : 1) : -1
-    return idx === 0 ? players.slice(0, half) : players.slice(half)
+    
+    // No squad data at all - return empty
+    return []
   }
 
   const safeHistory = Array.isArray(history) ? history : []
