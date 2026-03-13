@@ -33,7 +33,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
   const [passwordResetModal, setPasswordResetModal] = useState({show: false, userId: null, username: '', newPassword: ''})
   const [approveUserModal, setApproveUserModal] = useState({show: false, user: null, formData: {balance: 1000}, selectedSeasons: []})
   const [editSeasonModal, setEditSeasonModal] = useState({show: false, season: null, formData: {}})
-  const [predictionResultsModal, setPredictionResultsModal] = useState({show: false, matchId: null, matchName: '', formData: {toss_winner: '', man_of_match: '', best_bowler: ''}})
+  const [predictionResultsModal, setPredictionResultsModal] = useState({show: false, matchId: null, matchName: '', team1: '', team2: '', seasonId: null, players: [], loadingPlayers: false, formData: {toss_winner: '', man_of_match: '', best_bowler: ''}})
   const [emailSettings, setEmailSettings] = useState({ user: '', password: '', from: '' })
   const [emailMessage, setEmailMessage] = useState('')
   const [cricApiModal, setCricApiModal] = useState({
@@ -854,17 +854,63 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
     }
   }
 
+  async function openPredictionResultsModal(match) {
+    setPredictionResultsModal({
+      show: true,
+      matchId: match.id,
+      matchName: `${match.home_team} vs ${match.away_team}`,
+      team1: match.home_team,
+      team2: match.away_team,
+      seasonId: match.season_id,
+      players: [],
+      loadingPlayers: true,
+      formData: { toss_winner: '', man_of_match: '', best_bowler: '' }
+    })
+
+    // Fetch players for this match
+    try {
+      const response = await axios.get(`/api/predictions/players-by-season/${match.season_id}`, {
+        params: { team1: match.home_team, team2: match.away_team },
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      
+      // Build players array with team names
+      const playersWithTeams = []
+      const teamSquads = response.data.teamSquads || {}
+      
+      Object.entries(teamSquads).forEach(([teamName, teamPlayers]) => {
+        teamPlayers.forEach(player => {
+          playersWithTeams.push({
+            ...player,
+            team: teamName
+          })
+        })
+      })
+      
+      // Sort by team name, then by player name
+      playersWithTeams.sort((a, b) => {
+        if (a.team !== b.team) return a.team.localeCompare(b.team)
+        return a.name.localeCompare(b.name)
+      })
+      
+      setPredictionResultsModal(prev => ({ ...prev, players: playersWithTeams, loadingPlayers: false }))
+    } catch (e) {
+      console.error('Failed to fetch players:', e)
+      setPredictionResultsModal(prev => ({ ...prev, loadingPlayers: false }))
+    }
+  }
+
   async function submitPredictionResults() {
     const { matchId, formData } = predictionResultsModal
     if (!matchId) return
 
     try {
-      await axios.post(`/api/admin/matches/${matchId}/prediction-results`,
-        formData,
+      await axios.post('/api/predictions/results',
+        { match_id: matchId, ...formData },
         { headers: { 'x-user': user?.username || 'admin' } }
       )
       toast('success', 'Success', 'Prediction results saved successfully')
-      setPredictionResultsModal({show: false, matchId: null, matchName: '', formData: {toss_winner: '', man_of_match: '', best_bowler: ''}})
+      setPredictionResultsModal({show: false, matchId: null, matchName: '', team1: '', team2: '', seasonId: null, players: [], loadingPlayers: false, formData: {toss_winner: '', man_of_match: '', best_bowler: ''}})
       fetchMatches(selectedSeason)
     } catch (e) {
       toast('error', 'Error', e.response?.data?.error || 'Failed to save prediction results')
@@ -1608,6 +1654,26 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                                 Set Winner
                               </button>
                             )}
+                            {(isSuperuser || user?.role === 'admin') && (
+                              <button
+                                onClick={() => openPredictionResultsModal(m)}
+                                style={{
+                                  padding: '6px 12px',
+                                  fontSize: '11px',
+                                  backgroundColor: '#9b59b6',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  fontWeight: '600',
+                                  transition: 'all 0.2s ease'
+                                }}
+                                onMouseOver={(e) => e.target.style.backgroundColor = '#8e44ad'}
+                                onMouseOut={(e) => e.target.style.backgroundColor = '#9b59b6'}
+                              >
+                                🔮 Set Predictions
+                              </button>
+                            )}
                             {!isSuperuser && m.winner && (
                               <button
                                 onClick={() => clearWinner(m.id)}
@@ -1800,41 +1866,72 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
             <p style={{margin: '5px 0 20px 0', fontSize: '13px', color: '#666'}}>{predictionResultsModal.matchName}</p>
 
             <div style={{margin: '15px 0'}}>
-              <label style={{display: 'block', marginBottom: '8px', fontWeight: '600', fontSize: '13px', color: '#333'}}>🎯 Toss Winner:</label>
-              <input
-                type="text"
-                placeholder="e.g., India, New Zealand"
-                value={predictionResultsModal.formData.toss_winner}
-                onChange={e => setPredictionResultsModal({...predictionResultsModal, formData: {...predictionResultsModal.formData, toss_winner: e.target.value}})}
-                style={{width: '100%', padding: '10px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #ddd', fontSize: '13px'}}
-              />
+              <label style={{display: 'block', marginBottom: '12px', fontWeight: '600', fontSize: '13px', color: '#333'}}>🎯 Toss Winner:</label>
+              <div style={{display: 'flex', gap: '15px'}}>
+                <label style={{display: 'flex', alignItems: 'center', cursor: 'pointer', flex: 1, padding: '10px', borderRadius: '8px', border: '2px solid ' + (predictionResultsModal.formData.toss_winner === predictionResultsModal.team1 ? '#667eea' : '#ddd'), backgroundColor: predictionResultsModal.formData.toss_winner === predictionResultsModal.team1 ? '#f0f4ff' : 'white', transition: 'all 0.2s'}}>
+                  <input
+                    type="radio"
+                    name="toss_winner"
+                    value={predictionResultsModal.team1}
+                    checked={predictionResultsModal.formData.toss_winner === predictionResultsModal.team1}
+                    onChange={e => setPredictionResultsModal({...predictionResultsModal, formData: {...predictionResultsModal.formData, toss_winner: e.target.value}})}
+                    style={{marginRight: '8px'}}
+                  />
+                  <span style={{fontSize: '13px', fontWeight: '500'}}>{predictionResultsModal.team1}</span>
+                </label>
+                <label style={{display: 'flex', alignItems: 'center', cursor: 'pointer', flex: 1, padding: '10px', borderRadius: '8px', border: '2px solid ' + (predictionResultsModal.formData.toss_winner === predictionResultsModal.team2 ? '#667eea' : '#ddd'), backgroundColor: predictionResultsModal.formData.toss_winner === predictionResultsModal.team2 ? '#f0f4ff' : 'white', transition: 'all 0.2s'}}>
+                  <input
+                    type="radio"
+                    name="toss_winner"
+                    value={predictionResultsModal.team2}
+                    checked={predictionResultsModal.formData.toss_winner === predictionResultsModal.team2}
+                    onChange={e => setPredictionResultsModal({...predictionResultsModal, formData: {...predictionResultsModal.formData, toss_winner: e.target.value}})}
+                    style={{marginRight: '8px'}}
+                  />
+                  <span style={{fontSize: '13px', fontWeight: '500'}}>{predictionResultsModal.team2}</span>
+                </label>
+              </div>
             </div>
 
             <div style={{margin: '15px 0'}}>
               <label style={{display: 'block', marginBottom: '8px', fontWeight: '600', fontSize: '13px', color: '#333'}}>⭐ Man of the Match:</label>
-              <input
-                type="text"
-                placeholder="e.g., Virat Kohli, Kane Williamson"
-                value={predictionResultsModal.formData.man_of_match}
-                onChange={e => setPredictionResultsModal({...predictionResultsModal, formData: {...predictionResultsModal.formData, man_of_match: e.target.value}})}
-                style={{width: '100%', padding: '10px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #ddd', fontSize: '13px'}}
-              />
+              {predictionResultsModal.loadingPlayers ? (
+                <div style={{padding: '10px', textAlign: 'center', color: '#999', fontSize: '12px'}}>Loading players...</div>
+              ) : (
+                <select
+                  value={predictionResultsModal.formData.man_of_match}
+                  onChange={e => setPredictionResultsModal({...predictionResultsModal, formData: {...predictionResultsModal.formData, man_of_match: e.target.value}})}
+                  style={{width: '100%', padding: '10px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #ddd', fontSize: '13px', backgroundColor: 'white', cursor: 'pointer'}}
+                >
+                  <option value="">Select player...</option>
+                  {predictionResultsModal.players.map(p => (
+                    <option key={p.id} value={p.name}>{p.name} ({p.team})</option>
+                  ))}
+                </select>
+              )}
             </div>
 
             <div style={{margin: '15px 0'}}>
               <label style={{display: 'block', marginBottom: '8px', fontWeight: '600', fontSize: '13px', color: '#333'}}>🎳 Best Bowler:</label>
-              <input
-                type="text"
-                placeholder="e.g., Jasprit Bumrah, Trent Boult"
-                value={predictionResultsModal.formData.best_bowler}
-                onChange={e => setPredictionResultsModal({...predictionResultsModal, formData: {...predictionResultsModal.formData, best_bowler: e.target.value}})}
-                style={{width: '100%', padding: '10px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #ddd', fontSize: '13px'}}
-              />
+              {predictionResultsModal.loadingPlayers ? (
+                <div style={{padding: '10px', textAlign: 'center', color: '#999', fontSize: '12px'}}>Loading players...</div>
+              ) : (
+                <select
+                  value={predictionResultsModal.formData.best_bowler}
+                  onChange={e => setPredictionResultsModal({...predictionResultsModal, formData: {...predictionResultsModal.formData, best_bowler: e.target.value}})}
+                  style={{width: '100%', padding: '10px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #ddd', fontSize: '13px', backgroundColor: 'white', cursor: 'pointer'}}
+                >
+                  <option value="">Select player...</option>
+                  {predictionResultsModal.players.map(p => (
+                    <option key={p.id} value={p.name}>{p.name} ({p.team})</option>
+                  ))}
+                </select>
+              )}
             </div>
 
             <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '24px'}}>
               <button
-                onClick={() => setPredictionResultsModal({show: false, matchId: null, matchName: '', formData: {toss_winner: '', man_of_match: '', best_bowler: ''}})}
+                onClick={() => setPredictionResultsModal({show: false, matchId: null, matchName: '', team1: '', team2: '', seasonId: null, players: [], loadingPlayers: false, formData: {toss_winner: '', man_of_match: '', best_bowler: ''}})}
                 style={{padding: '10px 20px', backgroundColor: '#e0e0e0', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px'}}
               >
                 Cancel

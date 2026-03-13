@@ -490,6 +490,32 @@ export default function Predictions({ user, refreshTrigger }) {
         <SectionPill icon="🔮" title="Match Predictions" subtitle="Predict toss, man of match & best bowler" gradient="linear-gradient(135deg,#667eea,#764ba2)" />
       </div>
 
+      {/* Info Banner */}
+      <div style={{
+        background: 'linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%)',
+        border: '1px solid #9c27b0',
+        borderRadius: '12px',
+        padding: '14px 18px',
+        marginBottom: '20px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        boxShadow: '0 2px 8px rgba(156, 39, 176, 0.15)'
+      }}>
+        <div style={{ fontSize: '24px' }}>ℹ️</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: '700', fontSize: '14px', color: '#6a1b9a', marginBottom: '4px' }}>
+            For Fun Only
+          </div>
+          <div style={{ fontSize: '12px', color: '#7b1fa2', lineHeight: '1.5', marginBottom: '6px' }}>
+            Prediction points are for entertainment and do not affect your standings or balance. Only match winner votes count toward your rankings.
+          </div>
+          <div style={{ fontSize: '12px', color: '#7b1fa2', lineHeight: '1.5' }}>
+            📅 Showing matches for the <strong>next 2 days</strong> (or next 2 upcoming matches if none available)
+          </div>
+        </div>
+      </div>
+
       {/* Tabs */}
       <div style={{
         display: 'flex', gap: '6px', marginBottom: '18px',
@@ -543,27 +569,6 @@ export default function Predictions({ user, refreshTrigger }) {
       {/* ── PREDICT TAB ── */}
       {activeTab === 'predict' && (
         <>
-          {/* Info banner about 2-day window */}
-          {!loading && upcomingMatches.length > 0 && (
-            <div style={{
-              padding: '10px 16px',
-              background: 'linear-gradient(135deg, #667eea22, #764ba222)',
-              border: '1px solid #667eea33',
-              borderRadius: '10px',
-              marginBottom: '16px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              fontSize: '13px',
-              color: 'white'
-            }}>
-              <span style={{ fontSize: '18px' }}>ℹ️</span>
-              <span>
-                Showing matches for the <strong>next 2 days</strong> (or next 2 upcoming matches if none available)
-              </span>
-            </div>
-          )}
-
           {loading ? (
             <div style={{ textAlign: 'center', padding: '40px', color: '#667eea', fontSize: '14px' }}>⏳ Loading matches...</div>
           ) : upcomingMatches.length === 0 ? (
