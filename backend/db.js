@@ -129,6 +129,35 @@ db.serialize(() => {
     )
   `);
 
+  // Squad data cache table - stores player squads from Cricbuzz
+  db.run(`
+    CREATE TABLE IF NOT EXISTS season_players (
+      id INTEGER PRIMARY KEY,
+      season_id INTEGER NOT NULL,
+      team_name TEXT NOT NULL,
+      player_id INTEGER NOT NULL,
+      player_name TEXT NOT NULL,
+      role TEXT,
+      image_id TEXT,
+      batting_style TEXT,
+      bowling_style TEXT,
+      is_captain INTEGER DEFAULT 0,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(season_id) REFERENCES seasons(id)
+    )
+  `);
+
+  // Index for fast season+team lookups
+  db.run(`CREATE INDEX IF NOT EXISTS idx_season_players_season ON season_players(season_id)`, (err) => {
+    if (err) console.error('Error creating idx_season_players_season:', err);
+    else console.log('✅ Index on season_players(season_id) ready');
+  });
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_season_players_team ON season_players(season_id, team_name)`, (err) => {
+    if (err) console.error('Error creating idx_season_players_team:', err);
+    else console.log('✅ Index on season_players(season_id, team_name) ready');
+  });
+
   // Seed users if not present
   db.get("SELECT COUNT(*) as cnt FROM users", (err, row) => {
     if (err) {

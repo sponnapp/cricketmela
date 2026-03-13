@@ -3075,17 +3075,23 @@ app.get('/api/predictions/players-by-season/:seasonId', requireRole('picker', 's
   const db = openDb();
 
   db.get('SELECT cricapi_series_id, cricbuzz_series_id FROM seasons WHERE id = ?', [seasonId], (err, season) => {
-    db.close();
-    if (err) return res.status(500).json({ error: 'DB error' });
-    if (!season) return res.status(404).json({ error: 'Season not found' });
+    if (err) {
+      db.close();
+      return res.status(500).json({ error: 'DB error' });
+    }
+    if (!season) {
+      db.close();
+      return res.status(404).json({ error: 'Season not found' });
+    }
     
     // Prefer Cricbuzz squad data if available
     if (season.cricbuzz_series_id) {
       const cacheKey = `cricbuzz_squad_${seasonId}`;
       const cached = getCachedPredictionPlayers(cacheKey);
 
-      // Return cached data if available
+      // Return cached data if available (memory cache - fastest)
       if (cached) {
+        db.close();
         if (team1 && team2) {
           const filtered = filterPlayersByTeams(cached, team1, team2);
           return res.json(filtered);
@@ -3093,72 +3099,68 @@ app.get('/api/predictions/players-by-season/:seasonId', requireRole('picker', 's
         return res.json(cached);
       }
 
-      // Fetch from Cricbuzz
-      fetchCricbuzz(`/series/v1/${season.cricbuzz_series_id}/squads`, (cbErr, cbData) => {
-        if (cbErr || !cbData || !cbData.squads) {
-          return res.json({ players: [], source: 'cricbuzz_error', message: 'Failed to fetch squad from Cricbuzz' });
-        }
-
-        // Get all squad IDs for actual teams (not headers)
-        const teamSquads = cbData.squads.filter(s => s.squadId && !s.isHeader);
+      // Check database next (persistent cache)
+      db.all('SELECT * FROM season_players WHERE season_id = ? ORDER BY team_name, player_name', [seasonId], (dbErr, players) => {
+        db.close();
         
-        if (teamSquads.length === 0) {
-          return res.json({ players: [], source: 'cricbuzz_no_squads', message: 'No squads available for this series' });
+        if (dbErr) {
+          console.error('Error loading squad from database:', dbErr);
+          return res.status(500).json({ error: 'Database error loading squad' });
         }
-
-        // Fetch player details for each team squad
-        let completed = 0;
-        const teamSquadMap = {};
-        const allPlayers = [];
-
-        teamSquads.forEach(squad => {
-          fetchCricbuzz(`/series/v1/${season.cricbuzz_series_id}/squads/${squad.squadId}`, (err, playerData) => {
-            completed++;
+        
+        // If we have squad data in database, use it
+        if (players && players.length > 0) {
+          console.log(`✅ Loaded ${players.length} players from database for season ${seasonId}`);
+          
+          // Build teamSquads structure from DB
+          const teamSquadMap = {};
+          const allPlayers = [];
+          
+          players.forEach(p => {
+            const playerObj = {
+              id: p.player_id,
+              name: p.player_name,
+              role: p.role || '',
+              imageId: p.image_id || null,
+              imageUrl: p.image_id ? `/api/player-image/c${p.image_id}` : null,
+              battingStyle: p.batting_style || '',
+              bowlingStyle: p.bowling_style || '',
+              captain: p.is_captain === 1
+            };
             
-            if (!err && playerData && Array.isArray(playerData.player)) {
-              const teamName = squad.squadType || `Team ${squad.teamId}`;
-              const players = [];
-              
-              playerData.player.forEach(p => {
-                // Skip header rows
-                if (p.isHeader || !p.id) return;
-                
-                players.push({
-                  id: p.id,
-                  name: p.name,
-                  role: p.role || '',
-                  imageId: p.imageId || null,
-                  imageUrl: p.imageId ? `/api/player-image/c${p.imageId}` : null,
-                  battingStyle: p.battingStyle || '',
-                  bowlingStyle: p.bowlingStyle || '',
-                  captain: p.captain || false
-                });
-                allPlayers.push(players[players.length - 1]);
-              });
-              
-              teamSquadMap[teamName] = players;
+            if (!teamSquadMap[p.team_name]) {
+              teamSquadMap[p.team_name] = [];
             }
-
-            // When all squads fetched, cache and return
-            if (completed === teamSquads.length) {
-              const fullData = {
-                players: allPlayers,
-                source: 'cricbuzz',
-                season_id: seasonId,
-                teamSquads: teamSquadMap
-              };
-
-              setCachedPredictionPlayers(cacheKey, fullData);
-
-              // Filter by teams if provided
-              if (team1 && team2) {
-                const filtered = filterPlayersByTeams(fullData, team1, team2);
-                return res.json(filtered);
-              }
-
-              res.json(fullData);
-            }
+            teamSquadMap[p.team_name].push(playerObj);
+            allPlayers.push(playerObj);
           });
+          
+          const fullData = {
+            players: allPlayers,
+            source: 'database',
+            season_id: seasonId,
+            teamSquads: teamSquadMap
+          };
+          
+          // Cache in memory for even faster subsequent requests
+          setCachedPredictionPlayers(cacheKey, fullData);
+          
+          // Filter by teams if provided
+          if (team1 && team2) {
+            const filtered = filterPlayersByTeams(fullData, team1, team2);
+            return res.json(filtered);
+          }
+          
+          return res.json(fullData);
+        }
+        
+        // No data in database - fall back to Cricbuzz API (admin should refresh squad first)
+        console.log(`⚠️  No squad data in database for season ${seasonId}, returning empty (admin should refresh squad)`);
+        return res.json({
+          players: [],
+          teamSquads: {},
+          source: 'no_data',
+          message: 'Squad data not available. Admin should click "Refresh Squad" to fetch from Cricbuzz.'
         });
       });
       return; // Exit early for Cricbuzz path
@@ -3285,7 +3287,6 @@ app.post('/api/admin/seasons/:id/refresh-squad', requireRole('admin'), (req, res
             if (!err2 && playerData && Array.isArray(playerData.player)) {
               const teamName = squad.squadType || `Team ${squad.teamId}`;
               const players = [];
-              const refreshTimestamp = Date.now(); // Force image refresh
               
               playerData.player.forEach(p => {
                 if (p.isHeader || !p.id) return;
@@ -3294,7 +3295,7 @@ app.post('/api/admin/seasons/:id/refresh-squad', requireRole('admin'), (req, res
                   name: p.name,
                   role: p.role || '',
                   imageId: p.imageId || null,
-                  imageUrl: p.imageId ? `/api/player-image/c${p.imageId}?refresh=1&t=${refreshTimestamp}` : null,
+                  imageUrl: p.imageId ? `/api/player-image/c${p.imageId}` : null,
                   battingStyle: p.battingStyle || '',
                   bowlingStyle: p.bowlingStyle || '',
                   captain: p.captain || false
@@ -3306,23 +3307,68 @@ app.post('/api/admin/seasons/:id/refresh-squad', requireRole('admin'), (req, res
             }
 
             if (completed === teamSquads.length) {
-              const fullData = {
-                players: allPlayers,
-                source: 'cricbuzz',
-                season_id: seasonId,
-                teamSquads: teamSquadMap
-              };
+              // Save squad data to database for persistent caching
+              const dbSave = openDb();
+              
+              // First clear existing squad data for this season
+              dbSave.run('DELETE FROM season_players WHERE season_id = ?', [seasonId], (delErr) => {
+                if (delErr) {
+                  console.error('Error clearing old squad data:', delErr);
+                  dbSave.close();
+                  return res.status(500).json({ error: 'Failed to save squad data' });
+                }
+                
+                // Insert all players
+                const stmt = dbSave.prepare(
+                  'INSERT INTO season_players (season_id, team_name, player_id, player_name, role, image_id, batting_style, bowling_style, is_captain, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                );
+                
+                Object.entries(teamSquadMap).forEach(([teamName, players]) => {
+                  players.forEach(p => {
+                    stmt.run(
+                      seasonId,
+                      teamName,
+                      p.id,
+                      p.name,
+                      p.role || '',
+                      p.imageId || null,
+                      p.battingStyle || '',
+                      p.bowlingStyle || '',
+                      p.captain ? 1 : 0,
+                      new Date().toISOString()
+                    );
+                  });
+                });
+                
+                stmt.finalize((finalErr) => {
+                  dbSave.close();
+                  if (finalErr) {
+                    console.error('Error saving squad data:', finalErr);
+                    return res.status(500).json({ error: 'Failed to save squad data' });
+                  }
+                  
+                  console.log(`✅ Saved ${allPlayers.length} players to database for season ${seasonId}`);
+                  
+                  const fullData = {
+                    players: allPlayers,
+                    source: 'cricbuzz',
+                    season_id: seasonId,
+                    teamSquads: teamSquadMap
+                  };
 
-              setCachedPredictionPlayers(cacheKey, fullData);
+                  setCachedPredictionPlayers(cacheKey, fullData);
 
-              res.json({
-                ok: true,
-                season_id: seasonId,
-                season_name: season.name,
-                teams: Object.keys(teamSquadMap).length,
-                players: allPlayers.length,
-                source: 'cricbuzz',
-                refreshed_at: new Date().toISOString()
+                  res.json({
+                    ok: true,
+                    season_id: seasonId,
+                    season_name: season.name,
+                    teams: Object.keys(teamSquadMap).length,
+                    players: allPlayers.length,
+                    source: 'cricbuzz',
+                    saved_to_db: true,
+                    refreshed_at: new Date().toISOString()
+                  });
+                });
               });
             }
           });
