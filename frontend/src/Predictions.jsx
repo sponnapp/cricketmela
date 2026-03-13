@@ -257,7 +257,7 @@ export default function Predictions({ user, refreshTrigger }) {
   useEffect(() => {
     if (activeTab === 'predict') fetchUpcomingMatches()
     else fetchHistory()
-  }, [activeTab, selectedSeason, refreshTrigger])
+  }, [activeTab, selectedSeason])
 
   async function fetchSeasons() {
     try {

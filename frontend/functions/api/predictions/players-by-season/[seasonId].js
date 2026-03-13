@@ -2,7 +2,7 @@
 // This provides <100ms response times for squad data by caching in Cloudflare KV
 
 const BACKEND_URL = 'https://cricketmela-api.fly.dev';
-const CACHE_TTL = 3600; // 1 hour cache (within 100k daily read limit)
+const CACHE_TTL = 21600; // 6 hour cache (squad data rarely changes)
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
