@@ -3429,11 +3429,26 @@ function filterPlayersByTeams(squadData, team1, team2) {
 
   console.log(`[filterPlayersByTeams] Result: ${Object.keys(filteredTeamSquads).length} teams, ${uniqueFiltered.length} total players`);
 
+  // If no teams matched, return empty squads instead of all squads
+  // This prevents frontend from showing wrong players for teams not yet available
+  if (Object.keys(filteredTeamSquads).length === 0) {
+    console.log(`  ⚠️  No teams found! Returning empty squads.`);
+    return {
+      ...squadData,
+      players: [],
+      teamSquads: {},
+      filtered: false,
+      matchedTeams: 0,
+      error: `Squad data not yet available for ${team1} and ${team2}`,
+      availableTeams: Object.keys(squadData.teamSquads)
+    };
+  }
+
   return {
     ...squadData,
-    players: uniqueFiltered.length > 0 ? uniqueFiltered : squadData.players,
-    teamSquads: Object.keys(filteredTeamSquads).length > 0 ? filteredTeamSquads : squadData.teamSquads,
-    filtered: uniqueFiltered.length > 0,
+    players: uniqueFiltered,
+    teamSquads: filteredTeamSquads,
+    filtered: true,
     matchedTeams: Object.keys(filteredTeamSquads).length
   };
 }
