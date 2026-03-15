@@ -989,7 +989,7 @@ app.get('/api/admin/cricapi/series/:id/matches', requireRole('admin', 'superuser
   });
 });
 
-// POST /api/admin/cricapi/import-season – create season + import selected matches
+// POST /api/admin/cricapi/import-season – create or append to season + import selected matches
 app.post('/api/admin/cricapi/import-season', requireRole('admin'), (req, res) => {
   const { seasonName, matches: matchesToImport, seriesId } = req.body;
   if (!seasonName) return res.status(400).json({ error: 'seasonName required' });
@@ -999,31 +999,100 @@ app.post('/api/admin/cricapi/import-season', requireRole('admin'), (req, res) =>
 
   const db = openDb();
   db.serialize(() => {
-    // Create the season (with optional cricapi_series_id)
-    db.run('INSERT INTO seasons (name, cricapi_series_id) VALUES (?, ?)', [seasonName, seriesId || null], function(err) {
+    // Check if season already exists
+    db.get('SELECT id, cricapi_series_id FROM seasons WHERE name = ?', [seasonName], function(err, existingSeason) {
       if (err) {
         db.close();
-        return res.status(500).json({ error: 'Failed to create season: ' + err.message });
+        return res.status(500).json({ error: 'Failed to check existing season: ' + err.message });
       }
-      const seasonId = this.lastID;
-      const stmt = db.prepare(
-        'INSERT INTO matches (season_id, home_team, away_team, scheduled_at, venue) VALUES (?, ?, ?, ?, ?)'
-      );
-      let inserted = 0;
-      let errors = [];
-      for (const m of matchesToImport) {
-        try {
-          stmt.run([seasonId, m.home_team, m.away_team, m.scheduled_at || '', m.venue || '']);
-          inserted++;
-        } catch (e) {
-          errors.push(e.message);
+
+      let seasonId;
+      let isNewSeason = false;
+
+      const insertMatches = (sid) => {
+        // Get existing matches for this season to avoid duplicates
+        db.all('SELECT home_team, away_team, scheduled_at FROM matches WHERE season_id = ?', [sid], (err, existingMatches) => {
+          if (err) {
+            db.close();
+            return res.status(500).json({ error: 'Failed to fetch existing matches: ' + err.message });
+          }
+
+          // Create a Set of existing match signatures for deduplication
+          const existingMatchSet = new Set(
+            existingMatches.map(m => `${m.home_team}|${m.away_team}|${m.scheduled_at}`)
+          );
+
+          const stmt = db.prepare(
+            'INSERT INTO matches (season_id, home_team, away_team, scheduled_at, venue) VALUES (?, ?, ?, ?, ?)'
+          );
+          let inserted = 0;
+          let skipped = 0;
+          let errors = [];
+
+          for (const m of matchesToImport) {
+            try {
+              const scheduledAt = m.scheduled_at || '';
+              const matchSignature = `${m.home_team}|${m.away_team}|${scheduledAt}`;
+
+              // Skip if match already exists
+              if (existingMatchSet.has(matchSignature)) {
+                skipped++;
+                continue;
+              }
+
+              stmt.run([sid, m.home_team, m.away_team, scheduledAt, m.venue || '']);
+              inserted++;
+            } catch (e) {
+              errors.push(e.message);
+            }
+          }
+
+          stmt.finalize(err2 => {
+            db.close();
+            if (err2) return res.status(500).json({ error: 'Failed to insert matches: ' + err2.message });
+            res.status(201).json({ 
+              ok: true, 
+              seasonId: sid, 
+              seasonName, 
+              inserted, 
+              skipped,
+              errors,
+              isNewSeason,
+              message: isNewSeason 
+                ? `Created new season "${seasonName}" with ${inserted} match(es)` 
+                : `Appended ${inserted} match(es) to existing season "${seasonName}" (${skipped} duplicate(s) skipped)`
+            });
+          });
+        });
+      };
+
+      if (existingSeason) {
+        // Season exists - append matches
+        seasonId = existingSeason.id;
+        console.log(`✓ Found existing season "${seasonName}" (ID: ${seasonId}), appending matches...`);
+        
+        // Update cricapi_series_id if not set
+        if (seriesId && !existingSeason.cricapi_series_id) {
+          db.run('UPDATE seasons SET cricapi_series_id = ? WHERE id = ?', [seriesId, seasonId], (updateErr) => {
+            if (updateErr) console.error('Warning: Failed to update cricapi_series_id:', updateErr);
+            insertMatches(seasonId);
+          });
+        } else {
+          insertMatches(seasonId);
         }
+      } else {
+        // Create new season
+        isNewSeason = true;
+        db.run('INSERT INTO seasons (name, cricapi_series_id) VALUES (?, ?)', [seasonName, seriesId || null], function(insertErr) {
+          if (insertErr) {
+            db.close();
+            return res.status(500).json({ error: 'Failed to create season: ' + insertErr.message });
+          }
+          seasonId = this.lastID;
+          console.log(`✓ Created new season "${seasonName}" (ID: ${seasonId})`);
+          insertMatches(seasonId);
+        });
       }
-      stmt.finalize(err2 => {
-        db.close();
-        if (err2) return res.status(500).json({ error: 'Failed to insert matches: ' + err2.message });
-        res.status(201).json({ ok: true, seasonId, seasonName, inserted, errors });
-      });
     });
   });
 });
@@ -1232,7 +1301,7 @@ app.get('/api/admin/cricbuzz/series/:id/matches', requireRole('admin', 'superuse
   });
 });
 
-// POST /api/admin/cricbuzz/import-season – create season from Cricbuzz + import matches
+// POST /api/admin/cricbuzz/import-season – create or append to season from Cricbuzz + import matches
 app.post('/api/admin/cricbuzz/import-season', requireRole('admin'), (req, res) => {
   const { seasonName, matches: matchesToImport, seriesId } = req.body;
   if (!seasonName) return res.status(400).json({ error: 'seasonName required' });
@@ -1242,34 +1311,100 @@ app.post('/api/admin/cricbuzz/import-season', requireRole('admin'), (req, res) =
 
   const db = openDb();
   db.serialize(() => {
-    // Create the season with cricbuzz_series_id
-    db.run('INSERT INTO seasons (name, cricbuzz_series_id) VALUES (?, ?)', [seasonName, seriesId || null], function(err) {
+    // Check if season already exists
+    db.get('SELECT id, cricbuzz_series_id FROM seasons WHERE name = ?', [seasonName], function(err, existingSeason) {
       if (err) {
         db.close();
-        return res.status(500).json({ error: 'Failed to create season: ' + err.message });
+        return res.status(500).json({ error: 'Failed to check existing season: ' + err.message });
       }
-      const seasonId = this.lastID;
-      const stmt = db.prepare(
-        'INSERT INTO matches (season_id, home_team, away_team, scheduled_at, venue) VALUES (?, ?, ?, ?, ?)'
-      );
-      let inserted = 0;
-      let errors = [];
-      for (const m of matchesToImport) {
-        try {
-          // Keep ISO format to preserve timezone - frontend will convert to local time for display
-          const scheduledAt = m.scheduled_at || '';
-          
-          stmt.run([seasonId, m.home_team, m.away_team, scheduledAt, m.venue || '']);
-          inserted++;
-        } catch (e) {
-          errors.push(e.message);
+
+      let seasonId;
+      let isNewSeason = false;
+
+      const insertMatches = (sid) => {
+        // Get existing matches for this season to avoid duplicates
+        db.all('SELECT home_team, away_team, scheduled_at FROM matches WHERE season_id = ?', [sid], (err, existingMatches) => {
+          if (err) {
+            db.close();
+            return res.status(500).json({ error: 'Failed to fetch existing matches: ' + err.message });
+          }
+
+          // Create a Set of existing match signatures for deduplication
+          const existingMatchSet = new Set(
+            existingMatches.map(m => `${m.home_team}|${m.away_team}|${m.scheduled_at}`)
+          );
+
+          const stmt = db.prepare(
+            'INSERT INTO matches (season_id, home_team, away_team, scheduled_at, venue) VALUES (?, ?, ?, ?, ?)'
+          );
+          let inserted = 0;
+          let skipped = 0;
+          let errors = [];
+
+          for (const m of matchesToImport) {
+            try {
+              const scheduledAt = m.scheduled_at || '';
+              const matchSignature = `${m.home_team}|${m.away_team}|${scheduledAt}`;
+
+              // Skip if match already exists
+              if (existingMatchSet.has(matchSignature)) {
+                skipped++;
+                continue;
+              }
+
+              stmt.run([sid, m.home_team, m.away_team, scheduledAt, m.venue || '']);
+              inserted++;
+            } catch (e) {
+              errors.push(e.message);
+            }
+          }
+
+          stmt.finalize(err2 => {
+            db.close();
+            if (err2) return res.status(500).json({ error: 'Failed to insert matches: ' + err2.message });
+            res.status(201).json({ 
+              ok: true, 
+              seasonId: sid, 
+              seasonName, 
+              inserted, 
+              skipped,
+              errors,
+              isNewSeason,
+              message: isNewSeason 
+                ? `Created new season "${seasonName}" with ${inserted} match(es)` 
+                : `Appended ${inserted} match(es) to existing season "${seasonName}" (${skipped} duplicate(s) skipped)`
+            });
+          });
+        });
+      };
+
+      if (existingSeason) {
+        // Season exists - append matches
+        seasonId = existingSeason.id;
+        console.log(`✓ Found existing season "${seasonName}" (ID: ${seasonId}), appending matches...`);
+        
+        // Update cricbuzz_series_id if not set
+        if (seriesId && !existingSeason.cricbuzz_series_id) {
+          db.run('UPDATE seasons SET cricbuzz_series_id = ? WHERE id = ?', [seriesId, seasonId], (updateErr) => {
+            if (updateErr) console.error('Warning: Failed to update cricbuzz_series_id:', updateErr);
+            insertMatches(seasonId);
+          });
+        } else {
+          insertMatches(seasonId);
         }
+      } else {
+        // Create new season
+        isNewSeason = true;
+        db.run('INSERT INTO seasons (name, cricbuzz_series_id) VALUES (?, ?)', [seasonName, seriesId || null], function(insertErr) {
+          if (insertErr) {
+            db.close();
+            return res.status(500).json({ error: 'Failed to create season: ' + insertErr.message });
+          }
+          seasonId = this.lastID;
+          console.log(`✓ Created new season "${seasonName}" (ID: ${seasonId})`);
+          insertMatches(seasonId);
+        });
       }
-      stmt.finalize(err2 => {
-        db.close();
-        if (err2) return res.status(500).json({ error: 'Failed to insert matches: ' + err2.message });
-        res.status(201).json({ ok: true, seasonId, seasonName, inserted, errors });
-      });
     });
   });
 });

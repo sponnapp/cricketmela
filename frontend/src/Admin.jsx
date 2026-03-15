@@ -319,7 +319,9 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
       setCricApiModal(prev => ({...prev, show: false, loading: false}))
       fetchSeasons()
       fetchAllMatches()
-      alert(`✅ Season "${seasonName}" created with ${r.data.inserted} match(es) imported successfully!`)
+      // Use the message from backend which includes append/new season info
+      const message = r.data.message || `Season "${seasonName}" updated with ${r.data.inserted} match(es)`
+      alert(`✅ ${message}`)
     } catch (e) {
       setCricApiModal(prev => ({
         ...prev,
@@ -421,7 +423,9 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
       setCricApiModal(prev => ({...prev, show: false, loading: false}))
       fetchSeasons()
       fetchAllMatches()
-      toast('success', 'Success', `Season "${seasonName}" created with ${r.data.inserted} match(es) imported from Cricbuzz!`)
+      // Use the message from backend which includes append/new season info
+      const message = r.data.message || `Season "${seasonName}" updated with ${r.data.inserted} match(es)`
+      toast('success', 'Success', message)
     } catch (e) {
       setCricApiModal(prev => ({
         ...prev,
@@ -2316,6 +2320,14 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                     onFocus={e => e.target.style.borderColor='#667eea'}
                     onBlur={e => e.target.style.borderColor='#ddd'}
                   />
+                </div>
+                
+                {/* Info message about append behavior */}
+                <div style={{marginBottom:'12px',padding:'10px 15px',backgroundColor:'#e8f4f8',border:'1px solid #b8dce8',borderRadius:'8px',fontSize:'12px',color:'#2c5f6f',display:'flex',alignItems:'start',gap:'8px'}}>
+                  <span style={{fontSize:'14px'}}>ℹ️</span>
+                  <div>
+                    <strong>Smart Import:</strong> If a season with this name already exists, new matches will be appended to it. Duplicate matches are automatically skipped.
+                  </div>
                 </div>
 
                 {/* Select all / none */}
