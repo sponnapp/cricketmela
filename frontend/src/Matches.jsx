@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import axios from 'axios'
 import { toast } from './Toast'
+import CoinFlip from './CoinFlip'
 
 const POINTS = [10, 20, 50]
 
@@ -60,6 +61,7 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
   const [votes, setVotes] = useState({})
   const [userVotes, setUserVotes] = useState({})
   const [seasonBalance, setSeasonBalance] = useState(null)
+  const [coinFlip, setCoinFlip] = useState({ show: false, team: '' })
 
   useEffect(() => {
     fetchMatches()
@@ -118,24 +120,32 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
     if (!user) { toast('error', 'Not logged in', 'Please login to vote'); return }
     if (user.role === 'admin') { toast('warning', 'Admin View', 'Admins cannot vote'); return }
     if (!team || !points) { toast('warning', 'Incomplete', 'Please select both a team and points'); return }
-    try {
-      const res = await axios.post(`/api/matches/${matchId}/vote`,
-        { team, points: parseInt(points) },
-        { headers: { 'x-user': user.username } }
-      )
-      const isUpdate = !!userVotes[matchId]
-      if (res.data.season_balance !== undefined) {
-        setSeasonBalance(res.data.season_balance)
+    
+    // Show coin flip animation
+    setCoinFlip({ show: true, team })
+    
+    setTimeout(async () => {
+      try {
+        const res = await axios.post(`/api/matches/${matchId}/vote`,
+          { team, points: parseInt(points) },
+          { headers: { 'x-user': user.username } }
+        )
+        const isUpdate = !!userVotes[matchId]
+        if (res.data.season_balance !== undefined) {
+          setSeasonBalance(res.data.season_balance)
+        }
+        toast('success',
+          isUpdate ? '✅ Vote Updated!' : '🏏 Vote Placed!',
+          `${team} — ${points} pts | Season Balance: ${Math.round(res.data.season_balance ?? seasonBalance ?? 0)} pts`,
+          4000
+        )
+        await fetchMatches()
+      } catch (err) {
+        alert(err.response?.data?.error || 'Vote failed')
+      } finally {
+        setCoinFlip({ show: false, team: '' })
       }
-      toast('success',
-        isUpdate ? '✅ Vote Updated!' : '🏏 Vote Placed!',
-        `${team} — ${points} pts | Season Balance: ${Math.round(res.data.season_balance ?? seasonBalance ?? 0)} pts`,
-        4000
-      )
-      await fetchMatches()
-    } catch (err) {
-      alert(err.response?.data?.error || 'Vote failed')
-    }
+    }, 1500)
   }
 
   function parseMatchDateTime(value) {
@@ -267,24 +277,32 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
     if (!user) { toast('error', 'Not logged in', 'Please login to vote'); return }
     if (user.role === 'admin') { toast('warning', 'Admin View', 'Admins cannot vote'); return }
     if (!team || !points) { toast('warning', 'Incomplete', 'Please select both a team and points'); return }
-    try {
-      const res = await axios.post(`/api/matches/${matchId}/vote`,
-        { team, points: parseInt(points) },
-        { headers: { 'x-user': user.username } }
-      )
-      const isUpdate = !!userVotes[matchId]
-      if (res.data.season_balance !== undefined) {
-        setSeasonBalance(res.data.season_balance)
+    
+    // Show coin flip animation
+    setCoinFlip({ show: true, team })
+    
+    setTimeout(async () => {
+      try {
+        const res = await axios.post(`/api/matches/${matchId}/vote`,
+          { team, points: parseInt(points) },
+          { headers: { 'x-user': user.username } }
+        )
+        const isUpdate = !!userVotes[matchId]
+        if (res.data.season_balance !== undefined) {
+          setSeasonBalance(res.data.season_balance)
+        }
+        toast('success',
+          isUpdate ? '✅ Vote Updated!' : '🏏 Vote Placed!',
+          `${team} — ${points} pts | Season Balance: ${Math.round(res.data.season_balance ?? seasonBalance ?? 0)} pts`,
+          4000
+        )
+        await fetchMatches()
+      } catch (err) {
+        alert(err.response?.data?.error || 'Vote failed')
+      } finally {
+        setCoinFlip({ show: false, team: '' })
       }
-      toast('success',
-        isUpdate ? '✅ Vote Updated!' : '🏏 Vote Placed!',
-        `${team} — ${points} pts | Season Balance: ${Math.round(res.data.season_balance ?? seasonBalance ?? 0)} pts`,
-        4000
-      )
-      await fetchMatches()
-    } catch (err) {
-      alert(err.response?.data?.error || 'Vote failed')
-    }
+    }, 1500)
   }
 
   return (
@@ -565,6 +583,8 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
           </table>
         </div>
       )}
+      
+      {coinFlip.show && <CoinFlip teamName={coinFlip.team} />}
     </div>
   )
 }
