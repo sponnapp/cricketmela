@@ -59,8 +59,13 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Load Google OAuth strategy
-require('./auth/googleStrategy')(passport);
+// Load Google OAuth strategy only if credentials are configured
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  require('./auth/googleStrategy')(passport);
+  console.log('✅ Google OAuth enabled');
+} else {
+  console.log('⚠️  Google OAuth disabled (credentials not configured)');
+}
 
 const DB_DIR = process.env.NODE_ENV === 'production' ? '/app/data' : __dirname;
 const DB_PATH = path.join(DB_DIR, 'data.db');
@@ -2246,6 +2251,788 @@ app.get('/api/users/:userId/votes', (req, res) => {
   });
 });
 
+// Admin: Get vote history for all users or specific user
+app.get('/api/admin/vote-history', requireRole('admin'), (req, res) => {
+  const userId = req.query.userId ? Number(req.query.userId) : null;
+  const db = openDb();
+  
+  let query, params;
+  if (userId) {
+    // Get votes for specific user
+    query = `
+      SELECT v.id, v.match_id, v.team, v.points, v.created_at, v.user_id,
+             u.username, u.display_name,
+             m.home_team, m.away_team, m.winner, m.scheduled_at,
+             m.season_id, s.name as season_name
+      FROM votes v
+      JOIN matches m ON v.match_id = m.id
+      LEFT JOIN seasons s ON s.id = m.season_id
+      JOIN users u ON u.id = v.user_id
+      WHERE v.user_id = ?
+      ORDER BY m.scheduled_at ASC
+    `;
+    params = [userId];
+  } else {
+    // Get all votes across all users
+    query = `
+      SELECT v.id, v.match_id, v.team, v.points, v.created_at, v.user_id,
+             u.username, u.display_name,
+             m.home_team, m.away_team, m.winner, m.scheduled_at,
+             m.season_id, s.name as season_name
+      FROM votes v
+      JOIN matches m ON v.match_id = m.id
+      LEFT JOIN seasons s ON s.id = m.season_id
+      JOIN users u ON u.id = v.user_id
+      ORDER BY m.scheduled_at ASC
+    `;
+    params = [];
+  }
+  
+  db.all(query, params, (err, rows) => {
+    if (err) { db.close(); return res.status(500).json({ error: 'DB error' }); }
+    if (!rows || rows.length === 0) { db.close(); return res.json([]); }
+
+    const matchIds = [...new Set(rows.map(r => r.match_id))];
+    const placeholders = matchIds.map(() => '?').join(',');
+
+    db.all(
+      `SELECT match_id, team, SUM(points) as total
+       FROM votes
+       WHERE match_id IN (${placeholders})
+       GROUP BY match_id, team`,
+      matchIds,
+      (err2, totalsRows) => {
+        db.close();
+        if (err2) return res.status(500).json({ error: 'DB error' });
+
+        const totalsByMatch = {};
+        (totalsRows || []).forEach(t => {
+          if (!totalsByMatch[t.match_id]) totalsByMatch[t.match_id] = {};
+          totalsByMatch[t.match_id][t.team] = Number(t.total) || 0;
+        });
+
+        const withNet = rows.map(v => {
+          if (!v.winner) return { ...v, net_points: null, total_payout: null };
+          const totals = totalsByMatch[v.match_id] || {};
+          const totalWinner = Number(totals[v.winner] || 0);
+          const totalLoser = Object.keys(totals).reduce((sum, team) => team === v.winner ? sum : sum + Number(totals[team] || 0), 0);
+          if (v.team === v.winner) {
+            if (totalWinner === 0 || totalLoser === 0) return { ...v, net_points: 0, total_payout: Number(v.points) };
+            const share = (Number(v.points) / totalWinner) * totalLoser;
+            const netPoints = Number(share.toFixed(2));
+            const totalPayout = Number(v.points) + netPoints;
+            return { ...v, net_points: netPoints, total_payout: Number(totalPayout.toFixed(2)) };
+          }
+          return { ...v, net_points: -Number(v.points), total_payout: 0 };
+        });
+
+        res.json(withNet);
+      }
+    );
+  });
+});
+
+// Admin: Get analytics for all non-admin users or a specific user
+app.get('/api/admin/analytics', requireRole('admin'), (req, res) => {
+  const requestedUserId = req.query.userId ? Number(req.query.userId) : null;
+  const db = openDb();
+
+  let query = `
+    SELECT v.id, v.match_id, v.team, v.points, v.created_at, v.user_id,
+           u.username, u.display_name, u.role,
+           m.home_team, m.away_team, m.winner, m.scheduled_at,
+           m.season_id, s.name as season_name
+    FROM votes v
+    JOIN matches m ON v.match_id = m.id
+    LEFT JOIN seasons s ON s.id = m.season_id
+    JOIN users u ON u.id = v.user_id
+    WHERE u.role != 'admin'
+  `;
+  const params = [];
+
+  if (requestedUserId) {
+    query += ' AND v.user_id = ?';
+    params.push(requestedUserId);
+  }
+
+  query += ' ORDER BY m.scheduled_at ASC, v.id ASC';
+
+  function parseAnalyticsDate(value) {
+    if (!value) return null;
+    const raw = String(value).trim();
+    const isoNoTz = raw.match(/^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}(?::\d{2})?$/);
+    if (isoNoTz) {
+      const date = new Date(`${raw}Z`);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    const direct = new Date(raw);
+    if (!Number.isNaN(direct.getTime())) return direct;
+
+    if (raw.includes('T') && !raw.match(/^\d{4}-/)) {
+      const [datePart, timePart] = raw.split('T');
+      const dateStr = datePart.includes('-20') ? datePart : datePart.replace(/-(\d{2})$/, '-20$1');
+      const parsed = new Date(`${dateStr} ${timePart}`);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    return null;
+  }
+
+  function monthKeyFromScheduledAt(value) {
+    const parsed = parseAnalyticsDate(value);
+    if (!parsed) return 'Unknown';
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  }
+
+  db.all(query, params, (err, rows) => {
+    if (err) {
+      db.close();
+      return res.status(500).json({ error: 'DB error' });
+    }
+
+    if (!rows || rows.length === 0) {
+      db.close();
+      return res.json({
+        overview: {
+          total_votes: 0,
+          won: 0,
+          lost: 0,
+          pending: 0,
+          win_rate: 0,
+          total_bet: 0,
+          avg_bet: 0,
+          net_profit: 0,
+          roi: 0,
+        },
+        teams: [],
+        timeline: [],
+        streaks: {
+          current_streak: 0,
+          current_losing_streak: 0,
+          best_winning_streak: 0,
+        },
+        patterns: {
+          by_points: [],
+          by_day: [],
+        },
+      });
+    }
+
+    const matchIds = [...new Set(rows.map(row => row.match_id))];
+    const placeholders = matchIds.map(() => '?').join(',');
+
+    db.all(
+      `SELECT match_id, team, SUM(points) as total
+       FROM votes
+       WHERE match_id IN (${placeholders})
+       GROUP BY match_id, team`,
+      matchIds,
+      (err2, totalsRows) => {
+        db.close();
+        if (err2) return res.status(500).json({ error: 'DB error' });
+
+        const totalsByMatch = {};
+        (totalsRows || []).forEach(total => {
+          if (!totalsByMatch[total.match_id]) totalsByMatch[total.match_id] = {};
+          totalsByMatch[total.match_id][total.team] = Number(total.total) || 0;
+        });
+
+        const withNet = rows.map(vote => {
+          if (!vote.winner) return { ...vote, net_points: null, total_payout: null };
+
+          const totals = totalsByMatch[vote.match_id] || {};
+          const totalWinner = Number(totals[vote.winner] || 0);
+          const totalLoser = Object.keys(totals).reduce((sum, team) => {
+            return team === vote.winner ? sum : sum + Number(totals[team] || 0);
+          }, 0);
+
+          if (vote.team === vote.winner) {
+            if (totalWinner === 0 || totalLoser === 0) {
+              return { ...vote, net_points: 0, total_payout: Number(vote.points) };
+            }
+            const share = (Number(vote.points) / totalWinner) * totalLoser;
+            const netPoints = Number(share.toFixed(2));
+            return {
+              ...vote,
+              net_points: netPoints,
+              total_payout: Number((Number(vote.points) + netPoints).toFixed(2)),
+            };
+          }
+
+          return { ...vote, net_points: -Number(vote.points), total_payout: 0 };
+        });
+
+        const settledVotes = withNet.filter(vote => vote.winner);
+        const totalVotes = withNet.length;
+        const won = settledVotes.filter(vote => vote.team === vote.winner).length;
+        const lost = settledVotes.filter(vote => vote.team !== vote.winner).length;
+        const pending = totalVotes - won - lost;
+        const totalBet = withNet.reduce((sum, vote) => sum + Number(vote.points || 0), 0);
+        const netProfit = settledVotes.reduce((sum, vote) => sum + Number(vote.net_points || 0), 0);
+
+        const overview = {
+          total_votes: totalVotes,
+          won,
+          lost,
+          pending,
+          win_rate: totalVotes > 0 ? Number(((won / totalVotes) * 100).toFixed(1)) : 0,
+          total_bet: totalBet,
+          avg_bet: totalVotes > 0 ? Math.round(totalBet / totalVotes) : 0,
+          net_profit: Math.round(netProfit),
+          roi: totalBet > 0 ? Number(((netProfit / totalBet) * 100).toFixed(1)) : 0,
+        };
+
+        const teamMap = {};
+        withNet.forEach(vote => {
+          if (!teamMap[vote.team]) {
+            teamMap[vote.team] = {
+              team: vote.team,
+              votes: 0,
+              won: 0,
+              lost: 0,
+              total_bet: 0,
+              net_profit: 0,
+            };
+          }
+
+          const teamStats = teamMap[vote.team];
+          teamStats.votes += 1;
+          teamStats.total_bet += Number(vote.points || 0);
+          if (vote.winner && vote.team === vote.winner) teamStats.won += 1;
+          if (vote.winner && vote.team !== vote.winner) teamStats.lost += 1;
+          if (vote.winner) teamStats.net_profit += Number(vote.net_points || 0);
+        });
+
+        const teams = Object.values(teamMap).map(team => ({
+          ...team,
+          net_profit: Math.round(team.net_profit),
+          win_rate: team.votes > 0 ? ((team.won / team.votes) * 100).toFixed(1) : 0,
+          roi: team.total_bet > 0 ? ((team.net_profit / team.total_bet) * 100).toFixed(1) : 0,
+        }));
+
+        const timelineMap = {};
+        withNet.forEach(vote => {
+          const month = monthKeyFromScheduledAt(vote.scheduled_at);
+          if (!timelineMap[month]) {
+            timelineMap[month] = { month, votes: 0, won: 0, net_profit: 0 };
+          }
+          timelineMap[month].votes += 1;
+          if (vote.winner && vote.team === vote.winner) timelineMap[month].won += 1;
+          if (vote.winner) timelineMap[month].net_profit += Number(vote.net_points || 0);
+        });
+
+        const timeline = Object.values(timelineMap)
+          .map(item => ({ ...item, net_profit: Math.round(item.net_profit) }))
+          .sort((left, right) => left.month.localeCompare(right.month));
+
+        const settledSorted = [...settledVotes].sort((left, right) => {
+          const leftDate = parseAnalyticsDate(left.scheduled_at);
+          const rightDate = parseAnalyticsDate(right.scheduled_at);
+          if (!leftDate && !rightDate) return 0;
+          if (!leftDate) return 1;
+          if (!rightDate) return -1;
+          return leftDate - rightDate;
+        });
+
+        let currentRun = 0;
+        let currentIsWin = null;
+        for (let index = settledSorted.length - 1; index >= 0; index -= 1) {
+          const isWin = settledSorted[index].team === settledSorted[index].winner;
+          if (currentIsWin === null) {
+            currentIsWin = isWin;
+            currentRun = 1;
+            continue;
+          }
+          if (currentIsWin === isWin) {
+            currentRun += 1;
+          } else {
+            break;
+          }
+        }
+
+        let bestWinningStreak = 0;
+        let runningWinningStreak = 0;
+        settledSorted.forEach(vote => {
+          if (vote.team === vote.winner) {
+            runningWinningStreak += 1;
+            bestWinningStreak = Math.max(bestWinningStreak, runningWinningStreak);
+          } else {
+            runningWinningStreak = 0;
+          }
+        });
+
+        const streaks = {
+          current_streak: currentIsWin === true ? currentRun : 0,
+          current_losing_streak: currentIsWin === false ? currentRun : 0,
+          best_winning_streak: bestWinningStreak,
+        };
+
+        const pointMap = {};
+        const dayMap = {
+          Sunday: { day: 'Sunday', votes: 0, won: 0 },
+          Monday: { day: 'Monday', votes: 0, won: 0 },
+          Tuesday: { day: 'Tuesday', votes: 0, won: 0 },
+          Wednesday: { day: 'Wednesday', votes: 0, won: 0 },
+          Thursday: { day: 'Thursday', votes: 0, won: 0 },
+          Friday: { day: 'Friday', votes: 0, won: 0 },
+          Saturday: { day: 'Saturday', votes: 0, won: 0 },
+        };
+
+        settledSorted.forEach(vote => {
+          const pointsKey = Number(vote.points || 0);
+          if (!pointMap[pointsKey]) {
+            pointMap[pointsKey] = { points: pointsKey, count: 0, won: 0 };
+          }
+          pointMap[pointsKey].count += 1;
+          if (vote.team === vote.winner) pointMap[pointsKey].won += 1;
+
+          const parsed = parseAnalyticsDate(vote.scheduled_at);
+          if (parsed) {
+            const dayName = parsed.toLocaleDateString('en-US', { weekday: 'long' });
+            if (dayMap[dayName]) {
+              dayMap[dayName].votes += 1;
+              if (vote.team === vote.winner) dayMap[dayName].won += 1;
+            }
+          }
+        });
+
+        const patterns = {
+          by_points: Object.values(pointMap)
+            .sort((left, right) => left.points - right.points)
+            .map(item => ({
+              ...item,
+              win_rate: item.count > 0 ? ((item.won / item.count) * 100).toFixed(1) : 0,
+            })),
+          by_day: Object.values(dayMap)
+            .filter(item => item.votes > 0)
+            .map(item => ({
+              ...item,
+              win_rate: item.votes > 0 ? ((item.won / item.votes) * 100).toFixed(1) : 0,
+            })),
+        };
+
+        res.json({ overview, teams, timeline, streaks, patterns });
+      }
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// ANALYTICS ENDPOINTS
+// ═══════════════════════════════════════════════════════════════
+
+// Get comprehensive user analytics overview
+app.get('/api/analytics/overview/:userId', requireRole('picker', 'superuser', 'admin'), (req, res) => {
+  const userId = Number(req.params.userId);
+  const db = openDb();
+
+  // Overall stats
+  const overallQuery = `
+    SELECT 
+      COUNT(*) as total_votes,
+      COUNT(CASE WHEN v.team = m.winner THEN 1 END) as won,
+      COUNT(CASE WHEN m.winner IS NOT NULL AND v.team != m.winner THEN 1 END) as lost,
+      SUM(v.points) as total_bet,
+      AVG(v.points) as avg_bet
+    FROM votes v
+    JOIN matches m ON v.match_id = m.id
+    WHERE v.user_id = ?
+  `;
+
+  db.get(overallQuery, [userId], (err, overall) => {
+    if (err) { db.close(); return res.status(500).json({ error: err.message }); }
+
+    // Calculate net profit for each vote
+    db.all(`
+      SELECT v.match_id, v.points, v.team, m.winner
+      FROM votes v
+      JOIN matches m ON v.match_id = m.id
+      WHERE v.user_id = ? AND m.winner IS NOT NULL
+    `, [userId], (err2, userVotes) => {
+      if (err2) { db.close(); return res.status(500).json({ error: err2.message }); }
+
+      if (userVotes.length === 0) {
+        db.close();
+        return res.json({
+          total_votes: overall.total_votes || 0,
+          won: overall.won || 0,
+          lost: overall.lost || 0,
+          pending: (overall.total_votes || 0) - (overall.won || 0) - (overall.lost || 0),
+          win_rate: 0,
+          total_bet: overall.total_bet || 0,
+          avg_bet: Math.round(overall.avg_bet || 0),
+          net_profit: 0,
+          roi: 0
+        });
+      }
+
+      const matchIds = [...new Set(userVotes.map(v => v.match_id))];
+      const placeholders = matchIds.map(() => '?').join(',');
+
+      db.all(`
+        SELECT match_id, team, SUM(points) as total
+        FROM votes
+        WHERE match_id IN (${placeholders})
+        GROUP BY match_id, team
+      `, matchIds, (err3, totals) => {
+        db.close();
+        if (err3) return res.status(500).json({ error: err3.message });
+
+        const totalsByMatch = {};
+        totals.forEach(t => {
+          if (!totalsByMatch[t.match_id]) totalsByMatch[t.match_id] = {};
+          totalsByMatch[t.match_id][t.team] = Number(t.total);
+        });
+
+        let netProfit = 0;
+        userVotes.forEach(v => {
+          if (!v.winner) return;
+          const totals = totalsByMatch[v.match_id] || {};
+          const totalWinner = totals[v.winner] || 0;
+          const totalLoser = Object.keys(totals).reduce((sum, team) => 
+            team === v.winner ? sum : sum + (totals[team] || 0), 0);
+
+          if (v.team === v.winner && totalWinner > 0) {
+            const share = (v.points / totalWinner) * totalLoser;
+            netProfit += Math.round(share);
+          } else if (v.team !== v.winner) {
+            netProfit -= v.points;
+          }
+        });
+
+        const winRate = overall.total_votes > 0 ? (overall.won / overall.total_votes * 100).toFixed(1) : 0;
+        const roi = overall.total_bet > 0 ? ((netProfit / overall.total_bet) * 100).toFixed(1) : 0;
+
+        res.json({
+          total_votes: overall.total_votes || 0,
+          won: overall.won || 0,
+          lost: overall.lost || 0,
+          pending: (overall.total_votes || 0) - (overall.won || 0) - (overall.lost || 0),
+          win_rate: parseFloat(winRate),
+          total_bet: overall.total_bet || 0,
+          avg_bet: Math.round(overall.avg_bet || 0),
+          net_profit: netProfit,
+          roi: parseFloat(roi)
+        });
+      });
+    });
+  });
+});
+
+// Team-wise performance analytics
+app.get('/api/analytics/teams/:userId', requireRole('picker', 'superuser', 'admin'), (req, res) => {
+  const userId = Number(req.params.userId);
+  const db = openDb();
+
+  db.all(`
+    SELECT 
+      v.team,
+      COUNT(*) as votes,
+      COUNT(CASE WHEN v.team = m.winner THEN 1 END) as won,
+      COUNT(CASE WHEN m.winner IS NOT NULL AND v.team != m.winner THEN 1 END) as lost,
+      SUM(v.points) as total_bet,
+      GROUP_CONCAT(v.match_id || ':' || v.points || ':' || COALESCE(m.winner, '')) as match_data
+    FROM votes v
+    JOIN matches m ON v.match_id = m.id
+    WHERE v.user_id = ?
+    GROUP BY v.team
+  `, [userId], (err, teams) => {
+    if (err) { db.close(); return res.status(500).json({ error: err.message }); }
+
+    if (!teams || teams.length === 0) {
+      db.close();
+      return res.json([]);
+    }
+
+    const allMatchIds = [];
+    teams.forEach(t => {
+      if (t.match_data) {
+        const matches = t.match_data.split(',');
+        matches.forEach(m => {
+          const [matchId] = m.split(':');
+          if (matchId) allMatchIds.push(Number(matchId));
+        });
+      }
+    });
+
+    const uniqueMatchIds = [...new Set(allMatchIds)];
+    if (uniqueMatchIds.length === 0) {
+      db.close();
+      return res.json(teams.map(t => ({
+        team: t.team,
+        votes: t.votes,
+        won: t.won,
+        lost: t.lost,
+        win_rate: t.votes > 0 ? ((t.won / t.votes) * 100).toFixed(1) : 0,
+        total_bet: t.total_bet,
+        net_profit: 0,
+        roi: 0
+      })));
+    }
+
+    const placeholders = uniqueMatchIds.map(() => '?').join(',');
+    db.all(`
+      SELECT match_id, team, SUM(points) as total
+      FROM votes
+      WHERE match_id IN (${placeholders})
+      GROUP BY match_id, team
+    `, uniqueMatchIds, (err2, voteTotals) => {
+      db.close();
+      if (err2) return res.status(500).json({ error: err2.message });
+
+      const totalsByMatch = {};
+      voteTotals.forEach(v => {
+        if (!totalsByMatch[v.match_id]) totalsByMatch[v.match_id] = {};
+        totalsByMatch[v.match_id][v.team] = Number(v.total);
+      });
+
+      const result = teams.map(t => {
+        let netProfit = 0;
+        if (t.match_data) {
+          const matches = t.match_data.split(',');
+          matches.forEach(m => {
+            const [matchId, points, winner] = m.split(':');
+            if (!winner || winner === '') return;
+            
+            const totals = totalsByMatch[Number(matchId)] || {};
+            const totalWinner = totals[winner] || 0;
+            const totalLoser = Object.keys(totals).reduce((sum, team) => 
+              team === winner ? sum : sum + (totals[team] || 0), 0);
+
+            if (t.team === winner && totalWinner > 0) {
+              const share = (Number(points) / totalWinner) * totalLoser;
+              netProfit += Math.round(share);
+            } else if (t.team !== winner) {
+              netProfit -= Number(points);
+            }
+          });
+        }
+
+        return {
+          team: t.team,
+          votes: t.votes,
+          won: t.won,
+          lost: t.lost,
+          win_rate: t.votes > 0 ? ((t.won / t.votes) * 100).toFixed(1) : 0,
+          total_bet: t.total_bet,
+          net_profit: netProfit,
+          roi: t.total_bet > 0 ? ((netProfit / t.total_bet) * 100).toFixed(1) : 0
+        };
+      });
+
+      res.json(result);
+    });
+  });
+});
+
+// Monthly performance timeline
+app.get('/api/analytics/timeline/:userId', requireRole('picker', 'superuser', 'admin'), (req, res) => {
+  const userId = Number(req.params.userId);
+  const db = openDb();
+
+  db.all(`
+    SELECT 
+      v.match_id,
+      v.points,
+      v.team,
+      m.winner,
+      strftime('%Y-%m', m.scheduled_at) as month
+    FROM votes v
+    JOIN matches m ON v.match_id = m.id
+    WHERE v.user_id = ?
+    ORDER BY m.scheduled_at ASC
+  `, [userId], (err, votes) => {
+    if (err) { db.close(); return res.status(500).json({ error: err.message }); }
+
+    if (!votes || votes.length === 0) {
+      db.close();
+      return res.json([]);
+    }
+
+    const matchIds = [...new Set(votes.map(v => v.match_id))];
+    const placeholders = matchIds.map(() => '?').join(',');
+
+    db.all(`
+      SELECT match_id, team, SUM(points) as total
+      FROM votes
+      WHERE match_id IN (${placeholders})
+      GROUP BY match_id, team
+    `, matchIds, (err2, totals) => {
+      db.close();
+      if (err2) return res.status(500).json({ error: err2.message });
+
+      const totalsByMatch = {};
+      totals.forEach(t => {
+        if (!totalsByMatch[t.match_id]) totalsByMatch[t.match_id] = {};
+        totalsByMatch[t.match_id][t.team] = Number(t.total);
+      });
+
+      const monthlyData = {};
+      votes.forEach(v => {
+        if (!v.month) return;
+        if (!monthlyData[v.month]) {
+          monthlyData[v.month] = { month: v.month, votes: 0, won: 0, net_profit: 0 };
+        }
+
+        monthlyData[v.month].votes++;
+        
+        if (v.winner) {
+          if (v.team === v.winner) {
+            monthlyData[v.month].won++;
+            const totals = totalsByMatch[v.match_id] || {};
+            const totalWinner = totals[v.winner] || 0;
+            const totalLoser = Object.keys(totals).reduce((sum, team) => 
+              team === v.winner ? sum : sum + (totals[team] || 0), 0);
+            if (totalWinner > 0) {
+              const share = (v.points / totalWinner) * totalLoser;
+              monthlyData[v.month].net_profit += Math.round(share);
+            }
+          } else {
+            monthlyData[v.month].net_profit -= v.points;
+          }
+        }
+      });
+
+      res.json(Object.values(monthlyData).sort((a, b) => a.month.localeCompare(b.month)));
+    });
+  });
+});
+
+// Streak calculation
+app.get('/api/analytics/streaks/:userId', requireRole('picker', 'superuser', 'admin'), (req, res) => {
+  const userId = Number(req.params.userId);
+  const db = openDb();
+
+  db.all(`
+    SELECT 
+      v.match_id,
+      m.scheduled_at,
+      v.team,
+      m.winner,
+      CASE WHEN v.team = m.winner THEN 1 ELSE 0 END as won
+    FROM votes v
+    JOIN matches m ON v.match_id = m.id
+    WHERE v.user_id = ? AND m.winner IS NOT NULL
+    ORDER BY m.scheduled_at ASC
+  `, [userId], (err, rows) => {
+    db.close();
+    if (err) return res.status(500).json({ error: err.message });
+
+    if (!rows || rows.length === 0) {
+      return res.json({
+        current_streak: 0,
+        current_losing_streak: 0,
+        best_winning_streak: 0
+      });
+    }
+
+    let currentStreak = 0;
+    let maxStreak = 0;
+    let lastWon = null;
+
+    // Calculate current streak (from most recent)
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i].won === 1) {
+        if (lastWon === null) {
+          lastWon = true;
+          currentStreak = 1;
+        } else if (lastWon === true) {
+          currentStreak++;
+        } else {
+          break;
+        }
+      } else {
+        if (lastWon === null) {
+          lastWon = false;
+          currentStreak = 1;
+        } else if (lastWon === false) {
+          currentStreak++;
+        } else {
+          break;
+        }
+      }
+    }
+
+    // Calculate max winning streak
+    let streak = 0;
+    rows.forEach(row => {
+      if (row.won === 1) {
+        streak++;
+        maxStreak = Math.max(maxStreak, streak);
+      } else {
+        streak = 0;
+      }
+    });
+
+    res.json({
+      current_streak: lastWon === true ? currentStreak : 0,
+      current_losing_streak: lastWon === false ? currentStreak : 0,
+      best_winning_streak: maxStreak
+    });
+  });
+});
+
+// Betting patterns analysis
+app.get('/api/analytics/patterns/:userId', requireRole('picker', 'superuser', 'admin'), (req, res) => {
+  const userId = Number(req.params.userId);
+  const db = openDb();
+
+  const pointsQuery = `
+    SELECT 
+      v.points,
+      COUNT(*) as count,
+      COUNT(CASE WHEN v.team = m.winner THEN 1 END) as won
+    FROM votes v
+    JOIN matches m ON v.match_id = m.id
+    WHERE v.user_id = ? AND m.winner IS NOT NULL
+    GROUP BY v.points
+    ORDER BY v.points
+  `;
+
+  const dayQuery = `
+    SELECT 
+      CASE CAST(strftime('%w', m.scheduled_at) AS INTEGER)
+        WHEN 0 THEN 'Sunday'
+        WHEN 1 THEN 'Monday'
+        WHEN 2 THEN 'Tuesday'
+        WHEN 3 THEN 'Wednesday'
+        WHEN 4 THEN 'Thursday'
+        WHEN 5 THEN 'Friday'
+        WHEN 6 THEN 'Saturday'
+      END as day,
+      COUNT(*) as votes,
+      COUNT(CASE WHEN v.team = m.winner THEN 1 END) as won
+    FROM votes v
+    JOIN matches m ON v.match_id = m.id
+    WHERE v.user_id = ? AND m.winner IS NOT NULL AND m.scheduled_at IS NOT NULL
+    GROUP BY CAST(strftime('%w', m.scheduled_at) AS INTEGER)
+  `;
+
+  db.all(pointsQuery, [userId], (err, pointsData) => {
+    if (err) { db.close(); return res.status(500).json({ error: err.message }); }
+
+    db.all(dayQuery, [userId], (err2, dayData) => {
+      db.close();
+      if (err2) return res.status(500).json({ error: err2.message });
+
+      const byPoints = (pointsData || []).map(p => ({
+        points: p.points,
+        count: p.count,
+        won: p.won,
+        win_rate: p.count > 0 ? ((p.won / p.count) * 100).toFixed(1) : 0
+      }));
+
+      res.json({
+        by_points: byPoints,
+        by_day: dayData || []
+      });
+    });
+  });
+});
+
 // Admin endpoints: create match
 app.post('/api/admin/matches', requireRole('admin'), (req, res) => {
   const { season_id, home_team, away_team, scheduled_at } = req.body;
@@ -3720,31 +4507,62 @@ app.get('/api/predictions/upcoming', requireRole('picker', 'superuser', 'admin')
 // ⚠️ MUST be defined BEFORE /api/predictions/:matchId to avoid Express matching "user-history" as a matchId
 app.get('/api/predictions/user-history', requireRole('picker', 'superuser', 'admin'), (req, res) => {
   const username = req.headers['x-user'];
-  const { season_id } = req.query;
+  const { season_id, userId } = req.query;
   const db = openDb();
 
-  db.get('SELECT id FROM users WHERE LOWER(username) = ?', [username.toLowerCase()], (err, user) => {
+  db.get('SELECT id, role FROM users WHERE LOWER(username) = ?', [username.toLowerCase()], (err, user) => {
     if (err || !user) {
       db.close();
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    let query = `
-      SELECT p.*, m.home_team, m.away_team, m.scheduled_at, m.winner, m.season_id,
-             s.name as season_name,
-             pr.toss_winner as actual_toss, pr.man_of_match as actual_mom, pr.best_bowler as actual_bowler
-      FROM predictions p
-      JOIN matches m ON p.match_id = m.id
-      JOIN seasons s ON m.season_id = s.id
-      LEFT JOIN prediction_results pr ON p.match_id = pr.match_id
-      WHERE p.user_id = ?
-    `;
+    const isAdmin = user.role === 'admin';
+    let query;
+    const params = [];
 
-    const params = [user.id];
+    if (isAdmin) {
+      query = `
+        SELECT p.*, m.home_team, m.away_team, m.scheduled_at, m.winner, m.season_id,
+               s.name as season_name,
+               u.username, u.display_name,
+               pr.toss_winner as actual_toss, pr.man_of_match as actual_mom, pr.best_bowler as actual_bowler
+        FROM predictions p
+        JOIN matches m ON p.match_id = m.id
+        JOIN seasons s ON m.season_id = s.id
+        JOIN users u ON u.id = p.user_id
+        LEFT JOIN prediction_results pr ON p.match_id = pr.match_id
+      `;
 
-    if (season_id) {
-      query += ' AND m.season_id = ?';
-      params.push(season_id);
+      const conditions = [];
+      if (userId) {
+        conditions.push('p.user_id = ?');
+        params.push(Number(userId));
+      }
+      if (season_id) {
+        conditions.push('m.season_id = ?');
+        params.push(season_id);
+      }
+      if (conditions.length > 0) {
+        query += ` WHERE ${conditions.join(' AND ')}`;
+      }
+    } else {
+      query = `
+        SELECT p.*, m.home_team, m.away_team, m.scheduled_at, m.winner, m.season_id,
+               s.name as season_name,
+               pr.toss_winner as actual_toss, pr.man_of_match as actual_mom, pr.best_bowler as actual_bowler
+        FROM predictions p
+        JOIN matches m ON p.match_id = m.id
+        JOIN seasons s ON m.season_id = s.id
+        LEFT JOIN prediction_results pr ON p.match_id = pr.match_id
+        WHERE p.user_id = ?
+      `;
+
+      params.push(user.id);
+
+      if (season_id) {
+        query += ' AND m.season_id = ?';
+        params.push(season_id);
+      }
     }
 
     query += ' ORDER BY m.scheduled_at DESC';

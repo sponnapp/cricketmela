@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
 import { toast } from './Toast'
 
@@ -239,6 +239,8 @@ function OddsDisplay({ odds, accent }) {
 export default function Predictions({ user, refreshTrigger }) {
   const [seasons, setSeasons] = useState([])
   const [selectedSeason, setSelectedSeason] = useState('')
+  const [users, setUsers] = useState([])
+  const [selectedUser, setSelectedUser] = useState('all')
   const [upcomingMatches, setUpcomingMatches] = useState([])
   const [predictions, setPredictions] = useState({})
   const [history, setHistory] = useState([])
@@ -257,7 +259,14 @@ export default function Predictions({ user, refreshTrigger }) {
   useEffect(() => {
     if (activeTab === 'predict') fetchUpcomingMatches()
     else fetchHistory()
-  }, [activeTab, selectedSeason])
+  }, [activeTab, selectedSeason, selectedUser])
+
+  useEffect(() => {
+    if (!user || user.role !== 'admin') return
+    axios.get('/api/admin/users', { headers: { 'x-user': user.username } })
+      .then(r => setUsers(r.data?.filter(u => u.role !== 'admin') || []))
+      .catch(() => setUsers([]))
+  }, [user])
 
   async function fetchSeasons() {
     try {
@@ -328,8 +337,12 @@ export default function Predictions({ user, refreshTrigger }) {
   async function fetchHistory() {
     try {
       setLoading(true)
+      const params = {}
+      if (selectedSeason) params.season_id = selectedSeason
+      if (user?.role === 'admin' && selectedUser !== 'all') params.userId = selectedUser
+
       const r = await axios.get('/api/predictions/user-history', {
-        params: selectedSeason ? { season_id: selectedSeason } : {},
+        params,
         headers: { 'x-user': user?.username }
       })
       setHistory(Array.isArray(r.data) ? r.data : [])
@@ -448,6 +461,14 @@ export default function Predictions({ user, refreshTrigger }) {
     return total > 0 ? `${correct}/${total}` : 'N/A'
   }
 
+  function getScoreTotals(pred) {
+    let correct = 0, total = 0
+    if (pred.actual_toss) { total++; if (pred.toss_winner === pred.actual_toss) correct++ }
+    if (pred.actual_mom) { total++; if (pred.man_of_match === pred.actual_mom) correct++ }
+    if (pred.actual_bowler) { total++; if (pred.best_bowler === pred.actual_bowler) correct++ }
+    return { correct, total }
+  }
+
   // Split players by team for a match
   function getTeamPlayers(matchId, team) {
     const data = playerOptionsByMatch[matchId]
@@ -481,6 +502,37 @@ export default function Predictions({ user, refreshTrigger }) {
   }
 
   const safeHistory = Array.isArray(history) ? history : []
+
+  const adminHistorySummary = useMemo(() => {
+    if (user?.role !== 'admin') return null
+    const totalPredictions = safeHistory.length
+    let totalCorrect = 0
+    let totalEvaluated = 0
+
+    safeHistory.forEach(item => {
+      const score = getScoreTotals(item)
+      totalCorrect += score.correct
+      totalEvaluated += score.total
+    })
+
+    const avgScore = totalEvaluated > 0
+      ? `${((totalCorrect / totalEvaluated) * 100).toFixed(1)}%`
+      : 'N/A'
+
+    return { totalPredictions, avgScore }
+  }, [safeHistory, user?.role])
+
+  const selectedSeasonName = useMemo(() => {
+    if (!selectedSeason) return 'All Seasons'
+    const season = seasons.find(s => String(s.id) === String(selectedSeason))
+    return season?.name || `Season ${selectedSeason}`
+  }, [selectedSeason, seasons])
+
+  const selectedUserName = useMemo(() => {
+    if (selectedUser === 'all') return 'All Users'
+    const found = users.find(u => String(u.id) === String(selectedUser))
+    return found ? (found.display_name || found.username) : `User ${selectedUser}`
+  }, [selectedUser, users])
 
   return (
     <div style={{ padding: '20px', minHeight: '100vh' }}>
@@ -552,6 +604,20 @@ export default function Predictions({ user, refreshTrigger }) {
           >
             <option value="">All Seasons</option>
             {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+      )}
+
+      {activeTab === 'history' && user?.role === 'admin' && users.length > 0 && (
+        <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <label style={{ fontSize: '13px', fontWeight: '700', color: '#1a1a1a' }}>User:</label>
+          <select
+            value={selectedUser}
+            onChange={e => setSelectedUser(e.target.value)}
+            style={{ padding: '8px 14px', borderRadius: '20px', border: '1px solid #ddd', fontSize: '13px', outline: 'none', cursor: 'pointer' }}
+          >
+            <option value="all">All Users</option>
+            {users.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
           </select>
         </div>
       )}
@@ -828,6 +894,50 @@ export default function Predictions({ user, refreshTrigger }) {
       {/* ── HISTORY TAB ── */}
       {activeTab === 'history' && (
         <>
+          {user?.role === 'admin' && adminHistorySummary && (
+            <div style={{
+              marginBottom: '16px',
+              display: 'flex',
+              gap: '10px',
+              flexWrap: 'wrap'
+            }}>
+              <div style={{
+                background: 'rgba(255,255,255,0.90)',
+                border: '1px solid rgba(255,255,255,0.70)',
+                borderRadius: '12px',
+                padding: '10px 14px',
+                boxShadow: '0 3px 14px rgba(0,0,0,0.10)'
+              }}>
+                <div style={{ fontSize: '11px', fontWeight: '700', color: '#666', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Total Predictions</div>
+                <div style={{ fontSize: '20px', fontWeight: '900', color: '#667eea', marginTop: '3px' }}>{adminHistorySummary.totalPredictions}</div>
+              </div>
+              <div style={{
+                background: 'rgba(255,255,255,0.90)',
+                border: '1px solid rgba(255,255,255,0.70)',
+                borderRadius: '12px',
+                padding: '10px 14px',
+                boxShadow: '0 3px 14px rgba(0,0,0,0.10)'
+              }}>
+                <div style={{ fontSize: '11px', fontWeight: '700', color: '#666', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Average Score</div>
+                <div style={{ fontSize: '20px', fontWeight: '900', color: '#2e7d32', marginTop: '3px' }}>{adminHistorySummary.avgScore}</div>
+              </div>
+              <div style={{
+                background: 'rgba(255,255,255,0.90)',
+                border: '1px solid rgba(255,255,255,0.70)',
+                borderRadius: '12px',
+                padding: '10px 14px',
+                boxShadow: '0 3px 14px rgba(0,0,0,0.10)',
+                display: 'flex',
+                alignItems: 'center',
+                fontSize: '12px',
+                fontWeight: '700',
+                color: '#444'
+              }}>
+                Season: {selectedSeasonName} · User: {selectedUserName}
+              </div>
+            </div>
+          )}
+
           {loading ? (
             <div style={{ textAlign: 'center', padding: '40px', color: '#667eea' }}>⏳ Loading...</div>
           ) : safeHistory.length === 0 ? (
@@ -844,6 +954,9 @@ export default function Predictions({ user, refreshTrigger }) {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'Inter, sans-serif' }}>
                 <thead>
                   <tr style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white' }}>
+                    {user?.role === 'admin' && selectedUser === 'all' && (
+                      <th style={{ padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>User</th>
+                    )}
                     {['Match', 'Toss', 'Man of Match', 'Best Bowler', 'Score'].map(h => (
                       <th key={h} style={{ padding: '14px 12px', textAlign: h === 'Score' ? 'center' : 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{h}</th>
                     ))}
@@ -852,6 +965,11 @@ export default function Predictions({ user, refreshTrigger }) {
                 <tbody>
                   {safeHistory.map((h, idx) => (
                     <tr key={h.id} style={{ borderBottom: '1px solid #f0f0f0', backgroundColor: idx % 2 === 0 ? '#fafbfc' : 'white' }}>
+                      {user?.role === 'admin' && selectedUser === 'all' && (
+                        <td style={{ padding: '14px 12px', fontSize: '13px', fontWeight: '600', color: '#667eea' }}>
+                          {h.display_name || h.username || '-'}
+                        </td>
+                      )}
                       <td style={{ padding: '14px 12px' }}>
                         <strong style={{ fontSize: '13px' }}>{h.home_team} vs {h.away_team}</strong>
                         <div style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}>{h.season_name}</div>

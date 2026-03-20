@@ -6,9 +6,11 @@ import Predictions from './Predictions'
 import Admin from './Admin'
 import VoteHistory from './VoteHistory'
 import Standings from './Standings'
+import Analytics from './Analytics'
 import Profile from './Profile'
 import ToastContainer, { setToastHandler, toast } from './Toast'
 import useVersionCheck from './useVersionCheck'
+import { celebrateVictory } from './celebrations'
 import './styles.css'
 
 // ── User Avatar ───────────────────────────────────────────────────────────────
@@ -29,9 +31,9 @@ function UserAvatar({ name, size = 38 }) {
   )
 }
 
-const NAV_ICONS = {seasons:'🏏',admin:'⚙️',history:'📋',standings:'🏆',predictions:'🔮',profile:'👤'}
+const NAV_ICONS = {seasons:'🏏',admin:'⚙️',history:'📋',analytics:'📊',standings:'🏆',predictions:'🔮',profile:'👤'}
 const NAV_STATE_KEY = 'cm_nav_state'
-const VALID_PAGES = new Set(['seasons','matches','admin','history','standings','predictions','profile'])
+const VALID_PAGES = new Set(['seasons','matches','admin','history','analytics','standings','predictions','profile'])
 
 function readNavState() {
   try {
@@ -184,6 +186,7 @@ export default function App() {
     {key:'seasons',     label:'Seasons'      },
     {key:'admin',       label:'Admin',       adminOnly:true},
     {key:'history',     label:'Vote History' },
+    {key:'analytics',   label:'Analytics'    },
     {key:'standings',   label:'Standings'    },
     {key:'predictions', label:'Predictions'  },
     {key:'profile',     label:'Profile'      },
@@ -255,6 +258,32 @@ export default function App() {
                 filter:'drop-shadow(0 0 10px rgba(255,180,0,0.4))',
                 lineHeight:1.2,
               }}>Cricket Mela</span>
+              <button
+                onClick={() => celebrateVictory()}
+                title="Celebrate! 🎉"
+                style={{
+                  background:'rgba(255,215,0,0.15)',
+                  border:'1px solid rgba(255,215,0,0.3)',
+                  borderRadius:'50%',
+                  width:'28px',
+                  height:'28px',
+                  display:'flex',
+                  alignItems:'center',
+                  justifyContent:'center',
+                  cursor:'pointer',
+                  fontSize:'14px',
+                  transition:'all 0.2s',
+                  padding:0
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = 'rgba(255,215,0,0.25)';
+                  e.currentTarget.style.transform = 'scale(1.1)';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = 'rgba(255,215,0,0.15)';
+                  e.currentTarget.style.transform = 'scale(1)';
+                }}
+              >✨</button>
             </div>
 
             {/* User chip */}
@@ -357,6 +386,7 @@ export default function App() {
             {page==='matches'    && seasonId && <Matches seasonId={seasonId} user={user} refreshUser={u=>setUser(u)} refreshTrigger={refreshTrigger}/>}
             {page==='admin'      && <Admin user={user} initialTab={adminTab} onTabChange={setAdminTab} addToast={addToast} refreshTrigger={refreshTrigger}/>}
             {page==='history'    && <VoteHistory user={user} refreshTrigger={refreshTrigger}/>}
+            {page==='analytics'  && <Analytics user={user} refreshTrigger={refreshTrigger}/>}
             {page==='standings'  && <Standings user={user} refreshTrigger={refreshTrigger}/>}
             {page==='predictions'&& <Predictions user={user} refreshTrigger={refreshTrigger}/>}
             {page==='profile'    && <Profile user={user} refreshUser={u=>setUser(u)}/>}

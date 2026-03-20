@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import axios from 'axios'
+import { celebratePodium } from './celebrations'
 
 // ── Avatar ────────────────────────────────────────────────────────────────────
 function Avatar({ name, size = 40 }) {
@@ -33,6 +34,15 @@ function PodiumCard({ u, rank, isMe }) {
     '0 4px 18px rgba(192,192,192,0.45)',
     '0 4px 18px rgba(205,127,50,0.45)',
   ]
+
+  // Celebrate if this is the current user on podium
+  React.useEffect(() => {
+    if (isMe) {
+      setTimeout(() => {
+        celebratePodium(rank + 1);
+      }, 500);
+    }
+  }, [isMe, rank]);
 
   return (
     <div style={{

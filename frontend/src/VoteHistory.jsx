@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react'
 import axios from 'axios'
+import { celebrateBalanceIncrease } from './celebrations'
 
 export default function VoteHistory({ user, refreshTrigger }) {
   const [votes, setVotes] = useState([])
@@ -7,6 +8,8 @@ export default function VoteHistory({ user, refreshTrigger }) {
   const [seasons, setSeasons] = useState([])
   const [selectedSeason, setSelectedSeason] = useState('all')
   const [totalBalance, setTotalBalance] = useState(0)
+  const [users, setUsers] = useState([])
+  const [selectedUser, setSelectedUser] = useState('all')
 
   // Helper function to parse match date/time for sorting
   function parseMatchDateTime(value) {
@@ -96,6 +99,14 @@ export default function VoteHistory({ user, refreshTrigger }) {
     }
   }
 
+  // Fetch users list for admin dropdown
+  useEffect(() => {
+    if (!user || user.role !== 'admin') return
+    axios.get('/api/admin/users', { headers: { 'x-user': user.username } })
+      .then(r => setUsers(r.data?.filter(u => u.role !== 'admin') || []))
+      .catch(() => setUsers([]))
+  }, [user])
+
   // Fetch seasons for the dropdown
   useEffect(() => {
     if (!user || user.role === 'admin') return
@@ -114,12 +125,23 @@ export default function VoteHistory({ user, refreshTrigger }) {
 
   useEffect(() => {
     if (!user) return
-    if (user.role === 'admin') { setVotes([]); setLoading(false); return }
-    setLoading(true)
-    axios.get(`/api/users/${user.id}/votes`)
-      .then(r => { setVotes(sortVotesByDateTime(r.data || [])); setLoading(false) })
-      .catch(() => { setVotes([]); setLoading(false) })
-  }, [user, refreshTrigger])
+    if (user.role === 'admin') {
+      // Admin fetching vote history
+      setLoading(true)
+      const endpoint = selectedUser === 'all' 
+        ? '/api/admin/vote-history'
+        : `/api/admin/vote-history?userId=${selectedUser}`
+      axios.get(endpoint, { headers: { 'x-user': user.username } })
+        .then(r => { setVotes(sortVotesByDateTime(r.data || [])); setLoading(false) })
+        .catch(() => { setVotes([]); setLoading(false) })
+    } else {
+      // Regular user fetching their own votes
+      setLoading(true)
+      axios.get(`/api/users/${user.id}/votes`)
+        .then(r => { setVotes(sortVotesByDateTime(r.data || [])); setLoading(false) })
+        .catch(() => { setVotes([]); setLoading(false) })
+    }
+  }, [user, refreshTrigger, selectedUser])
 
   // Filter votes by selected season
   const filteredVotes = useMemo(() => {
@@ -162,11 +184,35 @@ export default function VoteHistory({ user, refreshTrigger }) {
         }}>📋</div>
         <div style={{flex: 1}}>
           <div style={{fontSize: '18px', fontWeight: '800', color: '#1a1a1a', fontFamily:"'Poppins',sans-serif", lineHeight: 1.2}}>Vote History</div>
-          <div style={{fontSize: '12px', color: '#444', fontWeight: '700', marginTop: '3px'}}>Your picks &amp; point history</div>
+          <div style={{fontSize: '12px', color: '#444', fontWeight: '700', marginTop: '3px'}}>
+            {user?.role === 'admin' ? 'View all user votes' : 'Your picks & point history'}
+          </div>
         </div>
 
+        {/* Admin user selector */}
+        {user?.role === 'admin' && users.length > 0 && (
+          <div style={{display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0}}>
+            <span style={{fontSize: '12px', fontWeight: '700', color: '#555', whiteSpace: 'nowrap'}}>👤 User:</span>
+            <select
+              value={selectedUser}
+              onChange={e => setSelectedUser(e.target.value)}
+              style={{
+                padding: '7px 12px', borderRadius: '8px', fontSize: '13px', fontWeight: '600',
+                border: '1px solid #ddd', background: 'white', cursor: 'pointer',
+                fontFamily: 'Inter, sans-serif', color: '#333',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+              }}
+            >
+              <option value="all">All Users</option>
+              {users.map(u => (
+                <option key={u.id} value={u.id}>{u.display_name || u.username}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* Season selector */}
-        {seasons.length > 0 && (
+        {seasons.length > 0 && user?.role !== 'admin' && (
           <div style={{display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0}}>
             <span style={{fontSize: '12px', fontWeight: '700', color: '#555', whiteSpace: 'nowrap'}}>🏏 Season:</span>
             <select
@@ -215,11 +261,31 @@ export default function VoteHistory({ user, refreshTrigger }) {
             { label: '❌ Lost', value: summary.lost, color: '#e53e3e' },
             { label: '📊 Net', value: (summary.netTotal >= 0 ? '+' : '') + Math.round(summary.netTotal), color: summary.netTotal >= 0 ? '#38a169' : '#e53e3e' },
           ].map(card => (
-            <div key={card.label} style={{
-              background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(10px)',
-              borderRadius: '12px', padding: '12px 20px', minWidth: '100px',
-              boxShadow: '0 2px 10px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.7)',
-            }}>
+            <div 
+              key={card.label} 
+              onClick={() => {
+                if (card.label === '✅ Won' && summary.won > 0) {
+                  celebrateBalanceIncrease(summary.won * 20);
+                } else if (card.label === '📊 Net' && summary.netTotal > 0) {
+                  celebrateBalanceIncrease(summary.netTotal);
+                }
+              }}
+              style={{
+                background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(10px)',
+                borderRadius: '12px', padding: '12px 20px', minWidth: '100px',
+                boxShadow: '0 2px 10px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.7)',
+                cursor: 'pointer',
+                transition: 'transform 0.2s, box-shadow 0.2s',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.12)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 2px 10px rgba(0,0,0,0.08)';
+              }}
+            >
               <div style={{fontSize: '11px', fontWeight: '600', color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px'}}>{card.label}</div>
               <div style={{fontSize: '20px', fontWeight: '900', color: card.color, fontFamily:"'Poppins',sans-serif", marginTop: '4px'}}>{card.value}</div>
             </div>
@@ -227,9 +293,7 @@ export default function VoteHistory({ user, refreshTrigger }) {
         </div>
       )}
 
-      {user?.role === 'admin' ? (
-        <p style={{fontSize: '14px', color: '#718096'}}>Admin accounts do not participate in voting.</p>
-      ) : loading ? (
+      {loading ? (
         <p style={{fontSize: '14px', color: '#718096'}}>Loading votes...</p>
       ) : filteredVotes.length === 0 ? (
         <p style={{fontSize: '14px', color: '#718096'}}>
@@ -240,6 +304,9 @@ export default function VoteHistory({ user, refreshTrigger }) {
           <table style={{width: '100%', borderCollapse: 'collapse'}}>
             <thead>
               <tr style={{background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white'}}>
+                {user?.role === 'admin' && selectedUser === 'all' && (
+                  <th style={{padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>User</th>
+                )}
                 {selectedSeason === 'all' && (
                   <th style={{padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Season</th>
                 )}
@@ -256,6 +323,11 @@ export default function VoteHistory({ user, refreshTrigger }) {
             <tbody>
               {filteredVotes.map((v, idx) => (
                 <tr key={v.id} style={{borderBottom: '1px solid #f0f0f0', backgroundColor: idx % 2 === 0 ? '#fafbfc' : 'white'}}>
+                  {user?.role === 'admin' && selectedUser === 'all' && (
+                    <td style={{padding: '14px 12px', fontSize: '13px', fontWeight: '600', color: '#667eea'}}>
+                      {v.display_name || v.username}
+                    </td>
+                  )}
                   {selectedSeason === 'all' && (
                     <td style={{padding: '14px 12px', fontSize: '12px', color: '#555'}}>
                       <span style={{
