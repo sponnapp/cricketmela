@@ -36,10 +36,6 @@ _redirects → /api/*              /api/* endpoints
 | `superuser` | Set match winners only |
 | `picker` | Vote on matches within assigned seasons |
 
-**Default credentials:**
-- Admin: `admin` / `admin123`
-- User: `senthil` / `senthil123`
-
 ---
 
 ## ✨ Features
