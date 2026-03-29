@@ -60,4 +60,9 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy frontend/dist --project-name=cricketmela --commit-dirty=true
+          # workingDirectory ensures wrangler runs from inside frontend/,
+          # so it automatically picks up both dist/ and functions/ as siblings.
+          # functions/ contains the API proxy (api/[[path]].js) and _middleware.js.
+          # This mirrors exactly what deploy-cf-simple.sh does (cd frontend && wrangler pages deploy dist).
+          workingDirectory: frontend
+          command: pages deploy dist --project-name=cricketmela --commit-dirty=true
