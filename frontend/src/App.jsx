@@ -11,6 +11,7 @@ import Profile from './Profile'
 import ToastContainer, { setToastHandler, toast } from './Toast'
 import useVersionCheck from './useVersionCheck'
 import { celebrateVictory } from './celebrations'
+import NewsTicker from './NewsTicker'
 import './styles.css'
 
 // ── User Avatar ───────────────────────────────────────────────────────────────
@@ -93,8 +94,14 @@ export default function App() {
     }
   }, [user])
 
-  const { updateAvailable, lastRefresh } = useVersionCheck(handleAutoRefresh)
+  const { updateAvailable } = useVersionCheck(handleAutoRefresh)
   const [bannerDismissed, setBannerDismissed] = useState(false)
+  const [disclaimerHidden, setDisclaimerHidden] = useState(false)
+
+  useEffect(() => {
+    const t = setTimeout(() => setDisclaimerHidden(true), 6000)
+    return () => clearTimeout(t)
+  }, [])
 
   const addToast = useCallback((t) => setToasts(prev=>[...prev,{...t,id:Date.now()+Math.random()}]),[])
   useEffect(()=>{ setToastHandler(addToast) },[addToast])
@@ -193,8 +200,14 @@ export default function App() {
   ].filter(t=>!t.adminOnly||(user?.role==='admin'||user?.role==='superuser'))
 
   return (
-    <div className="container">
-      <ToastContainer toasts={toasts} onRemove={removeToast} />
+    <>
+      {/* ── Background Orbs ── */}
+      <div className="bg-orb orb-1"></div>
+      <div className="bg-orb orb-2"></div>
+      <div className="bg-orb orb-3"></div>
+      
+      <div className="container">
+        <ToastContainer toasts={toasts} onRemove={removeToast} />
 
       {/* ── New-version banner ───────────────────────────────────────────── */}
       {updateAvailable && !bannerDismissed && (
@@ -243,7 +256,7 @@ export default function App() {
           padding:'12px 18px',
         }}>
           {/* ── Top row: brand + user chip ── */}
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'12px',gap:'12px'}}>
+          <div className="header-top-row" style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'12px',gap:'8px'}}>
 
             {/* Brand */}
             <div style={{display:'flex',alignItems:'center',gap:'8px',whiteSpace:'nowrap'}}>
@@ -259,6 +272,7 @@ export default function App() {
                 lineHeight:1.2,
               }}>Cricket Mela</span>
               <button
+                className="header-sparkle-btn"
                 onClick={() => celebrateVictory()}
                 title="Celebrate! 🎉"
                 style={{
@@ -287,20 +301,21 @@ export default function App() {
             </div>
 
             {/* User chip */}
-            <div style={{
+            <div className="header-user-chip" style={{
               display:'flex', alignItems:'center', gap:'10px',
               background:'rgba(255,255,255,0.07)',
               border:'1px solid rgba(255,255,255,0.13)',
               borderRadius:'40px',
               padding:'5px 6px 5px 5px',
               backdropFilter:'blur(6px)',
+              minWidth: 0,
             }}>
               <UserAvatar name={user.display_name||user.username} size={34}/>
               <div style={{lineHeight:1.3, paddingRight:'4px'}}>
                 <div style={{
                   fontSize:'13px', fontWeight:'700', color:'#fff',
                   fontFamily:"'Poppins',sans-serif", letterSpacing:'0.2px',
-                  maxWidth:'120px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+                  maxWidth:'100px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
                 }}>
                   {user.display_name||user.username}
                 </div>
@@ -350,6 +365,7 @@ export default function App() {
               const active = page === tab.key
               return (
                 <button
+                  className="nav-tab-btn"
                   key={tab.key}
                   onClick={()=>navigate(tab.key)}
                   style={{
@@ -377,7 +393,9 @@ export default function App() {
         </header>
       )}
 
-      <main>
+      {user && <NewsTicker />}
+
+      <main className={disclaimerHidden ? '' : 'disclaimer-visible'}>
         {!user ? (
           <Login onLogin={u=>{ setUser(u); toast('success',`Welcome, ${u.display_name||u.username}! 🏏`,'Ready to make your picks?') }}/>
         ):(
@@ -394,7 +412,7 @@ export default function App() {
         )}
       </main>
 
-      <footer className="disclaimer-ribbon">
+      <footer className={`disclaimer-ribbon${disclaimerHidden ? ' hidden' : ''}`}>
         <span style={{color:'#ffe082',fontWeight:'bold'}}>⚠️ Disclaimer:</span>{' '}
         Cricket Mela is a <strong style={{color:'#fff'}}>fun prediction game only</strong> — no real money involved.
         Virtual points have no monetary value and cannot be exchanged for cash.
@@ -402,6 +420,7 @@ export default function App() {
         &nbsp;|&nbsp; 🏏 Play responsibly &amp; enjoy the game!
       </footer>
     </div>
+    </>
   )
 }
 

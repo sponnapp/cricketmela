@@ -1,56 +1,75 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import axios from 'axios'
 import { toast } from './Toast'
 import CoinFlip from './CoinFlip'
 
 const POINTS = [10, 20, 50]
 
-// ── Countdown Timer Component ────────────────────────────────────────────────
-function CountdownTimer({ scheduledAt, parseMatchDateTime }) {
-  const [timeLeft, setTimeLeft] = useState(null)
-
-  const calcTime = useCallback(() => {
-    const matchTime = parseMatchDateTime(scheduledAt)
-    if (!matchTime) return null
-    const cutoff = new Date(matchTime.getTime() - 30 * 60 * 1000)
-    const now = new Date()
-    const diff = cutoff - now
-    if (diff <= 0) return null
-    const h = Math.floor(diff / 3600000)
-    const m = Math.floor((diff % 3600000) / 60000)
-    const s = Math.floor((diff % 60000) / 1000)
-    return { h, m, s, diff }
-  }, [scheduledAt])
+// ── Next Match Vote-Closes Banner ───────────────────────────────────────────
+function NextMatchCountdown({ matches, parseMatchDateTime }) {
+  const [state, setState] = useState({ match: null, timeLeft: null })
 
   useEffect(() => {
-    const update = () => setTimeLeft(calcTime())
-    update()
-    const id = setInterval(update, 1000)
+    function compute() {
+      const now = new Date()
+      let best = null, bestCutoff = null
+      for (const m of matches) {
+        if (m.winner) continue
+        const matchTime = parseMatchDateTime(m.scheduled_at)
+        if (!matchTime) continue
+        const cutoff = new Date(matchTime.getTime() - 30 * 60 * 1000)
+        if (cutoff <= now) continue
+        if (!bestCutoff || cutoff < bestCutoff) { best = m; bestCutoff = cutoff }
+      }
+      if (!best || !bestCutoff) return setState({ match: null, timeLeft: null })
+      const diff = bestCutoff - now
+      const h = Math.floor(diff / 3600000)
+      const m = Math.floor((diff % 3600000) / 60000)
+      const s = Math.floor((diff % 60000) / 1000)
+      setState({ match: best, timeLeft: { h, m, s, diff } })
+    }
+    compute()
+    const id = setInterval(compute, 1000)
     return () => clearInterval(id)
-  }, [calcTime])
+  }, [matches, parseMatchDateTime])
 
-  if (!timeLeft) return null
+  const { match, timeLeft } = state
+  if (!match || !timeLeft) return null
 
-  const urgent = timeLeft.diff < 10 * 60 * 1000   // < 10 min
-  const warning = timeLeft.diff < 30 * 60 * 1000  // < 30 min
-
-  const colour = urgent ? '#e74c3c' : warning ? '#f39c12' : '#27ae60'
-  const bg = urgent ? 'rgba(231,76,60,0.1)' : warning ? 'rgba(243,156,18,0.1)' : 'rgba(39,174,96,0.08)'
+  const urgent = timeLeft.diff < 10 * 60 * 1000
+  const warning = timeLeft.diff < 60 * 60 * 1000
+  const colour = urgent ? '#e74c3c' : warning ? '#f39c12' : '#2ecc71'
+  const bgColor = urgent ? 'rgba(231,76,60,0.12)' : warning ? 'rgba(243,156,18,0.12)' : 'rgba(46,204,113,0.10)'
   const label = timeLeft.h > 0
-    ? `${timeLeft.h}h ${timeLeft.m}m`
+    ? `${timeLeft.h}h ${String(timeLeft.m).padStart(2,'0')}m ${String(timeLeft.s).padStart(2,'0')}s`
     : `${timeLeft.m}m ${String(timeLeft.s).padStart(2,'0')}s`
 
   return (
     <div style={{
-      display:'inline-flex', alignItems:'center', gap:'5px',
-      background: bg, border:`1px solid ${colour}`,
-      borderRadius:'20px', padding:'3px 10px',
-      fontSize:'11px', fontWeight:'700', color: colour,
-      fontFamily:'Inter,sans-serif', letterSpacing:'0.3px',
-      animation: urgent ? 'pulse 1s infinite' : 'none',
+      display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px',
+      background: bgColor,
+      border: `1.5px solid ${colour}`,
+      borderRadius: '12px',
+      padding: '7px 14px',
+      flexShrink: 0,
     }}>
-      ⏳ {label}
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.55}}`}</style>
+      {urgent && <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.55}}`}</style>}
+      <div style={{ fontSize: '10px', fontWeight: '700', color: colour, textTransform: 'uppercase', letterSpacing: '0.8px', fontFamily: 'Inter, sans-serif' }}>
+        ⏰ Vote closes in
+      </div>
+      <div style={{
+        fontSize: '18px', fontWeight: '800',
+        color: colour,
+        fontFamily: "'Poppins', sans-serif",
+        letterSpacing: '0.5px',
+        animation: urgent ? 'pulse 1s infinite' : 'none',
+        lineHeight: 1.1,
+      }}>
+        {label}
+      </div>
+      <div style={{ fontSize: '10px', color: '#555', fontFamily: 'Inter, sans-serif', fontWeight: '600', whiteSpace: 'nowrap' }}>
+        {match.home_team} vs {match.away_team}
+      </div>
     </div>
   )
 }
@@ -60,8 +79,19 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
   const [loading, setLoading] = useState(true)
   const [votes, setVotes] = useState({})
   const [userVotes, setUserVotes] = useState({})
+  // Track which match IDs the user has manually touched this session
+  // Auto-refresh will never overwrite these
+  const dirtyVotes = useRef(new Set())
   const [seasonBalance, setSeasonBalance] = useState(null)
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768)
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768)
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
   const [coinFlip, setCoinFlip] = useState({ show: false, team: '' })
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     fetchMatches()
@@ -86,11 +116,14 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
           })
           if (voteRes.data) {
             userVotesData[match.id] = voteRes.data
-            // Pre-populate the vote form with existing vote
-            setVotes(prev => ({
-              ...prev,
-              [match.id]: { team: voteRes.data.team, points: voteRes.data.points }
-            }))
+            // Only pre-populate if the user hasn't manually changed this match
+            // this session — prevents auto-refresh from clobbering in-progress edits
+            if (!dirtyVotes.current.has(match.id)) {
+              setVotes(prev => ({
+                ...prev,
+                [match.id]: { team: voteRes.data.team, points: voteRes.data.points }
+              }))
+            }
           }
         } catch (err) {
           // No existing vote for this match
@@ -116,36 +149,59 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
     }
   }
 
-  async function submitVote(matchId, team, points) {
-    if (!user) { toast('error', 'Not logged in', 'Please login to vote'); return }
-    if (user.role === 'admin') { toast('warning', 'Admin View', 'Admins cannot vote'); return }
-    if (!team || !points) { toast('warning', 'Incomplete', 'Please select both a team and points'); return }
-    
-    // Show coin flip animation
-    setCoinFlip({ show: true, team })
-    
-    setTimeout(async () => {
+  async function submitAllVotes() {
+    if (!user || user.role === 'admin') return
+
+    const toSubmit = matches.filter(m => {
+      if (isVotingDisabled(m)) return false
+      const v = votes[m.id]
+      if (!v?.team || !v?.points) return false
+      const saved = userVotes[m.id]
+      if (!saved) return true
+      return v.team !== saved.team || String(v.points) !== String(saved.points)
+    })
+
+    if (toSubmit.length === 0) {
+      toast('warning', 'Nothing to save', 'Select a team and points for each match first')
+      return
+    }
+
+    setSaving(true)
+    let savedCount = 0, failedCount = 0, lastBalance = seasonBalance
+
+    for (const m of toSubmit) {
+      const { team, points } = votes[m.id]
       try {
-        const res = await axios.post(`/api/matches/${matchId}/vote`,
+        const res = await axios.post(`/api/matches/${m.id}/vote`,
           { team, points: parseInt(points) },
           { headers: { 'x-user': user.username } }
         )
-        const isUpdate = !!userVotes[matchId]
-        if (res.data.season_balance !== undefined) {
-          setSeasonBalance(res.data.season_balance)
-        }
-        toast('success',
-          isUpdate ? '✅ Vote Updated!' : '🏏 Vote Placed!',
-          `${team} — ${points} pts | Season Balance: ${Math.round(res.data.season_balance ?? seasonBalance ?? 0)} pts`,
-          4000
-        )
-        await fetchMatches()
+        if (res.data.season_balance !== undefined) lastBalance = res.data.season_balance
+        dirtyVotes.current.delete(m.id)
+        savedCount++
       } catch (err) {
-        alert(err.response?.data?.error || 'Vote failed')
-      } finally {
-        setCoinFlip({ show: false, team: '' })
+        failedCount++
       }
-    }, 1500)
+    }
+
+    if (lastBalance !== seasonBalance) setSeasonBalance(lastBalance)
+    setSaving(false)
+
+    if (failedCount === 0) {
+      toast('success',
+        `🏏 ${savedCount} Pick${savedCount > 1 ? 's' : ''} Saved!`,
+        `Season Balance: ${Math.round(lastBalance ?? 0)} pts`,
+        4000
+      )
+    } else {
+      toast('warning',
+        `${savedCount} saved, ${failedCount} failed`,
+        'Some picks could not be saved — check your selections',
+        5000
+      )
+    }
+
+    await fetchMatches()
   }
 
   function parseMatchDateTime(value) {
@@ -273,62 +329,49 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
     return null
   }
 
-  async function submitVote(matchId, team, points) {
-    if (!user) { toast('error', 'Not logged in', 'Please login to vote'); return }
-    if (user.role === 'admin') { toast('warning', 'Admin View', 'Admins cannot vote'); return }
-    if (!team || !points) { toast('warning', 'Incomplete', 'Please select both a team and points'); return }
-    
-    // Show coin flip animation
-    setCoinFlip({ show: true, team })
-    
-    setTimeout(async () => {
-      try {
-        const res = await axios.post(`/api/matches/${matchId}/vote`,
-          { team, points: parseInt(points) },
-          { headers: { 'x-user': user.username } }
-        )
-        const isUpdate = !!userVotes[matchId]
-        if (res.data.season_balance !== undefined) {
-          setSeasonBalance(res.data.season_balance)
-        }
-        toast('success',
-          isUpdate ? '✅ Vote Updated!' : '🏏 Vote Placed!',
-          `${team} — ${points} pts | Season Balance: ${Math.round(res.data.season_balance ?? seasonBalance ?? 0)} pts`,
-          4000
-        )
-        await fetchMatches()
-      } catch (err) {
-        alert(err.response?.data?.error || 'Vote failed')
-      } finally {
-        setCoinFlip({ show: false, team: '' })
-      }
-    }, 1500)
-  }
+  const pendingCount = matches.filter(m => {
+    if (isVotingDisabled(m)) return false
+    const v = votes[m.id]
+    if (!v?.team || !v?.points) return false
+    const saved = userVotes[m.id]
+    if (!saved) return true
+    return v.team !== saved.team || String(v.points) !== String(saved.points)
+  }).length
 
   return (
-    <div style={{padding: '20px', minHeight: '100vh'}}>
+    <div style={{padding: isMobile ? '12px' : '20px', minHeight: '100vh'}}>
       <div style={{
-        display: 'inline-flex', alignItems: 'center', gap: '12px',
+        display: 'flex', alignItems: isMobile ? 'flex-start' : 'center',
+        flexDirection: isMobile ? 'column' : 'row',
+        gap: '12px',
         background: 'rgba(255,255,255,0.90)',
         backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
         border: '1px solid rgba(255,255,255,0.70)',
-        borderRadius: '14px', padding: '10px 18px 10px 10px',
-        boxShadow: '0 3px 16px rgba(0,0,0,0.12)', marginBottom: '20px',
+        borderRadius: '14px', padding: '10px 14px',
+        boxShadow: '0 3px 16px rgba(0,0,0,0.12)', marginBottom: '16px',
       }}>
-        <div style={{
-          width: '42px', height: '42px',
-          background: 'linear-gradient(135deg,#2ecc71,#27ae60)',
-          borderRadius: '12px', display: 'flex', alignItems: 'center',
-          justifyContent: 'center', fontSize: '20px', flexShrink: 0,
-          boxShadow: '0 4px 14px rgba(46,204,113,0.4)',
-        }}>🏏</div>
-        <div>
-          <div style={{fontSize: '18px', fontWeight: '800', color: '#1a1a1a', fontFamily:"'Poppins',sans-serif", lineHeight: 1.2}}>Matches &amp; Voting</div>
-          <div style={{fontSize: '12px', color: '#444', fontWeight: '700', marginTop: '3px'}}>Pick your winner before the match starts</div>
-        </div>
-        {user?.role !== 'admin' && seasonBalance !== null && (
+        <div style={{display: 'flex', alignItems: 'center', gap: '10px', flex: 1}}>
           <div style={{
-            marginLeft: 'auto',
+            width: '42px', height: '42px',
+            background: 'linear-gradient(135deg,#2ecc71,#27ae60)',
+            borderRadius: '12px', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', fontSize: '20px', flexShrink: 0,
+            boxShadow: '0 4px 14px rgba(46,204,113,0.4)',
+          }}>🏏</div>
+          <div>
+            <div style={{fontSize: isMobile ? '16px' : '18px', fontWeight: '800', color: '#1a1a1a', fontFamily:"'Poppins',sans-serif", lineHeight: 1.2}}>Matches &amp; Voting</div>
+            <div style={{fontSize: '11px', color: '#444', fontWeight: '700', marginTop: '3px'}}>Pick your winner before the match starts</div>
+          </div>
+        </div>
+        <div style={{
+          marginLeft: isMobile ? '0' : 'auto',
+          width: isMobile ? '100%' : 'auto',
+          display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0,
+          justifyContent: isMobile ? 'space-between' : 'flex-end',
+        }}>
+          <NextMatchCountdown matches={matches} parseMatchDateTime={parseMatchDateTime} />
+          {user?.role !== 'admin' && seasonBalance !== null && (
+          <div style={{
             background: 'linear-gradient(135deg,#667eea,#764ba2)',
             color: 'white',
             borderRadius: '10px',
@@ -339,7 +382,8 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
             <div style={{fontSize: '10px', fontWeight: '600', opacity: 0.85, textTransform: 'uppercase', letterSpacing: '0.5px'}}>Season Balance</div>
             <div style={{fontSize: '16px', fontWeight: '800', fontFamily:"'Poppins',sans-serif"}}>{Math.round(seasonBalance)} pts</div>
           </div>
-        )}
+          )}
+        </div>
       </div>
 
       {loading ? (
@@ -350,16 +394,186 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
       ) : matches.length === 0 ? (
         <p style={{fontFamily: 'Inter, sans-serif', fontSize: '14px'}}>No matches found</p>
       ) : (
-        <div style={{
-          overflowX: 'auto',
-          background: 'rgba(255,255,255,0.72)',
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
-          borderRadius: '16px',
-          boxShadow: '0 4px 24px rgba(0,0,0,0.10)',
-          padding: '0',
-          border: '1px solid rgba(255,255,255,0.55)',
-        }}>
+        <>
+        {user?.role !== 'admin' && (
+          <div style={{display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', marginBottom: '12px', flexWrap: 'wrap'}}>
+            {pendingCount > 0 && (
+              <span style={{fontSize: '13px', color: '#f39c12', fontWeight: '600', fontFamily: 'Inter, sans-serif'}}>
+                ⚡ {pendingCount} unsaved pick{pendingCount > 1 ? 's' : ''}
+              </span>
+            )}
+            <button
+              onClick={submitAllVotes}
+              disabled={saving || pendingCount === 0}
+              style={{
+                padding: isMobile ? '14px 24px' : '12px 28px',
+                width: isMobile ? '100%' : 'auto',
+                background: pendingCount > 0
+                  ? 'linear-gradient(135deg, #2ecc71 0%, #27ae60 100%)'
+                  : 'rgba(255,255,255,0.25)',
+                color: pendingCount > 0 ? 'white' : 'rgba(255,255,255,0.4)',
+                border: pendingCount > 0 ? 'none' : '1px solid rgba(255,255,255,0.2)',
+                borderRadius: '12px',
+                cursor: pendingCount > 0 && !saving ? 'pointer' : 'not-allowed',
+                fontWeight: '700',
+                fontSize: '14px',
+                fontFamily: 'Inter, sans-serif',
+                transition: 'all 0.3s ease',
+                boxShadow: pendingCount > 0 ? '0 4px 15px rgba(46,204,113,0.4)' : 'none',
+              }}
+            >
+              {saving ? '⏳ Saving…' : pendingCount > 0 ? `💾 Save All Picks (${pendingCount})` : '✅ All Picks Saved'}
+            </button>
+          </div>
+        )}
+
+        {isMobile ? (
+          /* ── Mobile card list ─────────────────────────────────── */
+          <div>
+            {matches.map((m, idx) => {
+              const votingDisabled = isVotingDisabled(m)
+              const disabledReason = getVotingDisabledReason(m)
+              const isPending = !votingDisabled && !!votes[m.id]?.team && !!votes[m.id]?.points &&
+                (!userVotes[m.id] || votes[m.id].team !== userVotes[m.id].team || String(votes[m.id].points) !== String(userVotes[m.id].points))
+              const borderColor = isPending ? '#f39c12' : m.winner ? '#38a169' : votingDisabled ? '#a0aec0' : '#667eea'
+              return (
+                <div key={m.id} style={{
+                  background: isPending ? '#fffdf0' : 'rgba(255,255,255,0.93)',
+                  backdropFilter: 'blur(10px)',
+                  WebkitBackdropFilter: 'blur(10px)',
+                  borderRadius: '14px',
+                  marginBottom: '12px',
+                  borderLeft: `4px solid ${borderColor}`,
+                  boxShadow: '0 2px 12px rgba(0,0,0,0.09)',
+                  overflow: 'hidden',
+                }}>
+                  {/* Card header */}
+                  <div style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '10px 14px 8px',
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  }}>
+                    <span style={{fontSize: '11px', fontWeight: '700', color: 'rgba(255,255,255,0.8)', letterSpacing: '0.5px'}}>
+                      MATCH {idx + 1}
+                    </span>
+                    {m.winner ? (
+                      <span style={{fontSize: '11px', color: '#68d391', fontWeight: '700', background: 'rgba(255,255,255,0.15)', padding: '2px 8px', borderRadius: '10px'}}>
+                        ✅ {m.winner} won
+                      </span>
+                    ) : isVotingClosed(m.scheduled_at) ? (
+                      <span style={{fontSize: '11px', color: '#fc8181', fontWeight: '700', background: 'rgba(255,255,255,0.15)', padding: '2px 8px', borderRadius: '10px'}}>
+                        🔒 Voting Closed
+                      </span>
+                    ) : (
+                      <span style={{fontSize: '11px', color: '#68d391', fontWeight: '700', background: 'rgba(255,255,255,0.15)', padding: '2px 8px', borderRadius: '10px'}}>
+                        🟢 Open
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{padding: '12px 14px'}}>
+                    {/* Teams */}
+                    <div style={{textAlign: 'center', marginBottom: '8px'}}>
+                      <span style={{fontSize: '14px', fontWeight: '800', color: '#2d3748', fontFamily: "'Poppins',sans-serif"}}>{m.home_team}</span>
+                      <span style={{fontSize: '12px', color: '#a0aec0', margin: '0 8px', fontWeight: '600'}}>vs</span>
+                      <span style={{fontSize: '14px', fontWeight: '800', color: '#2d3748', fontFamily: "'Poppins',sans-serif"}}>{m.away_team}</span>
+                    </div>
+
+                    {/* Date / Time / Venue */}
+                    <div style={{fontSize: '11px', color: '#718096', textAlign: 'center', marginBottom: '12px', lineHeight: 1.6}}>
+                      📅 {formatMatchDatePart(m.scheduled_at)} &nbsp;·&nbsp; ⏱ {formatMatchTimePart(m.scheduled_at)}
+                      {m.venue && <div>📍 {m.venue}</div>}
+                    </div>
+
+                    {/* Vote section */}
+                    {votingDisabled ? (
+                      userVotes[m.id] ? (
+                        <div>
+                          <div style={{
+                            textAlign: 'center', fontSize: '12px', color: '#4a5568',
+                            background: '#f7fafc', borderRadius: '10px', padding: '8px',
+                            marginBottom: m.vote_totals ? '8px' : '0',
+                          }}>
+                            <span style={{fontWeight: '600'}}>Your pick: </span>
+                            <span style={{color: '#667eea', fontWeight: '700'}}>{userVotes[m.id].team}</span>
+                            <span style={{color: '#a0aec0'}}> · {userVotes[m.id].points} pts</span>
+                          </div>
+                          {m.vote_totals && (
+                            <div style={{display: 'flex', gap: '8px'}}>
+                              <div style={{flex: 1, textAlign: 'center', background: '#edf2f7', borderRadius: '8px', padding: '6px 4px', fontSize: '11px'}}>
+                                <div style={{color: '#718096', fontWeight: '600', marginBottom: '2px'}}>{m.home_team}</div>
+                                <div style={{color: '#667eea', fontWeight: '800', fontSize: '16px'}}>{m.vote_totals[m.home_team] || 0}</div>
+                                <div style={{color: '#a0aec0', fontSize: '10px'}}>votes</div>
+                              </div>
+                              <div style={{flex: 1, textAlign: 'center', background: '#edf2f7', borderRadius: '8px', padding: '6px 4px', fontSize: '11px'}}>
+                                <div style={{color: '#718096', fontWeight: '600', marginBottom: '2px'}}>{m.away_team}</div>
+                                <div style={{color: '#667eea', fontWeight: '800', fontSize: '16px'}}>{m.vote_totals[m.away_team] || 0}</div>
+                                <div style={{color: '#a0aec0', fontSize: '10px'}}>votes</div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div style={{textAlign: 'center', padding: '8px', background: '#fff5f5', borderRadius: '10px'}}>
+                          <span style={{color: '#e53e3e', fontWeight: '700', fontSize: '12px'}}>{disabledReason}</span>
+                        </div>
+                      )
+                    ) : (
+                      <div>
+                        {/* Pill-style team buttons */}
+                        <div style={{display: 'flex', gap: '8px', marginBottom: '10px'}}>
+                          {[m.home_team, m.away_team].map(team => {
+                            const selected = votes[m.id]?.team === team
+                            return (
+                              <label key={team} style={{
+                                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                padding: '10px 6px', borderRadius: '10px', cursor: 'pointer',
+                                border: `2px solid ${selected ? '#667eea' : '#e2e8f0'}`,
+                                background: selected ? 'rgba(102,126,234,0.12)' : 'white',
+                                fontSize: '12px', fontWeight: '700', color: selected ? '#667eea' : '#4a5568',
+                                textAlign: 'center', transition: 'all 0.15s ease',
+                              }}>
+                                <input type="radio" name={`vote-${m.id}`} value={team}
+                                  checked={selected}
+                                  onChange={e => { dirtyVotes.current.add(m.id); setVotes({...votes, [m.id]: {...(votes[m.id] || {}), team: e.target.value}}) }}
+                                  style={{display: 'none'}} />
+                                {team}
+                              </label>
+                            )
+                          })}
+                        </div>
+                        {/* Points */}
+                        <select
+                          value={votes[m.id]?.points || ''}
+                          onChange={e => { dirtyVotes.current.add(m.id); setVotes({...votes, [m.id]: {...(votes[m.id] || {}), points: e.target.value}}) }}
+                          style={{
+                            width: '100%', padding: '10px 12px', borderRadius: '10px',
+                            border: '2px solid #e2e8f0', fontSize: '13px', fontWeight: '600',
+                            fontFamily: 'Inter, sans-serif', backgroundColor: 'white', cursor: 'pointer',
+                          }}
+                        >
+                          <option value="">Select points</option>
+                          {POINTS.map(p => <option key={p} value={p}>{p} pts</option>)}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          /* ── Desktop table ────────────────────────────────────── */
+          <div style={{
+            overflowX: 'auto',
+            background: 'rgba(255,255,255,0.72)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            borderRadius: '16px',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.10)',
+            padding: '0',
+            border: '1px solid rgba(255,255,255,0.55)',
+          }}>
           <table style={{
             width: '100%',
             borderCollapse: 'collapse',
@@ -381,7 +595,6 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                 <th style={{padding: '14px 12px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>T1<br/>Odds</th>
                 <th style={{padding: '14px 12px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>T2<br/>Odds</th>
                 <th style={{padding: '14px 12px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Winner</th>
-                <th style={{padding: '14px 12px', textAlign: 'center', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -390,14 +603,17 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                 const disabledReason = getVotingDisabledReason(m)
                 const userVote = userVotes[m.id]
 
+                const isPending = !votingDisabled && !!votes[m.id]?.team && !!votes[m.id]?.points &&
+                  (!userVotes[m.id] || votes[m.id].team !== userVotes[m.id].team || String(votes[m.id].points) !== String(userVotes[m.id].points))
                 return (
                   <tr key={m.id} style={{
                     borderBottom: '1px solid #f0f0f0',
-                    backgroundColor: idx % 2 === 0 ? '#fafbfc' : 'white',
+                    borderLeft: isPending ? '3px solid #f39c12' : '3px solid transparent',
+                    backgroundColor: isPending ? (idx % 2 === 0 ? '#fffdf0' : '#fffef5') : (idx % 2 === 0 ? '#fafbfc' : 'white'),
                     transition: 'all 0.2s ease'
                   }}
                   onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f7fa'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#fafbfc' : 'white'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = isPending ? (idx % 2 === 0 ? '#fffdf0' : '#fffef5') : (idx % 2 === 0 ? '#fafbfc' : 'white')}
                   >
                     <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', textAlign: 'center', fontSize: '13px', fontWeight: '600', color: '#667eea'}}>{idx + 1}</td>
                     <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '13px', fontWeight: '600', color: '#2d3748'}}>{m.home_team}</td>
@@ -405,11 +621,6 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                     <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#718096'}}>{m.venue || 'N/A'}</td>
                     <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>
                       <div>{formatMatchDatePart(m.scheduled_at)}</div>
-                      {!m.winner && !isVotingClosed(m.scheduled_at) && (
-                        <div style={{marginTop:'4px'}}>
-                          <CountdownTimer scheduledAt={m.scheduled_at} parseMatchDateTime={parseMatchDateTime}/>
-                        </div>
-                      )}
                       {!m.winner && isVotingClosed(m.scheduled_at) && (
                         <div style={{marginTop:'4px',fontSize:'11px',color:'#e74c3c',fontWeight:'700'}}>🔒 Voting Closed</div>
                       )}
@@ -443,7 +654,7 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                               name={`vote-${m.id}`}
                               value={m.home_team}
                               checked={votes[m.id]?.team === m.home_team}
-                              onChange={e => setVotes({...votes, [m.id]: {...(votes[m.id] || {}), team: e.target.value}})}
+                              onChange={e => { dirtyVotes.current.add(m.id); setVotes({...votes, [m.id]: {...(votes[m.id] || {}), team: e.target.value}}) }}
                               disabled={votingDisabled}
                               style={{accentColor: '#667eea'}}
                             />
@@ -455,7 +666,7 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                               name={`vote-${m.id}`}
                               value={m.away_team}
                               checked={votes[m.id]?.team === m.away_team}
-                              onChange={e => setVotes({...votes, [m.id]: {...(votes[m.id] || {}), team: e.target.value}})}
+                              onChange={e => { dirtyVotes.current.add(m.id); setVotes({...votes, [m.id]: {...(votes[m.id] || {}), team: e.target.value}}) }}
                               disabled={votingDisabled}
                               style={{accentColor: '#667eea'}}
                             />
@@ -470,7 +681,7 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                       ) : (
                         <select
                           value={votes[m.id]?.points || ''}
-                          onChange={e => setVotes({...votes, [m.id]: {...(votes[m.id] || {}), points: e.target.value}})}
+                          onChange={e => { dirtyVotes.current.add(m.id); setVotes({...votes, [m.id]: {...(votes[m.id] || {}), points: e.target.value}}) }}
                           style={{
                             padding: '6px 8px',
                             width: '100%',
@@ -542,46 +753,46 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                         <span style={{color: '#a0aec0', fontSize: '12px', fontWeight: '600'}}>TBD</span>
                       )}
                     </td>
-                    <td style={{padding: '14px 12px', textAlign: 'center'}}>
-                      {votingDisabled ? (
-                        <span style={{color: '#a0aec0', fontSize: '11px', fontWeight: '500'}}>Voting Closed</span>
-                      ) : (
-                        <button
-                          onClick={() => submitVote(m.id, votes[m.id]?.team, votes[m.id]?.points)}
-                          style={{
-                            padding: '8px 20px',
-                            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '10px',
-                            cursor: 'pointer',
-                            fontWeight: '600',
-                            fontSize: '12px',
-                            fontFamily: 'Inter, sans-serif',
-                            transition: 'all 0.3s ease',
-                            boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)',
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.5px'
-                          }}
-                          onMouseOver={(e) => {
-                            e.target.style.transform = 'translateY(-2px)'
-                            e.target.style.boxShadow = '0 6px 20px rgba(102, 126, 234, 0.6)'
-                          }}
-                          onMouseOut={(e) => {
-                            e.target.style.transform = 'translateY(0)'
-                            e.target.style.boxShadow = '0 4px 15px rgba(102, 126, 234, 0.4)'
-                          }}
-                        >
-                          {userVote ? 'Update' : 'Vote'}
-                        </button>
-                      )}
-                    </td>
                   </tr>
                 )
               })}
             </tbody>
           </table>
         </div>
+        )} {/* end desktop/mobile ternary */}
+
+        {user?.role !== 'admin' && (
+          <div style={{display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', marginTop: '12px', flexWrap: 'wrap'}}>
+            {pendingCount > 0 && (
+              <span style={{fontSize: '13px', color: '#f39c12', fontWeight: '600', fontFamily: 'Inter, sans-serif'}}>
+                ⚡ {pendingCount} unsaved pick{pendingCount > 1 ? 's' : ''}
+              </span>
+            )}
+            <button
+              onClick={submitAllVotes}
+              disabled={saving || pendingCount === 0}
+              style={{
+                padding: isMobile ? '14px 24px' : '12px 28px',
+                width: isMobile ? '100%' : 'auto',
+                background: pendingCount > 0
+                  ? 'linear-gradient(135deg, #2ecc71 0%, #27ae60 100%)'
+                  : 'rgba(255,255,255,0.25)',
+                color: pendingCount > 0 ? 'white' : 'rgba(255,255,255,0.4)',
+                border: pendingCount > 0 ? 'none' : '1px solid rgba(255,255,255,0.2)',
+                borderRadius: '12px',
+                cursor: pendingCount > 0 && !saving ? 'pointer' : 'not-allowed',
+                fontWeight: '700',
+                fontSize: '14px',
+                fontFamily: 'Inter, sans-serif',
+                transition: 'all 0.3s ease',
+                boxShadow: pendingCount > 0 ? '0 4px 15px rgba(46,204,113,0.4)' : 'none',
+              }}
+            >
+              {saving ? '⏳ Saving…' : pendingCount > 0 ? `💾 Save All Picks (${pendingCount})` : '✅ All Picks Saved'}
+            </button>
+          </div>
+        )}
+        </>
       )}
       
       {coinFlip.show && <CoinFlip teamName={coinFlip.team} />}

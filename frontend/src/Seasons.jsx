@@ -23,9 +23,10 @@ export default function Seasons({ user, onSelect, refreshTrigger }) {
     title: {
       fontSize: 'clamp(24px, 5vw, 32px)',
       fontWeight: 'bold',
-      color: '#1a1a1a',
+      color: '#ffffff',
       marginBottom: '40px',
-      textAlign: 'center'
+      textAlign: 'center',
+      textShadow: '0 2px 8px rgba(0,0,0,0.5)'
     },
     grid: {
       display: 'grid',
