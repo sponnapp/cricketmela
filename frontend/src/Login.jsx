@@ -92,7 +92,25 @@ function IntlBadge({ team }) {
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
+
+// Simple hook to get window dimensions
+function useWindowSize() {
+  const [size, setSize] = React.useState([window.innerWidth, window.innerHeight]);
+  React.useLayoutEffect(() => {
+    function updateSize() {
+      setSize([window.innerWidth, window.innerHeight]);
+    }
+    window.addEventListener('resize', updateSize);
+    updateSize();
+    return () => window.removeEventListener('resize', updateSize);
+  }, []);
+  return size;
+}
+
 export default function Login({ onLogin }) {
+  const [width] = useWindowSize();
+  const isMobile = width < 768;
+
   const [isSignup, setIsSignup] = useState(false)
   const [isForgot, setIsForgot] = useState(false)
   const [isReset,  setIsReset]  = useState(false)
@@ -212,7 +230,7 @@ export default function Login({ onLogin }) {
   return (
     <div style={{
       minHeight: '100vh', width: '100%', boxSizing: 'border-box',
-      padding: '24px 16px 70px',
+      padding: isMobile ? '20px 12px 60px' : '24px 16px 70px',
       display: 'flex', flexDirection: 'column', alignItems: 'center',
       fontFamily: "'Inter', sans-serif",
       background: 'linear-gradient(170deg, #0a0a1a 0%, #0d2137 30%, #0a3320 60%, #1a0a08 100%)',
@@ -249,18 +267,18 @@ export default function Login({ onLogin }) {
         position:'relative', zIndex:1,
         width:'100%', maxWidth:'1100px',
         display:'flex',
-        alignItems:'flex-start',
+        flexDirection: isMobile ? 'column' : 'row',
+        alignItems: isMobile ? 'center' : 'flex-start',
         justifyContent:'space-around',
-        gap:'20px',
-        flexWrap: window.innerWidth > 768 ? 'nowrap' : 'wrap',
+        gap: isMobile ? '28px' : '20px',
       }}>
 
         {/* ── LEFT SIDE: GRID LOGO ARRANGEMENT ── */}
         <div style={{
           position:'relative',
-          flex: window.innerWidth > 768 ? '0 0 auto' : '1 1 100%',
-          minWidth: '300px',
-          maxWidth:'480px',
+          flex: '0 0 auto',
+          width: isMobile ? '100%' : 'auto',
+          maxWidth: isMobile ? '400px' : '480px',
         }}>
           {/* Title for logos section */}
           <div style={{
@@ -273,49 +291,49 @@ export default function Login({ onLogin }) {
           {/* Grid layout container */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(5, 80px)',
-            gridTemplateRows: 'repeat(4, 100px)',
-            gap: '30px 0px',
+            gridTemplateColumns: isMobile ? 'repeat(5, 60px)' : 'repeat(5, 80px)',
+            gridTemplateRows: isMobile ? 'repeat(4, 70px)' : 'repeat(4, 100px)',
+            gap: isMobile ? '14px 0px' : '30px 0px',
             justifyContent: 'center',
             alignItems: 'center',
             position: 'relative',
           }}>
             {/* Row 1: 3 logos (SRH, DC, GT) - columns 1, 3, 5 */}
             <div style={{ gridColumn: '1', gridRow: '1', justifySelf: 'center' }}>
-              <IplBadge team={IPL_TEAMS[9]} size={100} />
+              <IplBadge team={IPL_TEAMS[9]} size={isMobile ? 68 : 100} />
             </div>
             <div style={{ gridColumn: '3', gridRow: '1', justifySelf: 'center' }}>
-              <IplBadge team={IPL_TEAMS[1]} size={100} />
+              <IplBadge team={IPL_TEAMS[1]} size={isMobile ? 68 : 100} />
             </div>
             <div style={{ gridColumn: '5', gridRow: '1', justifySelf: 'center' }}>
-              <IplBadge team={IPL_TEAMS[2]} size={100} />
+              <IplBadge team={IPL_TEAMS[2]} size={isMobile ? 68 : 100} />
             </div>
 
             {/* Row 2: 2 logos (RR, PBKS) - columns 2, 4 (between Row 1) */}
             <div style={{ gridColumn: '2', gridRow: '2', justifySelf: 'center' }}>
-              <IplBadge team={IPL_TEAMS[7]} size={100} />
+              <IplBadge team={IPL_TEAMS[7]} size={isMobile ? 68 : 100} />
             </div>
             <div style={{ gridColumn: '4', gridRow: '2', justifySelf: 'center' }}>
-              <IplBadge team={IPL_TEAMS[6]} size={100} />
+              <IplBadge team={IPL_TEAMS[6]} size={isMobile ? 68 : 100} />
             </div>
 
             {/* Row 3: 3 logos (MI, CSK, KKR) - columns 1, 3, 5 (same as Row 1) */}
             <div style={{ gridColumn: '1', gridRow: '3', justifySelf: 'center' }}>
-              <IplBadge team={IPL_TEAMS[5]} size={100} />
+              <IplBadge team={IPL_TEAMS[5]} size={isMobile ? 68 : 100} />
             </div>
             <div style={{ gridColumn: '3', gridRow: '3', justifySelf: 'center' }}>
-              <IplBadge team={IPL_TEAMS[0]} size={100} />
+              <IplBadge team={IPL_TEAMS[0]} size={isMobile ? 68 : 100} />
             </div>
             <div style={{ gridColumn: '5', gridRow: '3', justifySelf: 'center' }}>
-              <IplBadge team={IPL_TEAMS[3]} size={100} />
+              <IplBadge team={IPL_TEAMS[3]} size={isMobile ? 68 : 100} />
             </div>
 
             {/* Row 4: 2 logos (LSG, RCB) - columns 2, 4 (between Row 3, same as Row 2) */}
             <div style={{ gridColumn: '2', gridRow: '4', justifySelf: 'center' }}>
-              <IplBadge team={IPL_TEAMS[4]} size={100} />
+              <IplBadge team={IPL_TEAMS[4]} size={isMobile ? 68 : 100} />
             </div>
             <div style={{ gridColumn: '4', gridRow: '4', justifySelf: 'center' }}>
-              <IplBadge team={IPL_TEAMS[8]} size={100} />
+              <IplBadge team={IPL_TEAMS[8]} size={isMobile ? 68 : 100} />
             </div>
           </div>
         </div>
@@ -323,9 +341,10 @@ export default function Login({ onLogin }) {
       {/* ── RIGHT SIDE: LOGIN CARD ── */}
       <div style={{
         position:'relative', zIndex:1,
-        flex: window.innerWidth > 768 ? '0 0 auto' : '1 1 100%',
-        minWidth: '280px',
-        maxWidth:'380px',
+        flex: '0 0 auto',
+        width: isMobile ? '100%' : 'auto',
+        minWidth: isMobile ? 'auto' : '280px',
+        maxWidth:'420px',
         background:'rgba(255,255,255,0.07)',
         backdropFilter:'blur(20px)', WebkitBackdropFilter:'blur(20px)',
         borderRadius:'20px',
