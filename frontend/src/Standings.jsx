@@ -20,7 +20,7 @@ function Avatar({ name, size = 40 }) {
 }
 
 // ── Podium Card ───────────────────────────────────────────────────────────────
-function PodiumCard({ u, rank, isMe }) {
+function PodiumCard({ u, rank, denseRank, isMe }) {
   const medals  = ['🥇','🥈','🥉']
   const heights = ['130px','100px','80px']
   const displayOrder = [1, 0, 2]   // centre=gold, left=silver, right=bronze
@@ -34,30 +34,32 @@ function PodiumCard({ u, rank, isMe }) {
     '0 4px 18px rgba(192,192,192,0.45)',
     '0 4px 18px rgba(205,127,50,0.45)',
   ]
+  // Clamp to bronze (index 2) for any extras tied at rank 3
+  const styleIdx = Math.min(rank, 2)
 
   // Celebrate if this is the current user on podium
   React.useEffect(() => {
     if (isMe) {
       setTimeout(() => {
-        celebratePodium(rank + 1);
+        celebratePodium(denseRank);
       }, 500);
     }
-  }, [isMe, rank]);
+  }, [isMe, denseRank]);
 
   return (
     <div style={{
       display:'flex', flexDirection:'column', alignItems:'center',
-      order: displayOrder[rank],
-      flex: rank===0 ? '0 0 150px' : '0 0 120px',
+      order: styleIdx < 3 ? displayOrder[styleIdx] : 3,
+      flex: styleIdx===0 ? '0 0 150px' : '0 0 120px',
     }}>
-      <div style={{fontSize:rank===0?'32px':'22px', marginBottom:'6px', filter:'drop-shadow(0 2px 4px rgba(0,0,0,0.3))'}}>{medals[rank]}</div>
+      <div style={{fontSize:styleIdx===0?'32px':'22px', marginBottom:'6px', filter:'drop-shadow(0 2px 4px rgba(0,0,0,0.3))'}}>{medals[styleIdx]}</div>
 
-      <div style={{marginBottom:'8px', transform:rank===0?'scale(1.12)':'scale(1)', transition:'transform 0.3s'}}>
-        <Avatar name={u.display_name||u.username} size={rank===0?58:44}/>
+      <div style={{marginBottom:'8px', transform:styleIdx===0?'scale(1.12)':'scale(1)', transition:'transform 0.3s'}}>
+        <Avatar name={u.display_name||u.username} size={styleIdx===0?58:44}/>
       </div>
 
       <div style={{
-        fontSize:rank===0?'14px':'12px', fontWeight:'800',
+        fontSize:styleIdx===0?'14px':'12px', fontWeight:'800',
         color: isMe ? '#4a3ea8' : '#1a1a1a',
         marginBottom:'4px', textAlign:'center',
         fontFamily:"'Poppins',sans-serif",
@@ -67,7 +69,7 @@ function PodiumCard({ u, rank, isMe }) {
       </div>
 
       <div style={{
-        fontSize:rank===0?'17px':'13px', fontWeight:'900',
+        fontSize:styleIdx===0?'17px':'13px', fontWeight:'900',
         color:'#333', marginBottom:'10px',
         fontFamily:"'Poppins',sans-serif",
       }}>
@@ -76,17 +78,17 @@ function PodiumCard({ u, rank, isMe }) {
 
       {/* Podium block */}
       <div style={{
-        width:'100%', height:heights[rank],
-        background: colours[rank],
+        width:'100%', height:heights[styleIdx],
+        background: colours[styleIdx],
         borderRadius:'10px 10px 0 0',
-        boxShadow: isMe ? `0 0 0 3px #667eea, ${glows[rank]}` : glows[rank],
+        boxShadow: isMe ? `0 0 0 3px #667eea, ${glows[styleIdx]}` : glows[styleIdx],
         display:'flex', alignItems:'center', justifyContent:'center',
         transition:'all 0.3s',
       }}>
         <span style={{
           fontFamily:"'Poppins',sans-serif", fontWeight:'900',
           fontSize:'22px', color:'rgba(255,255,255,0.75)',
-        }}>#{rank+1}</span>
+        }}>#{denseRank}</span>
       </div>
     </div>
   )
@@ -169,10 +171,23 @@ export default function Standings({ user: currentUser, refreshTrigger }) {
     </div>
   )
 
-  const top3   = standings.slice(0, 3)
-  const rest   = standings.slice(3)
   const leader = standings[0]?.balance || 1
   const myRank = currentUser ? standings.findIndex(u => u.username === currentUser.username) : -1
+
+  // Build dense-rank map: users with equal points share the same rank number
+  const rankMap = new Map()
+  let currentRank = 1
+  standings.forEach((u, i) => {
+    if (i > 0 && Math.round(u.balance) < Math.round(standings[i - 1].balance)) {
+      currentRank = i + 1
+    }
+    rankMap.set(u.id, currentRank)
+  })
+  const myDenseRank = myRank >= 0 ? rankMap.get(standings[myRank].id) : -1
+
+  // Split podium vs table by dense rank (all rank ≤ 3 go on podium)
+  const top3 = standings.filter(u => rankMap.get(u.id) <= 3)
+  const rest = standings.filter(u => rankMap.get(u.id) > 3)
 
   return (
     <div style={{padding:'20px', fontFamily:'Inter,sans-serif'}}>
@@ -213,9 +228,9 @@ export default function Standings({ user: currentUser, refreshTrigger }) {
           boxShadow:'0 3px 12px rgba(102,126,234,0.18)',
         }}>
           👤 You are ranked
-          <strong style={{fontSize:'17px', color:'#667eea'}}>#{myRank+1}</strong>
-          {myRank === 0 && <span style={{color:'#e67e22'}}>🔥 You&apos;re leading!</span>}
-          {myRank === 1 && <span style={{color:'#7f8c8d'}}>⚡ So close to #1!</span>}
+          <strong style={{fontSize:'17px', color:'#667eea'}}>#{myDenseRank}</strong>
+          {myDenseRank === 1 && <span style={{color:'#e67e22'}}>🔥 You&apos;re leading!</span>}
+          {myDenseRank === 2 && <span style={{color:'#7f8c8d'}}>⚡ So close to #1!</span>}
         </div>
       )}
 
@@ -231,7 +246,7 @@ export default function Standings({ user: currentUser, refreshTrigger }) {
         }}>
           <div style={{display:'flex', justifyContent:'center', alignItems:'flex-end', gap:'10px', flexWrap:'wrap'}}>
             {top3.map((u, rank) => (
-              <PodiumCard key={u.id} u={u} rank={rank} isMe={currentUser?.username === u.username} />
+              <PodiumCard key={u.id} u={u} rank={rank} denseRank={rankMap.get(u.id)} isMe={currentUser?.username === u.username} />
             ))}
           </div>
         </div>
@@ -258,7 +273,7 @@ export default function Standings({ user: currentUser, refreshTrigger }) {
             </thead>
             <tbody>
               {rest.map((u, i) => {
-                const rank  = i + 4
+                const rank  = rankMap.get(u.id)
                 const isMe  = currentUser?.username === u.username
                 const pct   = Math.max(5, Math.round((u.balance / leader) * 100))
                 const evenBg = isMe ? 'rgba(102,126,234,0.08)' : (i%2===0 ? 'rgba(255,255,255,0.55)' : 'rgba(248,249,252,0.55)')
