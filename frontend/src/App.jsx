@@ -99,7 +99,7 @@ export default function App() {
   const [disclaimerHidden, setDisclaimerHidden] = useState(false)
 
   useEffect(() => {
-    const t = setTimeout(() => setDisclaimerHidden(true), 6000)
+    const t = setTimeout(() => setDisclaimerHidden(true), 4000)
     return () => clearTimeout(t)
   }, [])
 
