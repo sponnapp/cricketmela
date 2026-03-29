@@ -21,7 +21,7 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
 
 function runMigrations() {
   let completed = 0;
-  const total = 2;
+  const total = 3;
 
   const allDone = () => {
     completed++;
@@ -90,6 +90,31 @@ function runMigrations() {
           console.error('[MIGRATION] Error adding email:', err);
         } else {
           console.log('[MIGRATION] ✅ Added email column');
+        }
+        allDone();
+      });
+    }
+  });
+
+  // Migration 3: Add is_auto_loss column to votes
+  console.log('[MIGRATION] Checking for is_auto_loss column...');
+  db.all(`PRAGMA table_info(votes)`, (err, columns) => {
+    if (err) {
+      console.error('[MIGRATION] Error checking votes columns:', err);
+      allDone();
+      return;
+    }
+    const hasAutoLoss = columns && columns.some(c => c.name === 'is_auto_loss');
+    if (hasAutoLoss) {
+      console.log('[MIGRATION] ✅ is_auto_loss column already exists');
+      allDone();
+    } else {
+      console.log('[MIGRATION] ⚠️  is_auto_loss column missing, adding...');
+      db.run('ALTER TABLE votes ADD COLUMN is_auto_loss INTEGER DEFAULT 0', (err) => {
+        if (err) {
+          console.error('[MIGRATION] Error adding is_auto_loss:', err);
+        } else {
+          console.log('[MIGRATION] ✅ Added is_auto_loss column');
         }
         allDone();
       });
