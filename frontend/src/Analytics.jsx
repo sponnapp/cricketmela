@@ -102,10 +102,10 @@ export default function Analytics({ user, refreshTrigger }) {
       
       {/* Header */}
       <div style={{ marginBottom: '30px' }}>
-        <h1 style={{ fontSize: '32px', fontWeight: '800', marginBottom: '8px', color: '#1a1a1a' }}>
+        <h1 style={{ fontSize: '32px', fontWeight: '800', marginBottom: '8px', color: '#ffffff', textShadow: '0 2px 8px rgba(0,0,0,0.5)' }}>
           📊 Analytics Dashboard
         </h1>
-        <p style={{ color: '#666', fontSize: '14px' }}>
+        <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '14px' }}>
           {user?.role === 'admin' ? 'View overall betting analytics or inspect a specific user' : 'Deep insights into your betting performance'}
         </p>
       </div>

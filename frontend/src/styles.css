@@ -38,7 +38,7 @@ body.with-cricket-bg::before {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(255, 255, 255, 0.45);
+  background: rgba(10, 15, 30, 0.42);
   z-index: -1;
   pointer-events: none;
 }
@@ -58,6 +58,8 @@ h1, h2, h3, h4, h5, h6 {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  position: relative;
+  z-index: 1;
 }
 
 @media (min-width: 768px) {
@@ -66,6 +68,21 @@ h1, h2, h3, h4, h5, h6 {
 
 @media (min-width: 1024px) {
   .container { padding: 32px; }
+}
+
+/* ── Mobile header fixes ─────────────────────────────── */
+@media (max-width: 560px) {
+  .header-sparkle-btn { display: none !important; }
+  .header-top-row { flex-wrap: wrap !important; }
+  .header-user-chip {
+    flex: 1 !important;
+    justify-content: space-between !important;
+  }
+  .nav-tab-btn {
+    min-width: 50px !important;
+    font-size: 11px !important;
+    padding: 7px 4px !important;
+  }
 }
 
 header {
@@ -280,11 +297,17 @@ button.warning:hover {
   color: #ccc;
   line-height: 1.5;
   box-shadow: 0 -3px 16px rgba(233, 30, 140, 0.18);
+  transition: transform 0.5s ease, opacity 0.5s ease;
+}
+.disclaimer-ribbon.hidden {
+  transform: translateY(100%);
+  opacity: 0;
+  pointer-events: none;
 }
 
-/* push main content so ribbon doesn't overlap the last bit */
-main {
-  padding-bottom: 48px;
+/* push main content so ribbon doesn't overlap the last bit — only when visible */
+main.disclaimer-visible {
+  padding-bottom: 64px;
 }
 
 footer {
@@ -293,3 +316,62 @@ footer {
   color: #666;
   font-size: 13px;
 }
+
+/* ==========================================================================
+   FANCY UI ENHANCEMENTS
+   ========================================================================== */
+
+/* 1. Skeleton Loader */
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.skeleton-box {
+  position: relative;
+  overflow: hidden;
+  background-color: rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+}
+.skeleton-box::after {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  transform: translateX(-100%);
+  background-image: linear-gradient(90deg, rgba(255,255,255, 0) 0, rgba(255,255,255, 0.4) 20%, rgba(255,255,255, 0.4) 60%, rgba(255,255,255, 0));
+  animation: shimmer 1.5s infinite;
+}
+
+/* 2. News Ticker */
+@keyframes ticker {
+  0% { transform: translate3d(0, 0, 0); }
+  100% { transform: translate3d(-100%, 0, 0); }
+}
+.ticker-wrap {
+  width: 100%; overflow: hidden; background: rgba(10, 20, 35, 0.65); backdrop-filter: blur(10px);
+  color: white; padding: 6px 0; display: flex; box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+  position: relative; z-index: 50; border-bottom: 1px solid rgba(255,255,255,0.15);
+}
+.ticker-content {
+  display: inline-block; white-space: nowrap; padding-right: 100%; box-sizing: content-box;
+  animation: ticker 80s linear infinite;
+}
+.ticker-item {
+  display: inline-block; padding: 0 2.5rem; font-weight: 600; font-size: 13px; font-family: 'Inter', sans-serif; letter-spacing: 0.5px;
+}
+.ticker-item .highlight { color: #f39c12; font-weight: 800; font-family: 'Poppins', sans-serif; }
+
+/* 3. Dynamic Background Orbs */
+@keyframes float-orb1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(40px, -60px) scale(1.1); }
+  66% { transform: translate(-30px, 30px) scale(0.9); }
+}
+@keyframes float-orb2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(-40px, 60px) scale(1.2); }
+  66% { transform: translate(30px, -30px) scale(0.85); }
+}
+.bg-orb {
+  position: fixed; border-radius: 50%; filter: blur(100px); opacity: 0.35; z-index: 0; pointer-events: none;
+}
+.orb-1 { width: 500px; height: 500px; background: radial-gradient(circle, #667eea, #764ba2); top: -150px; left: -150px; animation: float-orb1 18s ease-in-out infinite; }
+.orb-2 { width: 600px; height: 600px; background: radial-gradient(circle, #764ba2, #e91e8c); bottom: -150px; right: -150px; animation: float-orb2 22s ease-in-out infinite; }
+.orb-3 { width: 400px; height: 400px; background: radial-gradient(circle, #2ecc71, #1abc9c); top: 35%; left: 35%; animation: float-orb1 25s ease-in-out infinite reverse; opacity: 0.2; }

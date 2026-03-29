@@ -16,7 +16,7 @@ echo ""
 
 # Start backend
 echo "🚀 Starting Backend..."
-cd /Users/senthilponnappan/IdeaProjects/Test/backend
+cd /Users/senthilponnappan/IdeaProjects/CricketMela/backend
 nohup npm start > ../backend.log 2>&1 &
 sleep 3
 echo "✅ Backend started (port 4000)"
@@ -24,7 +24,7 @@ echo ""
 
 # Start frontend
 echo "🚀 Starting Frontend (with new Vite config)..."
-cd /Users/senthilponnappan/IdeaProjects/Test/frontend
+cd /Users/senthilponnappan/IdeaProjects/CricketMela/frontend
 nohup npm run dev > ../frontend.log 2>&1 &
 sleep 5
 echo "✅ Frontend started (port 5173)"
@@ -55,6 +55,6 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # Start Cloudflare Tunnel
-cd /Users/senthilponnappan/IdeaProjects/Test
+cd /Users/senthilponnappan/IdeaProjects/CricketMela
 cloudflared tunnel --url localhost:5173
 

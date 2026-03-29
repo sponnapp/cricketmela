@@ -8,11 +8,10 @@
  */
 import { useEffect, useState } from 'react'
 
-const POLL_INTERVAL_MS = 30 * 1000   // 30 seconds
+const POLL_INTERVAL_MS = 60 * 1000   // 60 seconds
 
 export default function useVersionCheck(onRefresh) {
   const [updateAvailable, setUpdateAvailable] = useState(false)
-  const [lastRefresh, setLastRefresh] = useState(Date.now())
 
   useEffect(() => {
     // Fetch initial version so we know what we started with
@@ -34,11 +33,7 @@ export default function useVersionCheck(onRefresh) {
         // Silently ignore network errors (offline, dev server, etc.)
       }
 
-      // Trigger data refresh callback
-      if (onRefresh && typeof onRefresh === 'function') {
-        onRefresh()
-      }
-      setLastRefresh(Date.now())
+      // (auto data-refresh removed — components refresh on mount and user actions only)
     }
 
     checkVersion()
@@ -46,6 +41,6 @@ export default function useVersionCheck(onRefresh) {
     return () => clearInterval(id)
   }, [onRefresh])
 
-  return { updateAvailable, lastRefresh }
+  return { updateAvailable }
 }
 
