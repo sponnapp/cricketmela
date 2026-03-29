@@ -113,6 +113,20 @@ function openDb() {
       if (err) console.error('[MIGRATION] Failed to create password_reset_tokens table:', err);
       else console.log('✅ [MIGRATION] password_reset_tokens table ready');
     });
+
+    // Add is_auto_loss column to votes if missing
+    db.all('PRAGMA table_info(votes)', (err, cols) => {
+      if (err) { console.error('[MIGRATION] Failed to inspect votes table:', err); return; }
+      const hasCol = cols && cols.some(c => c.name === 'is_auto_loss');
+      if (!hasCol) {
+        db.run('ALTER TABLE votes ADD COLUMN is_auto_loss INTEGER DEFAULT 0', (e) => {
+          if (e) console.error('[MIGRATION] Failed to add is_auto_loss column:', e);
+          else console.log('✅ [MIGRATION] is_auto_loss column added to votes');
+        });
+      } else {
+        console.log('✅ [MIGRATION] is_auto_loss column already exists');
+      }
+    });
   });
 })();
 
@@ -3161,22 +3175,27 @@ app.post('/api/admin/matches/:id/winner', requireRole(['admin', 'superuser']), (
                   db.all('SELECT user_id, points FROM votes WHERE match_id = ? AND team != ?', [id, winner], (errLosers, loserVotes) => {
                     if (errLosers) { db.close(); return res.status(500).json({ error: 'DB error' }); }
 
+                    // Auto-loss users already had their balance deducted — skip them here to avoid double-charging
+                    const autoLossUserIds = new Set(nonVotedUsers.map(u => u.id));
+                    const realLoserVotes = (loserVotes || []).filter(v => !autoLossUserIds.has(v.user_id));
+
                     if (totalLoser === 0 || totalWinner === 0) {
-                      // Deduct losers even if no winners (or no losers if no losers)
-                      if ((loserVotes || []).length === 0) {
+                      // Deduct losers even if no winners (or no losers)
+                      if (realLoserVotes.length === 0) {
                         db.close();
                         return res.json({ ok: true, distributed: 0, autoLoss: nonVotedUsers.length });
                       }
-                      // Still deduct loser season balances
+                      // Still deduct real loser season balances (auto-loss already deducted above)
                       let losersProcessed = 0;
-                      loserVotes.forEach(v => {
+                      realLoserVotes.forEach(v => {
                         db.run('UPDATE user_seasons SET balance = balance - ? WHERE user_id = ? AND season_id = ?',
-                          [v.points, v.user_id, seasonId], () => { losersProcessed++; if (losersProcessed === loserVotes.length) { db.close(); return res.json({ ok: true, distributed: 0, autoLoss: nonVotedUsers.length }); } });
+                          [v.points, v.user_id, seasonId], () => { losersProcessed++; if (losersProcessed === realLoserVotes.length) { db.close(); return res.json({ ok: true, distributed: 0, autoLoss: nonVotedUsers.length }); } });
                       });
                       return;
                     }
 
-                    // Deduct loser season balances
+                    // Deduct real loser season balances (auto-loss users already deducted)
+                    const loserVotesToDeduct = realLoserVotes;
                     let losersProcessed = 0;
                     const afterLosersDeducted = () => {
                       // For each winner vote, compute net gain = (stake/totalWinner)*totalLoser (rounded)
@@ -3203,15 +3222,15 @@ app.post('/api/admin/matches/:id/winner', requireRole(['admin', 'superuser']), (
                       });
                     };
 
-                    if (loserVotes.length === 0) {
+                    if (loserVotesToDeduct.length === 0) {
                       afterLosersDeducted();
                       return;
                     }
-                    loserVotes.forEach(v => {
+                    loserVotesToDeduct.forEach(v => {
                       db.run('UPDATE user_seasons SET balance = balance - ? WHERE user_id = ? AND season_id = ?',
                         [v.points, v.user_id, seasonId], () => {
                           losersProcessed++;
-                          if (losersProcessed === loserVotes.length) afterLosersDeducted();
+                          if (losersProcessed === loserVotesToDeduct.length) afterLosersDeducted();
                         });
                     });
                   });
@@ -3231,7 +3250,7 @@ app.post('/api/admin/matches/:id/winner', requireRole(['admin', 'superuser']), (
             db.run('UPDATE user_seasons SET balance = balance - ? WHERE user_id = ? AND season_id = ?',
               [autoPoints, user.id, seasonId], (errBal) => {
                 if (errBal) console.error('Error deducting auto-loss season balance:', errBal);
-                db.run('INSERT INTO votes (match_id, user_id, team, points) VALUES (?, ?, ?, ?)',
+                db.run('INSERT INTO votes (match_id, user_id, team, points, is_auto_loss) VALUES (?, ?, ?, ?, 1)',
                   [id, user.id, losingTeam, autoPoints], (errVote) => {
                     if (errVote) console.error('Error creating auto-loss vote:', errVote);
                     autoVotesPending--;
@@ -3663,6 +3682,86 @@ app.get('/api/admin/users/:userId/season-balances', requireRole('admin'), (req, 
       if (err) return res.status(500).json({ error: 'DB error' });
       res.json(rows || []);
     });
+});
+
+// ========== Retroactive Auto-Loss Balance Fix ==========
+
+// POST /api/admin/fix-auto-loss-balances
+// Finds every vote that was created after the match started (i.e. auto-loss votes) and
+// was double-charged. Credits each affected user +10 per such vote, marks the vote so
+// the endpoint is idempotent (safe to call multiple times).
+app.post('/api/admin/fix-auto-loss-balances', requireRole('admin'), (req, res) => {
+  const db = openDb();
+
+  // Fetch all completed matches with a winner set
+  db.all('SELECT id, season_id, scheduled_at, winner FROM matches WHERE winner IS NOT NULL', [], (err, matches) => {
+    if (err) return res.status(500).json({ error: 'DB error fetching matches', details: err.message });
+    if (!matches || matches.length === 0) return res.json({ fixed: 0, details: [] });
+
+    const results = [];
+    let pending = matches.length;
+
+    function finish() {
+      pending--;
+      if (pending === 0) {
+        const totalFixed = results.reduce((s, r) => s + r.credited, 0);
+        res.json({ fixed: totalFixed, details: results });
+      }
+    }
+
+    matches.forEach(match => {
+      // Parse scheduled_at using our existing helper so we can compare timestamps
+      const matchDate = parseMatchDateTime(match.scheduled_at);
+      if (!matchDate) { finish(); return; }
+
+      // The voting window closes 30 min before the match.
+      // Auto-loss votes are inserted AFTER the match starts, so their
+      // created_at will be well after matchDate. We use a 25-min buffer
+      // to safely distinguish real late votes from auto-loss inserts.
+      const cutoff = new Date(matchDate.getTime() - 25 * 60 * 1000); // matchDate - 25min
+
+      // Find votes for this match that:
+      //   1. are on the losing team (team != winner)
+      //   2. were created at or after the cutoff (auto-loss timing)
+      //   3. have NOT yet been fixed (is_auto_loss = 0, meaning they predate our column)
+      const sql = `
+        SELECT v.id, v.user_id, v.points, v.created_at, v.is_auto_loss
+        FROM votes v
+        WHERE v.match_id = ?
+          AND v.team != ?
+          AND v.is_auto_loss = 0
+          AND datetime(v.created_at) >= datetime(?)
+      `;
+      const cutoffStr = cutoff.toISOString();
+
+      db.all(sql, [match.id, match.winner, cutoffStr], (err2, suspectVotes) => {
+        if (err2 || !suspectVotes || suspectVotes.length === 0) { finish(); return; }
+
+        let votePending = suspectVotes.length;
+        let credited = 0;
+
+        suspectVotes.forEach(vote => {
+          // Credit +10 (the amount that was double-deducted) to user's season balance
+          db.run(
+            'UPDATE user_seasons SET balance = balance + 10 WHERE user_id = ? AND season_id = ?',
+            [vote.user_id, match.season_id],
+            (errUpd) => {
+              if (!errUpd) {
+                credited++;
+                // Mark the vote so we never double-credit
+                db.run('UPDATE votes SET is_auto_loss = 1 WHERE id = ?', [vote.id]);
+              }
+              votePending--;
+              if (votePending === 0) {
+                results.push({ match_id: match.id, scheduled_at: match.scheduled_at, credited });
+                finish();
+              }
+            }
+          );
+        });
+      });
+    });
+  });
 });
 
 // ========== Email Settings Management ==========

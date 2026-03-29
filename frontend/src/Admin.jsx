@@ -1536,6 +1536,31 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
               </div>
             )}
           </section>
+          <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
+            <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '8px', fontSize: '18px', fontWeight: 'bold'}}>🔧 Data Maintenance</h3>
+            <p style={{color: '#666', fontSize: '14px', marginBottom: '16px'}}>
+              Run one-time fixes for known data issues. These operations are safe to run multiple times — they won't double-credit users.
+            </p>
+            <div style={{display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap'}}>
+              <button
+                onClick={async () => {
+                  if (!window.confirm('This will find all users who were double-charged by the auto-loss bug and credit them +10 per affected match. Safe to run multiple times. Proceed?')) return;
+                  try {
+                    const resp = await axios.post('/api/admin/fix-auto-loss-balances', {}, { headers: { 'x-user': user.username } });
+                    const { fixed, details } = resp.data;
+                    const summary = details.filter(d => d.credited > 0).map(d => `Match ${d.match_id} (${d.scheduled_at}): ${d.credited} users credited`).join('\n') || 'No users needed fixing.';
+                    alert(`Fix complete.\nTotal credits applied: ${fixed}\n\n${summary}`);
+                  } catch (e) {
+                    alert('Error running fix: ' + (e.response?.data?.error || e.message));
+                  }
+                }}
+                style={{background: '#e67e22', color: 'white', border: 'none', borderRadius: '8px', padding: '10px 20px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px'}}
+              >
+                Fix Double-Charged Auto-Loss Users
+              </button>
+              <span style={{color: '#888', fontSize: '13px'}}>Credits +10 to users incorrectly charged twice when they didn't vote</span>
+            </div>
+          </section>
         </>
       )}
 
