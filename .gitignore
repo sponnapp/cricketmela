@@ -29,6 +29,9 @@ Thumbs.db
 .env.local
 .env.production
 
+# Wrangler local cache & state (not needed in repo)
+.wrangler/
+
 # Backups
 backups/
 *.backup
