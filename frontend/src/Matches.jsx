@@ -167,6 +167,11 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
     }
 
     setSaving(true)
+    // Show coin flip animation for the first pick being saved
+    const firstTeam = votes[toSubmit[0].id]?.team || '🏏'
+    setCoinFlip({ show: true, team: firstTeam })
+    setTimeout(() => setCoinFlip({ show: false, team: '' }), 1500)
+
     let savedCount = 0, failedCount = 0, lastBalance = seasonBalance
 
     for (const m of toSubmit) {
