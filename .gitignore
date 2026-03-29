@@ -1,12 +1,16 @@
-# Node modules
+# Node modules (all levels)
 node_modules/
+**/node_modules/
 package-lock.json
+**/package-lock.json
 
 # Database
 backend/data.db
 backend/data/
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 
 # Logs
 *.log
