@@ -246,13 +246,14 @@ export default function Standings({ user: currentUser, refreshTrigger }) {
           boxShadow:'0 4px 16px rgba(0,0,0,0.08)',
           border:'1px solid rgba(255,255,255,0.6)',
         }}>
-          <table style={{width:'100%', borderCollapse:'collapse'}}>
+          <div style={{overflowX:'auto', WebkitOverflowScrolling:'touch'}}>
+          <table style={{width:'100%', minWidth:'380px', borderCollapse:'collapse'}}>
             <thead>
               <tr style={{background:'linear-gradient(135deg,#667eea,#764ba2)', color:'white'}}>
                 <th style={{padding:'12px 16px', textAlign:'center', fontSize:'11px', fontWeight:'700', textTransform:'uppercase', letterSpacing:'0.5px', width:'60px'}}>Rank</th>
                 <th style={{padding:'12px 16px', textAlign:'left', fontSize:'11px', fontWeight:'700', textTransform:'uppercase', letterSpacing:'0.5px'}}>Player</th>
-                <th style={{padding:'12px 16px', textAlign:'left', fontSize:'11px', fontWeight:'700', textTransform:'uppercase', letterSpacing:'0.5px'}}>Progress</th>
-                <th style={{padding:'12px 16px', textAlign:'right', fontSize:'11px', fontWeight:'700', textTransform:'uppercase', letterSpacing:'0.5px', width:'100px'}}>Points</th>
+                <th style={{padding:'12px 16px', textAlign:'left', fontSize:'11px', fontWeight:'700', textTransform:'uppercase', letterSpacing:'0.5px', minWidth:'80px'}}>Progress</th>
+                <th style={{padding:'12px 16px', textAlign:'right', fontSize:'11px', fontWeight:'700', textTransform:'uppercase', letterSpacing:'0.5px', width:'80px'}}>Points</th>
               </tr>
             </thead>
             <tbody>
@@ -293,6 +294,7 @@ export default function Standings({ user: currentUser, refreshTrigger }) {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>
