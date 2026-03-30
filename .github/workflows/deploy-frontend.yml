@@ -1,4 +1,4 @@
-name: Deploy to Cloudflare Pages
+name: Deploy Frontend to Cloudflare Pages
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
       - main
     paths:
       - 'frontend/**'
-      - '.github/workflows/deploy.yml'
+      - '.github/workflows/deploy-frontend.yml'
 
 jobs:
   deploy:
