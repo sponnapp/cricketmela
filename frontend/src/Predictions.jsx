@@ -96,33 +96,6 @@ function RadioOption({ label, sublabel, selected, locked, accent = '#2ecc71', on
   )
 }
 
-// ── Points Selector ───────────────────────────────────────────────────────────
-function PointsSelector({ value, onChange, locked, accent = '#2ecc71' }) {
-  return (
-    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
-      <span style={{ fontSize: '11px', fontWeight: '700', color: '#888', alignSelf: 'center', letterSpacing: '0.4px', textTransform: 'uppercase' }}>Points:</span>
-      {[10, 20, 50].map(p => (
-        <button
-          key={p}
-          onClick={() => !locked && onChange(p)}
-          disabled={locked}
-          style={{
-            padding: '6px 16px',
-            background: p === value ? `linear-gradient(135deg,${accent},${accent}cc)` : 'rgba(0,0,0,0.05)',
-            color: p === value ? '#fff' : '#555',
-            borderRadius: '20px', fontWeight: '800', fontSize: '12px',
-            cursor: locked ? 'not-allowed' : 'pointer',
-            border: `1.5px solid ${p === value ? accent : 'rgba(0,0,0,0.08)'}`,
-            boxShadow: p === value ? `0 3px 10px ${accent}55` : 'none',
-            transition: 'all 0.2s',
-            opacity: locked ? 0.5 : 1,
-          }}
-        >{p} pts</button>
-      ))}
-    </div>
-  )
-}
-
 // ── Locked Tag ────────────────────────────────────────────────────────────────
 function LockedTag() {
   return (
@@ -250,8 +223,6 @@ export default function Predictions({ user, refreshTrigger }) {
   const [playerOptionsByMatch, setPlayerOptionsByMatch] = useState({})
   // Per-match, per-tile expand state: { [matchId]: { mom: bool, bowler: bool } }
   const [expandedTiles, setExpandedTiles] = useState({})
-  // Per-prediction points: { [matchId]: { toss: 10, mom: 10, bowler: 10 } }
-  const [predPoints, setPredPoints] = useState({})
   const [oddsData, setOddsData] = useState({})
 
   useEffect(() => { fetchSeasons() }, [refreshTrigger])
@@ -293,16 +264,6 @@ export default function Predictions({ user, refreshTrigger }) {
       const predMap = {}
       r.data.forEach((m, idx) => { if (predResults[idx]?.data) predMap[m.id] = predResults[idx].data })
       setPredictions(predMap)
-
-      const savedPointsMap = {}
-      Object.entries(predMap).forEach(([matchId, p]) => {
-        savedPointsMap[matchId] = {
-          toss: Number(p.toss_points) || 10,
-          mom: Number(p.mom_points) || 10,
-          bowler: Number(p.bowler_points) || 10,
-        }
-      })
-      setPredPoints(savedPointsMap)
 
       const playerResults = await Promise.all(
         r.data.map(async m => {
@@ -358,9 +319,9 @@ export default function Predictions({ user, refreshTrigger }) {
         toss_winner: pred.toss_winner || null,
         man_of_match: pred.man_of_match || null,
         best_bowler: pred.best_bowler || null,
-        toss_points: getPredPts(matchId, 'toss'),
-        mom_points: getPredPts(matchId, 'mom'),
-        bowler_points: getPredPts(matchId, 'bowler'),
+        toss_points: 10,
+        mom_points: 10,
+        bowler_points: 10,
       }, { headers: { 'x-user': user?.username } })
       setMessage('✅ Prediction saved!')
       toast('success', 'Prediction Saved', 'Your prediction and points were updated')
@@ -387,22 +348,6 @@ export default function Predictions({ user, refreshTrigger }) {
 
   function isTileExpanded(matchId, tile) {
     return !!(expandedTiles[matchId]?.[tile])
-  }
-
-  function setPredPts(matchId, tile, val) {
-    setPredPoints(prev => ({ ...prev, [matchId]: { ...(prev[matchId] || {}), [tile]: val } }))
-  }
-
-  function getPredPts(matchId, tile) {
-    const selected = predPoints[matchId]?.[tile]
-    if (selected !== undefined && selected !== null) return Number(selected) || 10
-
-    const saved = predictions[matchId]
-    if (!saved) return 10
-    if (tile === 'toss') return Number(saved.toss_points) || 10
-    if (tile === 'mom') return Number(saved.mom_points) || 10
-    if (tile === 'bowler') return Number(saved.bowler_points) || 10
-    return 10
   }
 
   function parseMatchDateTime(value) {
@@ -450,7 +395,7 @@ export default function Predictions({ user, refreshTrigger }) {
     const mt = parseMatchDateTime(scheduledAt)
     if (!mt || Number.isNaN(mt.getTime())) return false
     // Close predictions 30 minutes before match start (same as team voting)
-    return new Date() < new Date(mt.getTime() - 60 * 60 * 1000)
+    return new Date() < new Date(mt.getTime() - 30 * 60 * 1000)
   }
 
   function getAccuracyScore(pred) {
@@ -707,12 +652,6 @@ export default function Predictions({ user, refreshTrigger }) {
                             onClick={() => updatePrediction(match.id, 'toss_winner', match.away_team)}
                           />
                         </div>
-                        <PointsSelector
-                          value={getPredPts(match.id, 'toss')}
-                          onChange={v => setPredPts(match.id, 'toss', v)}
-                          locked={!isOpen}
-                          accent="#667eea"
-                        />
                         <OddsDisplay odds={oddsData[match.id]?.toss || {}} accent="#667eea" />
                       </div>
                     </GlassCard>
@@ -776,12 +715,6 @@ export default function Predictions({ user, refreshTrigger }) {
                               No squad data available
                             </div>
                           )}
-                          <PointsSelector
-                            value={getPredPts(match.id, 'mom')}
-                            onChange={v => setPredPts(match.id, 'mom', v)}
-                            locked={!isOpen}
-                            accent="#f39c12"
-                          />
                           <OddsDisplay odds={oddsData[match.id]?.mom || {}} accent="#f39c12" />
                         </div>
                       )}
@@ -846,12 +779,6 @@ export default function Predictions({ user, refreshTrigger }) {
                               No squad data available
                             </div>
                           )}
-                          <PointsSelector
-                            value={getPredPts(match.id, 'bowler')}
-                            onChange={v => setPredPts(match.id, 'bowler', v)}
-                            locked={!isOpen}
-                            accent="#e74c3c"
-                          />
                           <OddsDisplay odds={oddsData[match.id]?.bowler || {}} accent="#e74c3c" />
                         </div>
                       )}
