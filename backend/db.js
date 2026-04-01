@@ -74,6 +74,17 @@ db.serialize(() => {
   `);
 
   db.run(`
+    CREATE TABLE IF NOT EXISTS user_seasons (
+      user_id INTEGER NOT NULL,
+      season_id INTEGER NOT NULL,
+      balance REAL DEFAULT 1000,
+      PRIMARY KEY (user_id, season_id),
+      FOREIGN KEY(user_id) REFERENCES users(id),
+      FOREIGN KEY(season_id) REFERENCES seasons(id)
+    )
+  `);
+
+  db.run(`
     CREATE TABLE IF NOT EXISTS matches (
       id INTEGER PRIMARY KEY,
       season_id INTEGER NOT NULL,

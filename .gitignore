@@ -40,6 +40,9 @@ Thumbs.db
 backups/
 *.backup
 
+# Cached player images (fetched at runtime)
+backend/cache/
+
 # Fly.io
 .fly/
 fly.toml.bak
