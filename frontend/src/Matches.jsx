@@ -360,7 +360,7 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
       if (!m.home_team.toLowerCase().includes(q) && !m.away_team.toLowerCase().includes(q)) return false
     }
     if (filterTab === 'open')   return !isVotingDisabled(m)
-    if (filterTab === 'voted')  return !!userVotes[m.id]
+    if (filterTab === 'voted')  return !!userVotes[m.id] && !isVotingDisabled(m)
     if (filterTab === 'closed') return isVotingDisabled(m)
     return true
   })
