@@ -354,16 +354,23 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
     return v.team !== saved.team || String(v.points) !== String(saved.points)
   }).length
 
-  const filteredMatches = matches.filter(m => {
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase()
-      if (!m.home_team.toLowerCase().includes(q) && !m.away_team.toLowerCase().includes(q)) return false
-    }
-    if (filterTab === 'open')   return !isVotingDisabled(m)
-    if (filterTab === 'voted')  return !!userVotes[m.id] && !isVotingDisabled(m)
-    if (filterTab === 'closed') return isVotingDisabled(m)
-    return true
-  })
+  const filteredMatches = (() => {
+    const base = matches.filter(m => {
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase()
+        if (!m.home_team.toLowerCase().includes(q) && !m.away_team.toLowerCase().includes(q)) return false
+      }
+      // Open: voting still open OR voting closed but no winner yet
+      if (filterTab === 'open')   return !m.winner
+      if (filterTab === 'voted')  return !!userVotes[m.id] && !m.winner
+      // Closed: winner declared
+      if (filterTab === 'closed') return !!m.winner
+      return true
+    })
+    // Closed tab: latest match on top (reverse chronological)
+    if (filterTab === 'closed') return [...base].reverse()
+    return base
+  })()
 
   return (
     <div style={{padding: isMobile ? '12px' : '20px', paddingBottom: !loading && pendingCount > 0 ? '80px' : undefined, minHeight: '100vh'}}>
@@ -430,9 +437,9 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
           />
           {[
             { key: 'all',    label: `All (${matches.length})` },
-            { key: 'open',   label: `Open (${matches.filter(m => !isVotingDisabled(m)).length})` },
-            { key: 'voted',  label: `Voted (${Object.keys(userVotes).length})` },
-            { key: 'closed', label: `Closed (${matches.filter(m => isVotingDisabled(m)).length})` },
+            { key: 'open',   label: `Open (${matches.filter(m => !m.winner).length})` },
+            { key: 'voted',  label: `Voted (${matches.filter(m => !!userVotes[m.id] && !m.winner).length})` },
+            { key: 'closed', label: `Closed (${matches.filter(m => !!m.winner).length})` },
           ].map(tab => (
             <button key={tab.key} onClick={() => setFilterTab(tab.key)} style={{
               padding: '7px 13px', borderRadius: '20px',
