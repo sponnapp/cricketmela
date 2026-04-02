@@ -366,7 +366,7 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
   })
 
   return (
-    <div style={{padding: isMobile ? '12px' : '20px', paddingBottom: pendingCount > 0 ? '80px' : undefined, minHeight: '100vh'}}>
+    <div style={{padding: isMobile ? '12px' : '20px', paddingBottom: !loading && pendingCount > 0 ? '80px' : undefined, minHeight: '100vh'}}>
       <div style={{
         display: 'flex', alignItems: isMobile ? 'flex-start' : 'center',
         flexDirection: isMobile ? 'column' : 'row',
@@ -659,7 +659,7 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
       {coinFlip.show && <CoinFlip teamName={coinFlip.team} />}
 
       {/* ── Sticky Save Bar ── */}
-      {user?.role !== 'admin' && pendingCount > 0 && (
+      {user?.role !== 'admin' && !loading && pendingCount > 0 && (
         <div style={{
           position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 200,
           background: 'rgba(10,20,35,0.96)',
