@@ -60,6 +60,7 @@ export default function App() {
   const [user, setUser] = useState(() => {
     try { const u=localStorage.getItem('user'); return u?JSON.parse(u):null } catch{return null}
   })
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   // Read initial page & seasonId from URL so hard-refresh restores position
   const [page, setPage] = useState(() => {
@@ -187,7 +188,7 @@ export default function App() {
     return ()=>document.body.classList.remove('with-cricket-bg')
   },[user])
 
-  function navigate(p){ if(p==='seasons') setSeasonId(null); setPage(p) }
+  function navigate(p){ if(p==='seasons') setSeasonId(null); setPage(p); setMobileNavOpen(false) }
 
   const navTabs=[
     {key:'seasons',     label:'Seasons'      },
@@ -198,6 +199,12 @@ export default function App() {
     {key:'predictions', label:'Predictions'  },
     {key:'profile',     label:'Profile'      },
   ].filter(t=>!t.adminOnly||(user?.role==='admin'||user?.role==='superuser'))
+
+  const activeNavTab = navTabs.find(tab => tab.key === page) || navTabs[0]
+
+  useEffect(() => {
+    setMobileNavOpen(false)
+  }, [page, user])
 
   return (
     <>
@@ -259,7 +266,7 @@ export default function App() {
           <div className="header-top-row" style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'12px',gap:'8px'}}>
 
             {/* Brand */}
-            <div style={{display:'flex',alignItems:'center',gap:'8px',whiteSpace:'nowrap'}}>
+            <div className="header-brand" style={{display:'flex',alignItems:'center',gap:'8px',whiteSpace:'nowrap'}}>
               <span style={{fontSize:'clamp(20px,3.5vw,28px)',lineHeight:1,filter:'drop-shadow(0 0 6px rgba(255,180,0,0.5))'}}>🏏</span>
               <span style={{
                 fontFamily:"'Poppins',sans-serif",
@@ -311,7 +318,7 @@ export default function App() {
               minWidth: 0,
             }}>
               <UserAvatar name={user.display_name||user.username} size={34}/>
-              <div style={{lineHeight:1.3, paddingRight:'4px'}}>
+              <div className="header-user-meta" style={{lineHeight:1.3, paddingRight:'4px'}}>
                 <div style={{
                   fontSize:'13px', fontWeight:'700', color:'#fff',
                   fontFamily:"'Poppins',sans-serif", letterSpacing:'0.2px',
@@ -343,6 +350,7 @@ export default function App() {
               {/* Logout button */}
               <button
                 onClick={()=>{ setUser(null); setPage('seasons'); setSeasonId(null); setAdminTab('season'); localStorage.removeItem(NAV_STATE_KEY); window.history.replaceState({page:'seasons',seasonId:null,adminTab:'season'},'','/'); toast('info','Logged out 👋','See you next match!') }}
+                className="header-logout-btn"
                 style={{
                   background:'linear-gradient(135deg,#c0392b,#e74c3c)',
                   color:'#fff', border:'none', borderRadius:'20px',
@@ -360,35 +368,48 @@ export default function App() {
           </div>
 
           {/* ── Nav tabs ── */}
-          <nav style={{display:'flex', gap:'6px', flexWrap:'wrap'}}>
-            {navTabs.map(tab => {
-              const active = page === tab.key
-              return (
-                <button
-                  className="nav-tab-btn"
-                  key={tab.key}
-                  onClick={()=>navigate(tab.key)}
-                  style={{
-                    flex:1, minWidth:'65px', padding:'8px 6px',
-                    background: active
-                      ? 'linear-gradient(135deg,#2ecc71,#27ae60)'
-                      : 'rgba(255,255,255,0.06)',
-                    color: active ? '#fff' : 'rgba(255,255,255,0.6)',
-                    border: active ? '1px solid rgba(46,204,113,0.6)' : '1px solid rgba(255,255,255,0.08)',
-                    borderRadius:'10px', cursor:'pointer',
-                    fontWeight:'700', fontSize:'12px',
-                    fontFamily:'Inter,sans-serif',
-                    transition:'all 0.2s ease',
-                    boxShadow: active ? '0 4px 14px rgba(46,204,113,0.4)' : 'none',
-                    letterSpacing:'0.3px',
-                  }}
-                  onMouseOver={e=>{ if(!active){ e.currentTarget.style.background='rgba(255,255,255,0.12)'; e.currentTarget.style.color='#fff' }}}
-                  onMouseOut={e=>{ if(!active){ e.currentTarget.style.background='rgba(255,255,255,0.06)'; e.currentTarget.style.color='rgba(255,255,255,0.6)' }}}
-                >
-                  {NAV_ICONS[tab.key]} {tab.label}
-                </button>
-              )
-            })}
+          <nav className={`app-nav${mobileNavOpen ? ' mobile-open' : ''}`}>
+            <button
+              type="button"
+              className="mobile-nav-toggle"
+              onClick={() => setMobileNavOpen(open => !open)}
+              aria-expanded={mobileNavOpen}
+              aria-controls="primary-nav-list"
+            >
+              <span className="mobile-nav-toggle__active">{NAV_ICONS[activeNavTab.key]} {activeNavTab.label}</span>
+              <span className="mobile-nav-toggle__meta">Menu {mobileNavOpen ? '▲' : '▼'}</span>
+            </button>
+
+            <div id="primary-nav-list" className={`nav-tab-list${mobileNavOpen ? ' is-open' : ''}`}>
+              {navTabs.map(tab => {
+                const active = page === tab.key
+                return (
+                  <button
+                    className="nav-tab-btn"
+                    key={tab.key}
+                    onClick={()=>navigate(tab.key)}
+                    style={{
+                      flex:1, minWidth:'65px', padding:'8px 6px',
+                      background: active
+                        ? 'linear-gradient(135deg,#2ecc71,#27ae60)'
+                        : 'rgba(255,255,255,0.06)',
+                      color: active ? '#fff' : 'rgba(255,255,255,0.6)',
+                      border: active ? '1px solid rgba(46,204,113,0.6)' : '1px solid rgba(255,255,255,0.08)',
+                      borderRadius:'10px', cursor:'pointer',
+                      fontWeight:'700', fontSize:'12px',
+                      fontFamily:'Inter,sans-serif',
+                      transition:'all 0.2s ease',
+                      boxShadow: active ? '0 4px 14px rgba(46,204,113,0.4)' : 'none',
+                      letterSpacing:'0.3px',
+                    }}
+                    onMouseOver={e=>{ if(!active){ e.currentTarget.style.background='rgba(255,255,255,0.12)'; e.currentTarget.style.color='#fff' }}}
+                    onMouseOut={e=>{ if(!active){ e.currentTarget.style.background='rgba(255,255,255,0.06)'; e.currentTarget.style.color='rgba(255,255,255,0.6)' }}}
+                  >
+                    {NAV_ICONS[tab.key]} {tab.label}
+                  </button>
+                )
+              })}
+            </div>
           </nav>
         </header>
       )}
