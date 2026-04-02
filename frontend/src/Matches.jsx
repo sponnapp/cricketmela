@@ -6,7 +6,7 @@ import CoinFlip from './CoinFlip'
 const POINTS = [10, 20, 50]
 
 // ── Next Match Vote-Closes Banner ───────────────────────────────────────────
-function NextMatchCountdown({ matches, parseMatchDateTime }) {
+function NextMatchCountdown({ matches, parseMatchDateTime, seasonBalance }) {
   const [state, setState] = useState({ match: null, timeLeft: null })
 
   useEffect(() => {
@@ -46,29 +46,43 @@ function NextMatchCountdown({ matches, parseMatchDateTime }) {
 
   return (
     <div style={{
-      display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px',
+      display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '0',
       background: bgColor,
       border: `1.5px solid ${colour}`,
       borderRadius: '12px',
       padding: '7px 14px',
-      flexShrink: 0,
+      flexShrink: 0, width: '100%',
     }}>
       {urgent && <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.55}}`}</style>}
-      <div style={{ fontSize: '10px', fontWeight: '700', color: colour, textTransform: 'uppercase', letterSpacing: '0.8px', fontFamily: 'Inter, sans-serif' }}>
-        ⏰ Vote closes in
-      </div>
-      <div style={{
-        fontSize: '18px', fontWeight: '800',
-        color: colour,
-        fontFamily: "'Poppins', sans-serif",
-        letterSpacing: '0.5px',
-        animation: urgent ? 'pulse 1s infinite' : 'none',
-        lineHeight: 1.1,
-      }}>
-        {label}
-      </div>
-      <div style={{ fontSize: '10px', color: '#555', fontFamily: 'Inter, sans-serif', fontWeight: '600', whiteSpace: 'nowrap' }}>
-        {match.home_team} vs {match.away_team}
+      {seasonBalance !== null && seasonBalance !== undefined && (
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          paddingRight: '12px', marginRight: '12px',
+          borderRight: `1.5px solid ${colour}50`,
+          flexShrink: 0,
+        }}>
+          <div style={{ fontSize: '9px', fontWeight: '700', color: '#667eea', textTransform: 'uppercase', letterSpacing: '0.6px', fontFamily: 'Inter, sans-serif' }}>Balance</div>
+          <div style={{ fontSize: '16px', fontWeight: '900', color: '#667eea', fontFamily: "'Poppins', sans-serif", lineHeight: 1.1 }}>{Math.round(seasonBalance)}</div>
+          <div style={{ fontSize: '9px', fontWeight: '700', color: '#667eea', fontFamily: 'Inter, sans-serif' }}>pts</div>
+        </div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px', flex: 1 }}>
+        <div style={{ fontSize: '10px', fontWeight: '700', color: colour, textTransform: 'uppercase', letterSpacing: '0.8px', fontFamily: 'Inter, sans-serif' }}>
+          ⏰ Vote closes in
+        </div>
+        <div style={{
+          fontSize: '18px', fontWeight: '800',
+          color: colour,
+          fontFamily: "'Poppins', sans-serif",
+          letterSpacing: '0.5px',
+          animation: urgent ? 'pulse 1s infinite' : 'none',
+          lineHeight: 1.1,
+        }}>
+          {label}
+        </div>
+        <div style={{ fontSize: '10px', color: '#555', fontFamily: 'Inter, sans-serif', fontWeight: '600', whiteSpace: 'nowrap' }}>
+          {match.home_team} vs {match.away_team}
+        </div>
       </div>
     </div>
   )
@@ -92,6 +106,8 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
   }, [])
   const [coinFlip, setCoinFlip] = useState({ show: false, team: '' })
   const [saving, setSaving] = useState(false)
+  const [filterTab, setFilterTab] = useState('all')
+  const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
     fetchMatches()
@@ -338,8 +354,19 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
     return v.team !== saved.team || String(v.points) !== String(saved.points)
   }).length
 
+  const filteredMatches = matches.filter(m => {
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase()
+      if (!m.home_team.toLowerCase().includes(q) && !m.away_team.toLowerCase().includes(q)) return false
+    }
+    if (filterTab === 'open')   return !isVotingDisabled(m)
+    if (filterTab === 'voted')  return !!userVotes[m.id]
+    if (filterTab === 'closed') return isVotingDisabled(m)
+    return true
+  })
+
   return (
-    <div style={{padding: isMobile ? '12px' : '20px', minHeight: '100vh'}}>
+    <div style={{padding: isMobile ? '12px' : '20px', paddingBottom: pendingCount > 0 ? '80px' : undefined, minHeight: '100vh'}}>
       <div style={{
         display: 'flex', alignItems: isMobile ? 'flex-start' : 'center',
         flexDirection: isMobile ? 'column' : 'row',
@@ -366,23 +393,13 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
         <div style={{
           marginLeft: isMobile ? '0' : 'auto',
           width: isMobile ? '100%' : 'auto',
-          display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0,
-          justifyContent: isMobile ? 'space-between' : 'flex-end',
+          flexShrink: 0,
         }}>
-          <NextMatchCountdown matches={matches} parseMatchDateTime={parseMatchDateTime} />
-          {user?.role !== 'admin' && seasonBalance !== null && (
-          <div style={{
-            background: 'linear-gradient(135deg,#667eea,#764ba2)',
-            color: 'white',
-            borderRadius: '10px',
-            padding: '8px 14px',
-            textAlign: 'center',
-            minWidth: '90px',
-          }}>
-            <div style={{fontSize: '10px', fontWeight: '600', opacity: 0.85, textTransform: 'uppercase', letterSpacing: '0.5px'}}>Season Balance</div>
-            <div style={{fontSize: '16px', fontWeight: '800', fontFamily:"'Poppins',sans-serif"}}>{Math.round(seasonBalance)} pts</div>
-          </div>
-          )}
+          <NextMatchCountdown
+            matches={matches}
+            parseMatchDateTime={parseMatchDateTime}
+            seasonBalance={user?.role !== 'admin' && seasonBalance !== null ? seasonBalance : undefined}
+          />
         </div>
       </div>
 
@@ -395,105 +412,88 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
         <p style={{fontFamily: 'Inter, sans-serif', fontSize: '14px'}}>No matches found</p>
       ) : (
         <>
-        {user?.role !== 'admin' && (
-          <div style={{display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', marginBottom: '12px', flexWrap: 'wrap'}}>
-            {pendingCount > 0 && (
-              <span style={{fontSize: '13px', color: '#f39c12', fontWeight: '600', fontFamily: 'Inter, sans-serif'}}>
-                ⚡ {pendingCount} unsaved pick{pendingCount > 1 ? 's' : ''}
-              </span>
-            )}
-            <button
-              onClick={submitAllVotes}
-              disabled={saving || pendingCount === 0}
-              style={{
-                padding: isMobile ? '14px 24px' : '12px 28px',
-                width: isMobile ? '100%' : 'auto',
-                background: pendingCount > 0
-                  ? 'linear-gradient(135deg, #2ecc71 0%, #27ae60 100%)'
-                  : 'rgba(255,255,255,0.25)',
-                color: pendingCount > 0 ? 'white' : 'rgba(255,255,255,0.4)',
-                border: pendingCount > 0 ? 'none' : '1px solid rgba(255,255,255,0.2)',
-                borderRadius: '12px',
-                cursor: pendingCount > 0 && !saving ? 'pointer' : 'not-allowed',
-                fontWeight: '700',
-                fontSize: '14px',
-                fontFamily: 'Inter, sans-serif',
-                transition: 'all 0.3s ease',
-                boxShadow: pendingCount > 0 ? '0 4px 15px rgba(46,204,113,0.4)' : 'none',
-              }}
-            >
-              {saving ? '⏳ Saving…' : pendingCount > 0 ? `💾 Save All Picks (${pendingCount})` : '✅ All Picks Saved'}
-            </button>
-          </div>
-        )}
+        {/* ── Filter bar ── */}
+        <div style={{display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap', alignItems: 'center'}}>
+          <input
+            type="text"
+            placeholder="🔍 Search teams…"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            style={{
+              flex: '1 1 150px', minWidth: '130px',
+              padding: '8px 12px', borderRadius: '20px',
+              border: '1px solid rgba(255,255,255,0.2)',
+              background: 'rgba(255,255,255,0.12)',
+              color: '#fff', fontSize: '13px', fontFamily: 'Inter,sans-serif',
+              outline: 'none',
+            }}
+          />
+          {[
+            { key: 'all',    label: `All (${matches.length})` },
+            { key: 'open',   label: `Open (${matches.filter(m => !isVotingDisabled(m)).length})` },
+            { key: 'voted',  label: `Voted (${Object.keys(userVotes).length})` },
+            { key: 'closed', label: `Closed (${matches.filter(m => isVotingDisabled(m)).length})` },
+          ].map(tab => (
+            <button key={tab.key} onClick={() => setFilterTab(tab.key)} style={{
+              padding: '7px 13px', borderRadius: '20px',
+              border: filterTab === tab.key ? 'none' : '1px solid rgba(255,255,255,0.18)',
+              background: filterTab === tab.key ? 'linear-gradient(135deg,#667eea,#764ba2)' : 'rgba(255,255,255,0.08)',
+              color: filterTab === tab.key ? '#fff' : 'rgba(255,255,255,0.65)',
+              fontSize: '12px', fontWeight: '700', fontFamily: 'Inter,sans-serif',
+              cursor: 'pointer', whiteSpace: 'nowrap',
+              boxShadow: filterTab === tab.key ? '0 3px 10px rgba(102,126,234,0.4)' : 'none',
+              transition: 'all 0.2s',
+            }}>{tab.label}</button>
+          ))}
+        </div>
 
-        {isMobile ? (
-          /* ── Mobile card list ─────────────────────────────────── */
+        {filteredMatches.length === 0 ? (
+          <div style={{textAlign: 'center', padding: '32px', color: 'rgba(255,255,255,0.5)', fontSize: '14px', fontFamily: 'Inter,sans-serif'}}>
+            No matches match your filter.
+          </div>
+        ) : isMobile ? (
+          /* ── Mobile cards ── */
           <div>
-            {matches.map((m, idx) => {
+            {filteredMatches.map((m, idx) => {
               const votingDisabled = isVotingDisabled(m)
               const disabledReason = getVotingDisabledReason(m)
               const isPending = !votingDisabled && !!votes[m.id]?.team && !!votes[m.id]?.points &&
                 (!userVotes[m.id] || votes[m.id].team !== userVotes[m.id].team || String(votes[m.id].points) !== String(userVotes[m.id].points))
               const borderColor = isPending ? '#f39c12' : m.winner ? '#38a169' : votingDisabled ? '#a0aec0' : '#667eea'
+              const globalIdx = matches.indexOf(m)
               return (
                 <div key={m.id} style={{
                   background: isPending ? '#fffdf0' : 'rgba(255,255,255,0.93)',
-                  backdropFilter: 'blur(10px)',
-                  WebkitBackdropFilter: 'blur(10px)',
+                  backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
                   borderRadius: '14px',
                   marginBottom: '12px',
                   borderLeft: `4px solid ${borderColor}`,
-                  boxShadow: '0 2px 12px rgba(0,0,0,0.09)',
-                  overflow: 'hidden',
+                  boxShadow: '0 2px 12px rgba(0,0,0,0.09)', overflow: 'hidden',
                 }}>
-                  {/* Card header */}
-                  <div style={{
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    padding: '10px 14px 8px',
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                  }}>
-                    <span style={{fontSize: '11px', fontWeight: '700', color: 'rgba(255,255,255,0.8)', letterSpacing: '0.5px'}}>
-                      MATCH {idx + 1}
-                    </span>
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px 8px', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'}}>
+                    <span style={{fontSize: '11px', fontWeight: '700', color: 'rgba(255,255,255,0.8)', letterSpacing: '0.5px'}}>MATCH {globalIdx + 1}</span>
                     {m.winner ? (
-                      <span style={{fontSize: '11px', color: '#68d391', fontWeight: '700', background: 'rgba(255,255,255,0.15)', padding: '2px 8px', borderRadius: '10px'}}>
-                        ✅ {m.winner} won
-                      </span>
+                      <span style={{fontSize: '11px', color: '#68d391', fontWeight: '700', background: 'rgba(255,255,255,0.15)', padding: '2px 8px', borderRadius: '10px'}}>✅ {m.winner} won</span>
                     ) : isVotingClosed(m.scheduled_at) ? (
-                      <span style={{fontSize: '11px', color: '#fc8181', fontWeight: '700', background: 'rgba(255,255,255,0.15)', padding: '2px 8px', borderRadius: '10px'}}>
-                        🔒 Voting Closed
-                      </span>
+                      <span style={{fontSize: '11px', color: '#fc8181', fontWeight: '700', background: 'rgba(255,255,255,0.15)', padding: '2px 8px', borderRadius: '10px'}}>🔒 Voting Closed</span>
                     ) : (
-                      <span style={{fontSize: '11px', color: '#68d391', fontWeight: '700', background: 'rgba(255,255,255,0.15)', padding: '2px 8px', borderRadius: '10px'}}>
-                        🟢 Open
-                      </span>
+                      <span style={{fontSize: '11px', color: '#68d391', fontWeight: '700', background: 'rgba(255,255,255,0.15)', padding: '2px 8px', borderRadius: '10px'}}>🟢 Open</span>
                     )}
                   </div>
-
                   <div style={{padding: '12px 14px'}}>
-                    {/* Teams */}
                     <div style={{textAlign: 'center', marginBottom: '8px'}}>
                       <span style={{fontSize: '14px', fontWeight: '800', color: '#2d3748', fontFamily: "'Poppins',sans-serif"}}>{m.home_team}</span>
                       <span style={{fontSize: '12px', color: '#a0aec0', margin: '0 8px', fontWeight: '600'}}>vs</span>
                       <span style={{fontSize: '14px', fontWeight: '800', color: '#2d3748', fontFamily: "'Poppins',sans-serif"}}>{m.away_team}</span>
                     </div>
-
-                    {/* Date / Time / Venue */}
                     <div style={{fontSize: '11px', color: '#718096', textAlign: 'center', marginBottom: '12px', lineHeight: 1.6}}>
                       📅 {formatMatchDatePart(m.scheduled_at)} &nbsp;·&nbsp; ⏱ {formatMatchTimePart(m.scheduled_at)}
                       {m.venue && <div>📍 {m.venue}</div>}
                     </div>
-
-                    {/* Vote section */}
                     {votingDisabled ? (
                       userVotes[m.id] ? (
                         <div>
-                          <div style={{
-                            textAlign: 'center', fontSize: '12px', color: '#4a5568',
-                            background: '#f7fafc', borderRadius: '10px', padding: '8px',
-                            marginBottom: m.vote_totals ? '8px' : '0',
-                          }}>
+                          <div style={{textAlign: 'center', fontSize: '12px', color: '#4a5568', background: '#f7fafc', borderRadius: '10px', padding: '8px', marginBottom: m.vote_totals ? '8px' : '0'}}>
                             <span style={{fontWeight: '600'}}>Your pick: </span>
                             <span style={{color: '#667eea', fontWeight: '700'}}>{userVotes[m.id].team}</span>
                             <span style={{color: '#a0aec0'}}> · {userVotes[m.id].points} pts</span>
@@ -520,21 +520,12 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                       )
                     ) : (
                       <div>
-                        {/* Pill-style team buttons */}
                         <div style={{display: 'flex', gap: '8px', marginBottom: '10px'}}>
                           {[m.home_team, m.away_team].map(team => {
                             const selected = votes[m.id]?.team === team
                             return (
-                              <label key={team} style={{
-                                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                padding: '10px 6px', borderRadius: '10px', cursor: 'pointer',
-                                border: `2px solid ${selected ? '#667eea' : '#e2e8f0'}`,
-                                background: selected ? 'rgba(102,126,234,0.12)' : 'white',
-                                fontSize: '12px', fontWeight: '700', color: selected ? '#667eea' : '#4a5568',
-                                textAlign: 'center', transition: 'all 0.15s ease',
-                              }}>
-                                <input type="radio" name={`vote-${m.id}`} value={team}
-                                  checked={selected}
+                              <label key={team} style={{flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '10px 6px', borderRadius: '10px', cursor: 'pointer', border: `2px solid ${selected ? '#667eea' : '#e2e8f0'}`, background: selected ? 'rgba(102,126,234,0.12)' : 'white', fontSize: '12px', fontWeight: '700', color: selected ? '#667eea' : '#4a5568', textAlign: 'center', transition: 'all 0.15s ease'}}>
+                                <input type="radio" name={`vote-${m.id}`} value={team} checked={selected}
                                   onChange={e => { dirtyVotes.current.add(m.id); setVotes({...votes, [m.id]: {...(votes[m.id] || {}), team: e.target.value}}) }}
                                   style={{display: 'none'}} />
                                 {team}
@@ -542,15 +533,9 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                             )
                           })}
                         </div>
-                        {/* Points */}
-                        <select
-                          value={votes[m.id]?.points || ''}
+                        <select value={votes[m.id]?.points || ''}
                           onChange={e => { dirtyVotes.current.add(m.id); setVotes({...votes, [m.id]: {...(votes[m.id] || {}), points: e.target.value}}) }}
-                          style={{
-                            width: '100%', padding: '10px 12px', borderRadius: '10px',
-                            border: '2px solid #e2e8f0', fontSize: '13px', fontWeight: '600',
-                            fontFamily: 'Inter, sans-serif', backgroundColor: 'white', cursor: 'pointer',
-                          }}
+                          style={{width: '100%', padding: '10px 12px', borderRadius: '10px', border: '2px solid #e2e8f0', fontSize: '13px', fontWeight: '600', fontFamily: 'Inter, sans-serif', backgroundColor: 'white', cursor: 'pointer'}}
                         >
                           <option value="">Select points</option>
                           {POINTS.map(p => <option key={p} value={p}>{p} pts</option>)}
@@ -563,239 +548,148 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
             })}
           </div>
         ) : (
-          /* ── Desktop table ────────────────────────────────────── */
-          <div style={{
-            overflowX: 'auto',
-            background: 'rgba(255,255,255,0.72)',
-            backdropFilter: 'blur(12px)',
-            WebkitBackdropFilter: 'blur(12px)',
-            borderRadius: '16px',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.10)',
-            padding: '0',
-            border: '1px solid rgba(255,255,255,0.55)',
-          }}>
-          <table style={{
-            width: '100%',
-            borderCollapse: 'collapse',
-            fontFamily: 'Inter, sans-serif'
-          }}>
-            <thead>
-              <tr style={{
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                color: 'white'
-              }}>
-                <th style={{padding: '14px 12px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>S.No</th>
-                <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Team 1</th>
-                <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Team 2</th>
-                <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Venue</th>
-                <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Date</th>
-                <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Time</th>
-                <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Vote</th>
-                <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Points</th>
-                <th style={{padding: '14px 12px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>T1<br/>Odds</th>
-                <th style={{padding: '14px 12px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>T2<br/>Odds</th>
-                <th style={{padding: '14px 12px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Winner</th>
-              </tr>
-            </thead>
-            <tbody>
-              {matches.map((m, idx) => {
-                const votingDisabled = isVotingDisabled(m)
-                const disabledReason = getVotingDisabledReason(m)
-                const userVote = userVotes[m.id]
-
-                const isPending = !votingDisabled && !!votes[m.id]?.team && !!votes[m.id]?.points &&
-                  (!userVotes[m.id] || votes[m.id].team !== userVotes[m.id].team || String(votes[m.id].points) !== String(userVotes[m.id].points))
-                return (
-                  <tr key={m.id} style={{
-                    borderBottom: '1px solid #f0f0f0',
-                    borderLeft: isPending ? '3px solid #f39c12' : '3px solid transparent',
-                    backgroundColor: isPending ? (idx % 2 === 0 ? '#fffdf0' : '#fffef5') : (idx % 2 === 0 ? '#fafbfc' : 'white'),
-                    transition: 'all 0.2s ease'
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f7fa'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = isPending ? (idx % 2 === 0 ? '#fffdf0' : '#fffef5') : (idx % 2 === 0 ? '#fafbfc' : 'white')}
-                  >
-                    <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', textAlign: 'center', fontSize: '13px', fontWeight: '600', color: '#667eea'}}>{idx + 1}</td>
-                    <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '13px', fontWeight: '600', color: '#2d3748'}}>{m.home_team}</td>
-                    <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '13px', fontWeight: '600', color: '#2d3748'}}>{m.away_team}</td>
-                    <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#718096'}}>{m.venue || 'N/A'}</td>
-                    <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>
-                      <div>{formatMatchDatePart(m.scheduled_at)}</div>
-                      {!m.winner && isVotingClosed(m.scheduled_at) && (
-                        <div style={{marginTop:'4px',fontSize:'11px',color:'#e74c3c',fontWeight:'700'}}>🔒 Voting Closed</div>
-                      )}
-                    </td>
-                    <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>
-                      {formatMatchTimePart(m.scheduled_at)}
-                    </td>
-                    <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0'}}>
-                      {votingDisabled ? (
-                        userVotes[m.id] ? (
-                          <div style={{fontSize: '12px', color: '#4a5568'}}>
-                            <div style={{fontWeight: '600', marginBottom: '2px'}}>{userVotes[m.id].team}</div>
-                            <div style={{color: '#a0aec0', fontSize: '11px'}}>{userVotes[m.id].points} pts</div>
-                          </div>
+          /* ── Desktop table ── */
+          <div style={{overflowX: 'auto', background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', boxShadow: '0 4px 24px rgba(0,0,0,0.10)', border: '1px solid rgba(255,255,255,0.55)'}}>
+            <table style={{width: '100%', borderCollapse: 'collapse', fontFamily: 'Inter, sans-serif'}}>
+              <thead>
+                <tr style={{background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white'}}>
+                  <th style={{padding: '14px 12px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>S.No</th>
+                  <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Team 1</th>
+                  <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Team 2</th>
+                  <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Venue</th>
+                  <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Date</th>
+                  <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Time</th>
+                  <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Vote</th>
+                  <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Points</th>
+                  <th style={{padding: '14px 12px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>T1<br/>Odds</th>
+                  <th style={{padding: '14px 12px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>T2<br/>Odds</th>
+                  <th style={{padding: '14px 12px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Winner</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredMatches.map((m, idx) => {
+                  const votingDisabled = isVotingDisabled(m)
+                  const disabledReason = getVotingDisabledReason(m)
+                  const globalIdx = matches.indexOf(m)
+                  const isPending = !votingDisabled && !!votes[m.id]?.team && !!votes[m.id]?.points &&
+                    (!userVotes[m.id] || votes[m.id].team !== userVotes[m.id].team || String(votes[m.id].points) !== String(userVotes[m.id].points))
+                  return (
+                    <tr key={m.id} style={{borderBottom: '1px solid #f0f0f0', borderLeft: isPending ? '3px solid #f39c12' : '3px solid transparent', backgroundColor: isPending ? (idx % 2 === 0 ? '#fffdf0' : '#fffef5') : (idx % 2 === 0 ? '#fafbfc' : 'white'), transition: 'all 0.2s ease'}}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f7fa'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = isPending ? (idx % 2 === 0 ? '#fffdf0' : '#fffef5') : (idx % 2 === 0 ? '#fafbfc' : 'white')}
+                    >
+                      <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', textAlign: 'center', fontSize: '13px', fontWeight: '600', color: '#667eea'}}>{globalIdx + 1}</td>
+                      <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '13px', fontWeight: '600', color: '#2d3748'}}>{m.home_team}</td>
+                      <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '13px', fontWeight: '600', color: '#2d3748'}}>{m.away_team}</td>
+                      <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#718096'}}>{m.venue || 'N/A'}</td>
+                      <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>
+                        <div>{formatMatchDatePart(m.scheduled_at)}</div>
+                        {!m.winner && isVotingClosed(m.scheduled_at) && (
+                          <div style={{marginTop:'4px',fontSize:'11px',color:'#e74c3c',fontWeight:'700'}}>🔒 Voting Closed</div>
+                        )}
+                      </td>
+                      <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{formatMatchTimePart(m.scheduled_at)}</td>
+                      <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0'}}>
+                        {votingDisabled ? (
+                          userVotes[m.id] ? (
+                            <div style={{fontSize: '12px', color: '#4a5568'}}>
+                              <div style={{fontWeight: '600', marginBottom: '2px'}}>{userVotes[m.id].team}</div>
+                              <div style={{color: '#a0aec0', fontSize: '11px'}}>{userVotes[m.id].points} pts</div>
+                            </div>
+                          ) : (
+                            <span style={{color: '#e53e3e', fontWeight: '600', fontSize: '11px', backgroundColor: '#fff5f5', padding: '4px 8px', borderRadius: '6px', display: 'inline-block'}}>{disabledReason}</span>
+                          )
                         ) : (
-                          <span style={{
-                            color: '#e53e3e',
-                            fontWeight: '600',
-                            fontSize: '11px',
-                            backgroundColor: '#fff5f5',
-                            padding: '4px 8px',
-                            borderRadius: '6px',
-                            display: 'inline-block'
-                          }}>{disabledReason}</span>
-                        )
-                      ) : (
-                        <div style={{display: 'flex', flexDirection: 'column', gap: '6px'}}>
-                          <label style={{display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px'}}>
-                            <input
-                              type="radio"
-                              name={`vote-${m.id}`}
-                              value={m.home_team}
-                              checked={votes[m.id]?.team === m.home_team}
-                              onChange={e => { dirtyVotes.current.add(m.id); setVotes({...votes, [m.id]: {...(votes[m.id] || {}), team: e.target.value}}) }}
-                              disabled={votingDisabled}
-                              style={{accentColor: '#667eea'}}
-                            />
-                            <span style={{fontWeight: '500'}}>{m.home_team}</span>
-                          </label>
-                          <label style={{display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px'}}>
-                            <input
-                              type="radio"
-                              name={`vote-${m.id}`}
-                              value={m.away_team}
-                              checked={votes[m.id]?.team === m.away_team}
-                              onChange={e => { dirtyVotes.current.add(m.id); setVotes({...votes, [m.id]: {...(votes[m.id] || {}), team: e.target.value}}) }}
-                              disabled={votingDisabled}
-                              style={{accentColor: '#667eea'}}
-                            />
-                            <span style={{fontWeight: '500'}}>{m.away_team}</span>
-                          </label>
-                        </div>
-                      )}
-                    </td>
-                    <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0'}}>
-                      {votingDisabled ? (
-                        <span style={{color: '#a0aec0', fontSize: '12px'}}>-</span>
-                      ) : (
-                        <select
-                          value={votes[m.id]?.points || ''}
-                          onChange={e => { dirtyVotes.current.add(m.id); setVotes({...votes, [m.id]: {...(votes[m.id] || {}), points: e.target.value}}) }}
-                          style={{
-                            padding: '6px 8px',
-                            width: '100%',
-                            minWidth: '70px',
-                            borderRadius: '8px',
-                            border: '1px solid #e2e8f0',
-                            fontSize: '12px',
-                            fontWeight: '500',
-                            fontFamily: 'Inter, sans-serif',
-                            backgroundColor: 'white',
-                            cursor: 'pointer'
-                          }}
-                          disabled={votingDisabled}
-                        >
-                          <option value="">Select</option>
-                          {POINTS.map(p => <option key={p} value={p}>{p}</option>)}
-                        </select>
-                      )}
-                    </td>
-                    <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', textAlign: 'center'}}>
-                      {votingDisabled ? (
-                        <span style={{
-                          fontWeight: '700',
-                          fontSize: '15px',
-                          color: '#667eea',
-                          backgroundColor: '#edf2f7',
-                          padding: '4px 12px',
-                          borderRadius: '8px',
-                          display: 'inline-block'
-                        }}>
-                          {m.vote_totals && m.vote_totals[m.home_team] ? m.vote_totals[m.home_team] : 0}
-                        </span>
-                      ) : (
-                        <span style={{color: '#a0aec0', fontSize: '12px'}}>-</span>
-                      )}
-                    </td>
-                    <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', textAlign: 'center'}}>
-                      {votingDisabled ? (
-                        <span style={{
-                          fontWeight: '700',
-                          fontSize: '15px',
-                          color: '#667eea',
-                          backgroundColor: '#edf2f7',
-                          padding: '4px 12px',
-                          borderRadius: '8px',
-                          display: 'inline-block'
-                        }}>
-                          {m.vote_totals && m.vote_totals[m.away_team] ? m.vote_totals[m.away_team] : 0}
-                        </span>
-                      ) : (
-                        <span style={{color: '#a0aec0', fontSize: '12px'}}>-</span>
-                      )}
-                    </td>
-                    <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', textAlign: 'center'}}>
-                      {m.winner ? (
-                        <span style={{
-                          color: '#38a169',
-                          fontWeight: '700',
-                          backgroundColor: '#f0fff4',
-                          padding: '6px 12px',
-                          borderRadius: '8px',
-                          fontSize: '12px',
-                          display: 'inline-block',
-                          border: '1px solid #c6f6d5'
-                        }}>
-                          {m.winner}
-                        </span>
-                      ) : (
-                        <span style={{color: '#a0aec0', fontSize: '12px', fontWeight: '600'}}>TBD</span>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-        )} {/* end desktop/mobile ternary */}
-
-        {user?.role !== 'admin' && (
-          <div style={{display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', marginTop: '12px', flexWrap: 'wrap'}}>
-            {pendingCount > 0 && (
-              <span style={{fontSize: '13px', color: '#f39c12', fontWeight: '600', fontFamily: 'Inter, sans-serif'}}>
-                ⚡ {pendingCount} unsaved pick{pendingCount > 1 ? 's' : ''}
-              </span>
-            )}
-            <button
-              onClick={submitAllVotes}
-              disabled={saving || pendingCount === 0}
-              style={{
-                padding: isMobile ? '14px 24px' : '12px 28px',
-                width: isMobile ? '100%' : 'auto',
-                background: pendingCount > 0
-                  ? 'linear-gradient(135deg, #2ecc71 0%, #27ae60 100%)'
-                  : 'rgba(255,255,255,0.25)',
-                color: pendingCount > 0 ? 'white' : 'rgba(255,255,255,0.4)',
-                border: pendingCount > 0 ? 'none' : '1px solid rgba(255,255,255,0.2)',
-                borderRadius: '12px',
-                cursor: pendingCount > 0 && !saving ? 'pointer' : 'not-allowed',
-                fontWeight: '700',
-                fontSize: '14px',
-                fontFamily: 'Inter, sans-serif',
-                transition: 'all 0.3s ease',
-                boxShadow: pendingCount > 0 ? '0 4px 15px rgba(46,204,113,0.4)' : 'none',
-              }}
-            >
-              {saving ? '⏳ Saving…' : pendingCount > 0 ? `💾 Save All Picks (${pendingCount})` : '✅ All Picks Saved'}
-            </button>
+                          <div style={{display: 'flex', flexDirection: 'column', gap: '6px'}}>
+                            <label style={{display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px'}}>
+                              <input type="radio" name={`vote-${m.id}`} value={m.home_team} checked={votes[m.id]?.team === m.home_team}
+                                onChange={e => { dirtyVotes.current.add(m.id); setVotes({...votes, [m.id]: {...(votes[m.id] || {}), team: e.target.value}}) }}
+                                disabled={votingDisabled} style={{accentColor: '#667eea'}} />
+                              <span style={{fontWeight: '500'}}>{m.home_team}</span>
+                            </label>
+                            <label style={{display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px'}}>
+                              <input type="radio" name={`vote-${m.id}`} value={m.away_team} checked={votes[m.id]?.team === m.away_team}
+                                onChange={e => { dirtyVotes.current.add(m.id); setVotes({...votes, [m.id]: {...(votes[m.id] || {}), team: e.target.value}}) }}
+                                disabled={votingDisabled} style={{accentColor: '#667eea'}} />
+                              <span style={{fontWeight: '500'}}>{m.away_team}</span>
+                            </label>
+                          </div>
+                        )}
+                      </td>
+                      <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0'}}>
+                        {votingDisabled ? (
+                          <span style={{color: '#a0aec0', fontSize: '12px'}}>-</span>
+                        ) : (
+                          <select value={votes[m.id]?.points || ''}
+                            onChange={e => { dirtyVotes.current.add(m.id); setVotes({...votes, [m.id]: {...(votes[m.id] || {}), points: e.target.value}}) }}
+                            style={{padding: '6px 8px', width: '100%', minWidth: '70px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px', fontWeight: '500', fontFamily: 'Inter, sans-serif', backgroundColor: 'white', cursor: 'pointer'}}
+                            disabled={votingDisabled}>
+                            <option value="">Select</option>
+                            {POINTS.map(p => <option key={p} value={p}>{p}</option>)}
+                          </select>
+                        )}
+                      </td>
+                      <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', textAlign: 'center'}}>
+                        {votingDisabled ? (
+                          <span style={{fontWeight: '700', fontSize: '15px', color: '#667eea', backgroundColor: '#edf2f7', padding: '4px 12px', borderRadius: '8px', display: 'inline-block'}}>{m.vote_totals && m.vote_totals[m.home_team] ? m.vote_totals[m.home_team] : 0}</span>
+                        ) : <span style={{color: '#a0aec0', fontSize: '12px'}}>-</span>}
+                      </td>
+                      <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', textAlign: 'center'}}>
+                        {votingDisabled ? (
+                          <span style={{fontWeight: '700', fontSize: '15px', color: '#667eea', backgroundColor: '#edf2f7', padding: '4px 12px', borderRadius: '8px', display: 'inline-block'}}>{m.vote_totals && m.vote_totals[m.away_team] ? m.vote_totals[m.away_team] : 0}</span>
+                        ) : <span style={{color: '#a0aec0', fontSize: '12px'}}>-</span>}
+                      </td>
+                      <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', textAlign: 'center'}}>
+                        {m.winner ? (
+                          <span style={{color: '#38a169', fontWeight: '700', backgroundColor: '#f0fff4', padding: '6px 12px', borderRadius: '8px', fontSize: '12px', display: 'inline-block', border: '1px solid #c6f6d5'}}>{m.winner}</span>
+                        ) : (
+                          <span style={{color: '#a0aec0', fontSize: '12px', fontWeight: '600'}}>TBD</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         )}
         </>
       )}
-      
+
       {coinFlip.show && <CoinFlip teamName={coinFlip.team} />}
+
+      {/* ── Sticky Save Bar ── */}
+      {user?.role !== 'admin' && pendingCount > 0 && (
+        <div style={{
+          position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 200,
+          background: 'rgba(10,20,35,0.96)',
+          backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)',
+          borderTop: '1px solid rgba(46,204,113,0.35)',
+          boxShadow: '0 -4px 24px rgba(0,0,0,0.32)',
+          padding: '12px 24px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', flexWrap: 'wrap',
+        }}>
+          <span style={{fontSize: '13px', color: '#f39c12', fontWeight: '700', fontFamily: 'Inter,sans-serif'}}>
+            ⚡ {pendingCount} unsaved pick{pendingCount > 1 ? 's' : ''}
+          </span>
+          <button
+            onClick={submitAllVotes}
+            disabled={saving}
+            style={{
+              padding: '11px 28px',
+              background: saving ? 'rgba(46,204,113,0.5)' : 'linear-gradient(135deg,#2ecc71,#27ae60)',
+              color: '#fff', border: 'none', borderRadius: '12px',
+              cursor: saving ? 'not-allowed' : 'pointer',
+              fontWeight: '800', fontSize: '14px', fontFamily: 'Inter,sans-serif',
+              boxShadow: '0 4px 16px rgba(46,204,113,0.45)',
+              transition: 'all 0.2s',
+            }}
+          >
+            {saving ? '⏳ Saving…' : `💾 Save All Picks (${pendingCount})`}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
+
