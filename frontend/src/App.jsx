@@ -196,7 +196,7 @@ export default function App() {
     {key:'history',     label:'Vote History' },
     {key:'analytics',   label:'Analytics'    },
     {key:'standings',   label:'Standings'    },
-    {key:'predictions', label:'Predictions'  },
+    {key:'predictions', label:'Predictions',  adminOnly:true},
     {key:'profile',     label:'Profile'      },
   ].filter(t=>!t.adminOnly||(user?.role==='admin'||user?.role==='superuser'))
 
