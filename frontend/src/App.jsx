@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
+import axios from 'axios'
 import Login from './Login'
 import Seasons from './Seasons'
 import Matches from './Matches'
@@ -86,6 +87,15 @@ export default function App() {
 
   const [toasts, setToasts] = useState([])
   const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const [headerBalance, setHeaderBalance] = useState(null)
+
+  // Fetch overall balance for header chip
+  useEffect(() => {
+    if (!user || user.role === 'admin') { setHeaderBalance(null); return }
+    axios.get('/api/users/my-total-balance', { headers: { 'x-user': user.username } })
+      .then(r => setHeaderBalance(r.data?.balance ?? null))
+      .catch(() => setHeaderBalance(null))
+  }, [user, refreshTrigger])
 
   // Auto-refresh callback triggered every 30 seconds
   const handleAutoRefresh = useCallback(() => {
@@ -322,11 +332,10 @@ export default function App() {
                 <div style={{
                   fontSize:'13px', fontWeight:'700', color:'#fff',
                   fontFamily:"'Poppins',sans-serif", letterSpacing:'0.2px',
-                  maxWidth:'100px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
                 }}>
                   {user.display_name||user.username}
                 </div>
-                <div style={{fontSize:'11px', color:'rgba(255,215,0,0.85)', fontWeight:'600'}}>
+                <div style={{display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap', marginTop:'2px'}}>
                   {user.role==='admin' ? (
                     <span style={{
                       fontSize:'10px', fontWeight:'700',
@@ -343,6 +352,15 @@ export default function App() {
                       border:'1px solid rgba(46,204,113,0.3)',
                       textTransform:'uppercase', letterSpacing:'0.5px',
                     }}>{user.role}</span>
+                  )}
+                  {headerBalance !== null && (
+                    <span style={{
+                      fontSize:'10px', fontWeight:'700',
+                      background:'rgba(102,126,234,0.25)', color:'#a78bfa',
+                      padding:'1px 6px', borderRadius:'8px',
+                      border:'1px solid rgba(102,126,234,0.35)',
+                      letterSpacing:'0.3px',
+                    }}>💰 {Math.round(headerBalance)} pts</span>
                   )}
                 </div>
               </div>
