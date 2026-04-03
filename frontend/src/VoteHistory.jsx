@@ -300,72 +300,86 @@ export default function VoteHistory({ user, refreshTrigger }) {
           {selectedSeason === 'all' ? 'No votes yet.' : 'No votes for this season yet.'}
         </p>
       ) : (
-        <div style={{overflowX: 'auto', background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '12px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
-          <table style={{width: '100%', borderCollapse: 'collapse'}}>
-            <thead>
-              <tr style={{background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white'}}>
-                {user?.role === 'admin' && selectedUser === 'all' && (
-                  <th style={{padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>User</th>
-                )}
-                {selectedSeason === 'all' && (
-                  <th style={{padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Season</th>
-                )}
-                <th style={{padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Match</th>
-                <th style={{padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Date/Time</th>
-                <th style={{padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Your Vote</th>
-                <th style={{padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Points Voted</th>
-                <th style={{padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Winner</th>
-                <th style={{padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Result</th>
-                <th style={{padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Total Payout</th>
-                <th style={{padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Net</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredVotes.map((v, idx) => (
-                <tr key={v.id} style={{borderBottom: '1px solid #f0f0f0', backgroundColor: idx % 2 === 0 ? '#fafbfc' : 'white'}}>
-                  {user?.role === 'admin' && selectedUser === 'all' && (
-                    <td style={{padding: '14px 12px', fontSize: '13px', fontWeight: '600', color: '#667eea'}}>
-                      {v.display_name || v.username}
-                    </td>
-                  )}
-                  {selectedSeason === 'all' && (
-                    <td style={{padding: '14px 12px', fontSize: '12px', color: '#555'}}>
+        <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+          {filteredVotes.map(v => {
+            const isWon = v.winner && v.team === v.winner
+            const isLost = v.winner && v.team !== v.winner
+            const isPending = !v.winner
+            const netVal = v.net_points !== null && v.net_points !== undefined ? Math.round(v.net_points) : null
+
+            const resultColor = isPending ? '#ed8936' : isWon ? '#38a169' : '#e53e3e'
+            const resultBg   = isPending ? 'rgba(237,137,54,0.12)' : isWon ? 'rgba(56,161,105,0.12)' : 'rgba(229,62,62,0.12)'
+            const resultIcon = isPending ? '⏳' : isWon ? '✅' : '❌'
+            const resultText = isPending ? 'Pending' : isWon ? 'Won' : 'Lost'
+
+            return (
+              <div key={v.id} style={{
+                background: 'rgba(255,255,255,0.88)', backdropFilter: 'blur(14px)',
+                borderRadius: '14px', padding: '14px 16px',
+                boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
+                border: `1px solid ${isPending ? 'rgba(237,137,54,0.2)' : isWon ? 'rgba(56,161,105,0.2)' : 'rgba(229,62,62,0.2)'}`,
+                borderLeft: `4px solid ${resultColor}`,
+              }}>
+                {/* Row 1: match title + result badge */}
+                <div style={{display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px', marginBottom: '8px'}}>
+                  <div style={{flex: 1, minWidth: 0}}>
+                    <div style={{fontSize: '14px', fontWeight: '800', color: '#1a1a1a', fontFamily:"'Poppins',sans-serif", lineHeight: 1.3}}>
+                      {v.home_team} <span style={{color: '#999', fontWeight: 400}}>vs</span> {v.away_team}
+                    </div>
+                    <div style={{fontSize: '11px', color: '#888', marginTop: '3px', fontWeight: 500}}>
+                      {formatMatchDateTime(v.scheduled_at)}
+                    </div>
+                  </div>
+                  <div style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', flexShrink: 0,
+                  }}>
+                    <span style={{
+                      background: resultBg, color: resultColor,
+                      fontSize: '12px', fontWeight: '700', borderRadius: '20px',
+                      padding: '3px 10px', whiteSpace: 'nowrap',
+                    }}>{resultIcon} {resultText}</span>
+                    {netVal !== null && (
                       <span style={{
-                        background: 'linear-gradient(135deg,#667eea22,#764ba222)',
-                        border: '1px solid #667eea44',
-                        color: '#667eea', borderRadius: '6px',
-                        padding: '2px 8px', fontWeight: '700', whiteSpace: 'nowrap',
-                      }}>{v.season_name || `Season ${v.season_id}`}</span>
-                    </td>
+                        fontSize: '16px', fontWeight: '900', fontFamily:"'Poppins',sans-serif",
+                        color: netVal >= 0 ? '#38a169' : '#e53e3e',
+                      }}>{netVal >= 0 ? '+' : ''}{netVal} pts</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Row 2: season badge + vote info */}
+                <div style={{display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap'}}>
+                  {(selectedSeason === 'all' || user?.role === 'admin') && (
+                    <span style={{
+                      background: 'linear-gradient(135deg,#667eea22,#764ba222)',
+                      border: '1px solid #667eea44', color: '#667eea',
+                      borderRadius: '6px', padding: '2px 8px',
+                      fontSize: '11px', fontWeight: '700',
+                    }}>{v.season_name || `Season ${v.season_id}`}</span>
                   )}
-                  <td style={{padding: '14px 12px', fontSize: '13px', color: '#2d3748'}}>{v.home_team} vs {v.away_team}</td>
-                  <td style={{padding: '14px 12px', fontSize: '13px', color: '#4a5568'}}>{formatMatchDateTime(v.scheduled_at)}</td>
-                  <td style={{padding: '14px 12px', fontSize: '13px', fontWeight: '600', color: '#667eea'}}>{v.team}</td>
-                  <td style={{padding: '14px 12px', fontSize: '13px', fontWeight: '600', color: '#4a5568'}}>{v.points}</td>
-                  <td style={{padding: '14px 12px', fontSize: '13px', color: '#2d3748'}}>{v.winner || 'TBD'}</td>
-                  <td style={{padding: '14px 12px', fontSize: '13px', fontWeight: '600'}}>
-                    {!v.winner ? <span style={{color: '#ed8936'}}>⏳ Pending</span> : v.team === v.winner ? <span style={{color: '#38a169'}}>✅ Won</span> : <span style={{color: '#e53e3e'}}>❌ Lost</span>}
-                  </td>
-                  <td style={{padding: '14px 12px', fontSize: '13px', fontWeight: '600'}}>
-                    {v.total_payout === null || v.total_payout === undefined ? (
-                      <span style={{color: '#a0aec0'}}>—</span>
-                    ) : (
-                      <span style={{color: '#2d3748'}}>{Math.round(v.total_payout)}</span>
-                    )}
-                  </td>
-                  <td style={{padding: '14px 12px', fontSize: '13px', fontWeight: '600'}}>
-                    {v.net_points === null || v.net_points === undefined ? (
-                      <span style={{color: '#a0aec0'}}>—</span>
-                    ) : v.net_points >= 0 ? (
-                      <span style={{color: '#38a169'}}>+{Math.round(v.net_points)}</span>
-                    ) : (
-                      <span style={{color: '#e53e3e'}}>{Math.round(v.net_points)}</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  {user?.role === 'admin' && v.display_name && (
+                    <span style={{
+                      background: 'rgba(102,126,234,0.1)', color: '#667eea',
+                      borderRadius: '6px', padding: '2px 8px',
+                      fontSize: '11px', fontWeight: '700',
+                    }}>👤 {v.display_name || v.username}</span>
+                  )}
+                  <span style={{
+                    background: 'rgba(102,126,234,0.1)', color: '#4a5568',
+                    borderRadius: '6px', padding: '2px 8px',
+                    fontSize: '11px', fontWeight: '600',
+                  }}>🗳️ <span style={{color: '#667eea', fontWeight: 700}}>{v.team}</span> · {v.points} pts</span>
+                  {v.winner && (
+                    <span style={{
+                      background: 'rgba(56,161,105,0.1)', color: '#2f855a',
+                      borderRadius: '6px', padding: '2px 8px',
+                      fontSize: '11px', fontWeight: '600',
+                    }}>🏆 {v.winner}</span>
+                  )}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
