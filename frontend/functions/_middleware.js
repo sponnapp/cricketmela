@@ -8,7 +8,7 @@ export async function onRequest(context) {
   if (url.pathname.startsWith('/api') ||
       url.pathname.startsWith('/auth') ||
       url.pathname.startsWith('/assets') ||
-      url.pathname.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|json|woff|woff2|ttf)$/)) {
+      url.pathname.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|json|woff|woff2|ttf|webmanifest)$/)) {
     return context.next();
   }
 
