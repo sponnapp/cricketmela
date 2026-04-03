@@ -8,6 +8,13 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
   }
 
   const [activeTab, setActiveTab] = useState(initialTab || 'season')
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768)
+
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768)
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [])
 
   // Notify parent when tab changes so it can update URL and nav state
   useEffect(() => {
@@ -1119,7 +1126,23 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
 
           <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
             <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Manage Seasons</h3>
-            {seasons.length === 0 ? <p>No seasons found</p> : (
+            {seasons.length === 0 ? <p>No seasons found</p> : isMobile ? (
+              <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+                {seasons.map(s => (
+                  <div key={s.id} style={{background: 'white', borderRadius: '12px', padding: '14px 16px', boxShadow: '0 2px 8px rgba(0,0,0,0.07)', border: '1px solid #e8e8e8'}}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px'}}>
+                      <span style={{fontWeight: '700', fontSize: '15px', color: '#1a1a1a'}}>{s.name}</span>
+                      <span style={{background: '#eef3ff', color: '#2f3d7e', borderRadius: '999px', padding: '3px 10px', fontSize: '12px', fontWeight: '600'}}>{allMatches.filter(m => m.season_id === s.id).length} matches</span>
+                    </div>
+                    <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px'}}>
+                      <button onClick={() => editSeason(s)} style={{flex: 1, padding: '8px', fontSize: '13px', backgroundColor: '#667eea', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600'}}>Edit</button>
+                      <button onClick={() => deleteSeason(s.id, s.name)} style={{flex: 1, padding: '8px', fontSize: '13px', backgroundColor: '#e74c3c', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600'}}>Delete</button>
+                      <button onClick={() => refreshSeasonSquad(s)} style={{flex: 1, padding: '8px', fontSize: '13px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600'}}>Refresh Squad</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
               <div style={{
                 overflowX: 'auto',
                 backgroundColor: 'white',
@@ -1229,6 +1252,18 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
           {users.some(u => u.approved === 0) && (
             <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
               <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Pending Approvals</h3>
+              {isMobile ? (
+                <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+                  {users.filter(u => u.approved === 0).map(u => (
+                    <div key={u.id} style={{background: 'white', borderRadius: '12px', padding: '14px 16px', boxShadow: '0 2px 8px rgba(0,0,0,0.07)', border: '1px solid #ffe082', borderLeft: '4px solid #f39c12'}}>
+                      <div style={{fontWeight: '700', fontSize: '15px', color: '#1a1a1a', marginBottom: '4px'}}>{u.username}</div>
+                      <div style={{fontSize: '13px', color: '#4a5568', marginBottom: '2px'}}>{u.display_name || u.username}</div>
+                      <div style={{fontSize: '12px', color: '#666', marginBottom: '12px'}}>{u.email || 'xyz@xyz.com'}</div>
+                      <button onClick={() => openApproveUserModal(u)} style={{width: '100%', padding: '10px', fontSize: '14px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '700'}}>✅ Approve</button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
               <div style={{
                 overflowX: 'auto',
                 backgroundColor: 'white',
@@ -1291,12 +1326,13 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                   </tbody>
                 </table>
               </div>
+              )}
             </section>
           )}
 
           <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
             <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Create New User</h3>
-            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 150px 120px', gap: '10px'}}>
+            <div style={{display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr 150px 120px', gap: '10px'}}>
               <input
                 value={newUser.username}
                 onChange={e => setNewUser({...newUser, username: e.target.value})}
@@ -1380,7 +1416,49 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
 
           <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
             <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>All Users</h3>
-            {users.length === 0 ? <p>No users found</p> : (
+            {users.length === 0 ? <p>No users found</p> : isMobile ? (
+              <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+                {users.map(u => (
+                  <div key={u.id} style={{background: 'white', borderRadius: '12px', padding: '14px 16px', boxShadow: '0 2px 8px rgba(0,0,0,0.07)', border: '1px solid #e8e8e8'}}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px'}}>
+                      <span style={{fontWeight: '700', fontSize: '15px', color: '#1a1a1a'}}>{u.display_name || u.username}</span>
+                      <span style={{backgroundColor: u.role === 'admin' ? '#dc3545' : u.role === 'superuser' ? '#ff9800' : '#28a745', color: 'white', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600'}}>{u.role}</span>
+                    </div>
+                    <div style={{fontSize: '12px', color: '#666', marginBottom: '2px'}}>@{u.username}</div>
+                    <div style={{fontSize: '12px', color: '#888', marginBottom: '12px'}}>{u.email || 'xyz@xyz.com'}</div>
+                    <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
+                      <button onClick={() => toggleUserSeasonBreakdown(u.id)} style={{flex: 1, padding: '8px', fontSize: '12px', backgroundColor: expandedUserRows[u.id] ? '#6c757d' : '#00a86b', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600'}}>
+                        {expandedUserRows[u.id] ? 'Hide' : '💰 Balance'}
+                      </button>
+                      <button onClick={() => editUser(u)} style={{flex: 1, padding: '8px', fontSize: '12px', backgroundColor: '#667eea', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600'}}>Edit</button>
+                      <button onClick={() => deleteUser(u.id, u.username)} style={{flex: 1, padding: '8px', fontSize: '12px', backgroundColor: '#e74c3c', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600'}}>Delete</button>
+                    </div>
+                    {expandedUserRows[u.id] && (
+                      <div style={{marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #f0f0f0'}}>
+                        {seasonBalancesLoading[u.id] ? (
+                          <span style={{fontSize: '12px', color: '#667'}}>Loading...</span>
+                        ) : (userSeasonBalances[u.id] || []).length === 0 ? (
+                          <span style={{fontSize: '12px', color: '#999'}}>No season assignments found.</span>
+                        ) : (
+                          <div style={{display: 'flex', flexWrap: 'wrap', gap: '6px'}}>
+                            <span style={{display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '4px 10px', borderRadius: '999px', border: '1px solid #b8c6ff', backgroundColor: '#eef3ff', fontSize: '11px', color: '#2f3d7e', fontWeight: '700'}}>
+                              <span>Σ Total</span>
+                              <span style={{color: '#1d5bd1'}}>{Math.round((userSeasonBalances[u.id] || []).reduce((sum, sb) => sum + (Number(sb.balance) || 0), 0))} pts</span>
+                            </span>
+                            {(userSeasonBalances[u.id] || []).map(sb => (
+                              <span key={`${u.id}-${sb.season_id}`} style={{display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '4px 10px', borderRadius: '999px', border: '1px solid #cdd7ff', backgroundColor: 'white', fontSize: '11px', color: '#2f3d7e', fontWeight: '600'}}>
+                                <span>{sb.season_name}</span>
+                                <span style={{color: '#00a86b'}}>{Math.round(sb.balance)} pts</span>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
               <div style={{
                 overflowX: 'auto',
                 backgroundColor: 'white',
@@ -1591,7 +1669,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
 
           <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
             <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Manage Matches</h3>
-            <div style={{marginBottom: '15px', display: 'flex', gap: '10px', alignItems: 'center'}}>
+            <div style={{marginBottom: '15px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap'}}>
               <label style={{fontWeight: 'bold', color: '#1a1a1a'}}>Select Season:</label>
               <select value={selectedSeason} onChange={e => setSelectedSeason(e.target.value)} style={{padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none', cursor: 'pointer', flex: 1, maxWidth: '300px'}}>
                 <option value="">-- Select Season --</option>
@@ -1601,7 +1679,41 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                 <button onClick={clearAllMatches} style={{padding: '12px 30px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '25px', cursor: 'pointer', fontWeight: 'bold'}} onMouseOver={(e) => e.target.style.backgroundColor = '#c82333'} onMouseOut={(e) => e.target.style.backgroundColor = '#dc3545'}>Clear Matches</button>
               )}
             </div>
-            {matches.length === 0 ? <p>No matches in this season</p> : (
+            {matches.length === 0 ? <p>No matches in this season</p> : isMobile ? (
+              <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+                {matches.map(m => (
+                  <div key={m.id} style={{background: 'white', borderRadius: '12px', padding: '14px 16px', boxShadow: '0 2px 8px rgba(0,0,0,0.07)', border: '1px solid #e8e8e8', borderLeft: m.winner ? '4px solid #2ecc71' : '4px solid #667eea'}}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px'}}>
+                      <span style={{fontWeight: '700', fontSize: '14px', color: '#1a1a1a'}}>{m.home_team} vs {m.away_team}</span>
+                      {m.winner
+                        ? <span style={{backgroundColor: '#2ecc71', color: 'white', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600'}}>{m.winner}</span>
+                        : <span style={{color: '#a0aec0', fontSize: '12px', fontWeight: '600'}}>TBD</span>
+                      }
+                    </div>
+                    <div style={{fontSize: '12px', color: '#666', marginBottom: '2px'}}>📍 {m.venue || 'N/A'}</div>
+                    <div style={{fontSize: '12px', color: '#888', marginBottom: '12px'}}>🕐 {formatMatchDateTime(m.scheduled_at)}</div>
+                    <div style={{display: 'flex', gap: '6px', flexWrap: 'wrap'}}>
+                      <button onClick={() => editMatch(m)} style={{flex: 1, minWidth: '70px', padding: '8px', fontSize: '12px', backgroundColor: '#667eea', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600'}}>Edit</button>
+                      {(isSuperuser || user?.role === 'admin') && (
+                        <button onClick={() => setWinner(m.id, m.home_team, m.away_team)} style={{flex: 1, minWidth: '70px', padding: '8px', fontSize: '12px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600'}}>Set Winner</button>
+                      )}
+                      {(isSuperuser || user?.role === 'admin') && (
+                        <button onClick={() => openPredictionResultsModal(m)} style={{flex: 1, minWidth: '70px', padding: '8px', fontSize: '12px', backgroundColor: '#9b59b6', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600'}}>🔮 Predict</button>
+                      )}
+                      {!isSuperuser && m.winner && (
+                        <button onClick={() => clearWinner(m.id)} style={{flex: 1, minWidth: '70px', padding: '8px', fontSize: '12px', backgroundColor: '#f39c12', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600'}}>Clear Win</button>
+                      )}
+                      {!isSuperuser && (
+                        <button onClick={() => clearMatchVotes(m.id, m.home_team, m.away_team)} style={{flex: 1, minWidth: '70px', padding: '8px', fontSize: '12px', backgroundColor: '#FFA500', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600'}}>Clear Votes</button>
+                      )}
+                      {!isSuperuser && (
+                        <button onClick={() => deleteMatch(m.id)} style={{flex: 1, minWidth: '70px', padding: '8px', fontSize: '12px', backgroundColor: '#e74c3c', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600'}}>Delete</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
               <div style={{
                 overflowX: 'auto',
                 backgroundColor: 'white',
@@ -1781,7 +1893,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
             <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Email Settings</h3>
             <p style={{color: '#666', fontSize: '14px', marginBottom: '20px'}}>Configure Gmail SMTP for sending signup notifications and approval emails to users.</p>
 
-            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px'}}>
+            <div style={{display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '15px', marginBottom: '20px'}}>
               <div>
                 <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold', color: '#333', fontSize: '14px'}}>Gmail Address:</label>
                 <input
