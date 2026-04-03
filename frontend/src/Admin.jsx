@@ -43,6 +43,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
   const [predictionResultsModal, setPredictionResultsModal] = useState({show: false, matchId: null, matchName: '', team1: '', team2: '', seasonId: null, players: [], loadingPlayers: false, formData: {toss_winner: '', man_of_match: '', best_bowler: ''}})
   const [emailSettings, setEmailSettings] = useState({ user: '', password: '', from: '' })
   const [emailMessage, setEmailMessage] = useState('')
+  const [userSearch, setUserSearch] = useState('')
   const [cricApiModal, setCricApiModal] = useState({
     show: false,
     step: 'series', // 'series' | 'matches' | 'importing'
@@ -1415,10 +1416,35 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
           </section>
 
           <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
-            <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>All Users</h3>
-            {users.length === 0 ? <p>No users found</p> : isMobile ? (
+            <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '15px', gap: '12px', flexWrap: 'wrap'}}>
+              <h3 style={{color: '#1a1a1a', margin: '0', fontSize: '18px', fontWeight: 'bold'}}>All Users</h3>
+              <div style={{position: 'relative', flex: 1, maxWidth: '280px', minWidth: '160px'}}>
+                <span style={{position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '14px', pointerEvents: 'none'}}>🔍</span>
+                <input
+                  type="text"
+                  value={userSearch}
+                  onChange={e => setUserSearch(e.target.value)}
+                  placeholder="Search by name, username, email…"
+                  style={{width: '100%', padding: '9px 12px 9px 34px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '13px', outline: 'none', boxSizing: 'border-box', backgroundColor: 'white'}}
+                  onFocus={e => e.target.style.borderColor = '#2ecc71'}
+                  onBlur={e => e.target.style.borderColor = '#ddd'}
+                />
+                {userSearch && (
+                  <button onClick={() => setUserSearch('')} style={{position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', color: '#999', padding: '0', lineHeight: 1}}>✕</button>
+                )}
+              </div>
+            </div>
+            {users.length === 0 ? <p>No users found</p> : (() => {
+              const q = userSearch.trim().toLowerCase()
+              const filtered = q ? users.filter(u =>
+                (u.display_name || '').toLowerCase().includes(q) ||
+                u.username.toLowerCase().includes(q) ||
+                (u.email || '').toLowerCase().includes(q)
+              ) : users
+              return isMobile ? (
               <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
-                {users.map(u => (
+                {filtered.length === 0 && <p style={{color: '#999', fontSize: '14px', margin: 0}}>No users match "{userSearch}"</p>}
+                {filtered.map(u => (
                   <div key={u.id} style={{background: 'white', borderRadius: '12px', padding: '14px 16px', boxShadow: '0 2px 8px rgba(0,0,0,0.07)', border: '1px solid #e8e8e8'}}>
                     <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px'}}>
                       <span style={{fontWeight: '700', fontSize: '15px', color: '#1a1a1a'}}>{u.display_name || u.username}</span>
@@ -1485,7 +1511,9 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                     </tr>
                   </thead>
                   <tbody>
-                    {users.map((u, idx) => (
+                    {filtered.length === 0 ? (
+                      <tr><td colSpan={5} style={{padding: '20px', textAlign: 'center', color: '#999', fontSize: '14px'}}>No users match "{userSearch}"</td></tr>
+                    ) : filtered.map((u, idx) => (
                       <React.Fragment key={u.id}>
                         <tr style={{
                           borderBottom: '1px solid #f0f0f0',
@@ -1612,7 +1640,8 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                   </tbody>
                 </table>
               </div>
-            )}
+              )
+            })()}
           </section>
           <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
             <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '8px', fontSize: '18px', fontWeight: 'bold'}}>🔧 Data Maintenance</h3>
@@ -1681,8 +1710,9 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
             </div>
             {matches.length === 0 ? <p>No matches in this season</p> : isMobile ? (
               <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
-                {matches.map(m => (
+                {matches.map((m, idx) => (
                   <div key={m.id} style={{background: 'white', borderRadius: '12px', padding: '14px 16px', boxShadow: '0 2px 8px rgba(0,0,0,0.07)', border: '1px solid #e8e8e8', borderLeft: m.winner ? '4px solid #2ecc71' : '4px solid #667eea'}}>
+                    <div style={{fontSize: '10px', fontWeight: '700', color: '#667eea', letterSpacing: '0.8px', textTransform: 'uppercase', marginBottom: '4px'}}>MATCH {idx + 1}</div>
                     <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px'}}>
                       <span style={{fontWeight: '700', fontSize: '14px', color: '#1a1a1a'}}>{m.home_team} vs {m.away_team}</span>
                       {m.winner
@@ -1732,6 +1762,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                       background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                       color: 'white'
                     }}>
+                      <th style={{padding: '14px 12px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', width: '50px'}}>#</th>
                       <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Match</th>
                       <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Venue</th>
                       <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Date/Time</th>
@@ -1749,6 +1780,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                       onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f7fa'}
                       onMouseLeave={(e) => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#fafbfc' : 'white'}
                       >
+                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', textAlign: 'center', fontSize: '12px', fontWeight: '700', color: '#667eea'}}>{idx + 1}</td>
                         <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '13px', fontWeight: '500'}}><strong>{m.home_team}</strong> vs <strong>{m.away_team}</strong></td>
                         <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{m.venue || 'N/A'}</td>
                         <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{formatMatchDateTime(m.scheduled_at)}</td>
