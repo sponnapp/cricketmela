@@ -2246,7 +2246,7 @@ app.get('/api/users/:userId/votes', (req, res) => {
 
         const withNet = rows.map(v => {
           if (!v.winner) return { ...v, net_points: null, total_payout: null };
-          if (v.winner === 'NO_RESULT') return { ...v, net_points: 0, total_payout: Number(v.points) };
+          if (v.winner === 'NO_RESULT') return { ...v, net_points: 0, total_payout: 0 };
           const totals = totalsByMatch[v.match_id] || {};
           const totalWinner = Number(totals[v.winner] || 0);
           const totalLoser = Object.keys(totals).reduce((sum, team) => team === v.winner ? sum : sum + Number(totals[team] || 0), 0);
@@ -2328,7 +2328,7 @@ app.get('/api/admin/vote-history', requireRole('admin'), (req, res) => {
 
         const withNet = rows.map(v => {
           if (!v.winner) return { ...v, net_points: null, total_payout: null };
-          if (v.winner === 'NO_RESULT') return { ...v, net_points: 0, total_payout: Number(v.points) };
+          if (v.winner === 'NO_RESULT') return { ...v, net_points: 0, total_payout: 0 };
           const totals = totalsByMatch[v.match_id] || {};
           const totalWinner = Number(totals[v.winner] || 0);
           const totalLoser = Object.keys(totals).reduce((sum, team) => team === v.winner ? sum : sum + Number(totals[team] || 0), 0);
@@ -2458,7 +2458,7 @@ app.get('/api/admin/analytics', requireRole('admin'), (req, res) => {
 
         const withNet = rows.map(vote => {
           if (!vote.winner) return { ...vote, net_points: null, total_payout: null };
-          if (vote.winner === 'NO_RESULT') return { ...vote, net_points: 0, total_payout: Number(vote.points) };
+          if (vote.winner === 'NO_RESULT') return { ...vote, net_points: 0, total_payout: 0 };
 
           const totals = totalsByMatch[vote.match_id] || {};
           const totalWinner = Number(totals[vote.winner] || 0);
