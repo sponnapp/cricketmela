@@ -157,7 +157,7 @@ export default function VoteHistory({ user, refreshTrigger }) {
 
   // Summary stats for filtered votes
   const summary = useMemo(() => {
-    const settled = filteredVotes.filter(v => v.winner)
+    const settled = filteredVotes.filter(v => v.winner && v.winner !== 'NO_RESULT')
     const won = settled.filter(v => v.team === v.winner).length
     const lost = settled.filter(v => v.team !== v.winner).length
     const netTotal = settled.reduce((sum, v) => sum + (v.net_points ?? 0), 0)
@@ -302,22 +302,23 @@ export default function VoteHistory({ user, refreshTrigger }) {
       ) : (
         <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
           {filteredVotes.map(v => {
-            const isWon = v.winner && v.team === v.winner
-            const isLost = v.winner && v.team !== v.winner
+            const isNoResult = v.winner === 'NO_RESULT'
+            const isWon = !isNoResult && v.winner && v.team === v.winner
+            const isLost = !isNoResult && v.winner && v.team !== v.winner
             const isPending = !v.winner
             const netVal = v.net_points !== null && v.net_points !== undefined ? Math.round(v.net_points) : null
 
-            const resultColor = isPending ? '#ed8936' : isWon ? '#38a169' : '#e53e3e'
-            const resultBg   = isPending ? 'rgba(237,137,54,0.12)' : isWon ? 'rgba(56,161,105,0.12)' : 'rgba(229,62,62,0.12)'
-            const resultIcon = isPending ? '⏳' : isWon ? '✅' : '❌'
-            const resultText = isPending ? 'Pending' : isWon ? 'Won' : 'Lost'
+            const resultColor = isNoResult ? '#718096' : isPending ? '#ed8936' : isWon ? '#38a169' : '#e53e3e'
+            const resultBg   = isNoResult ? 'rgba(113,128,150,0.12)' : isPending ? 'rgba(237,137,54,0.12)' : isWon ? 'rgba(56,161,105,0.12)' : 'rgba(229,62,62,0.12)'
+            const resultIcon = isNoResult ? '⚪' : isPending ? '⏳' : isWon ? '✅' : '❌'
+            const resultText = isNoResult ? 'No Result' : isPending ? 'Pending' : isWon ? 'Won' : 'Lost'
 
             return (
               <div key={v.id} style={{
                 background: 'rgba(255,255,255,0.88)', backdropFilter: 'blur(14px)',
                 borderRadius: '14px', padding: '14px 16px',
                 boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
-                border: `1px solid ${isPending ? 'rgba(237,137,54,0.2)' : isWon ? 'rgba(56,161,105,0.2)' : 'rgba(229,62,62,0.2)'}`,
+                border: `1px solid ${isNoResult ? 'rgba(113,128,150,0.2)' : isPending ? 'rgba(237,137,54,0.2)' : isWon ? 'rgba(56,161,105,0.2)' : 'rgba(229,62,62,0.2)'}`,
                 borderLeft: `4px solid ${resultColor}`,
               }}>
                 {/* Row 1: match title + result badge */}
@@ -369,7 +370,7 @@ export default function VoteHistory({ user, refreshTrigger }) {
                     borderRadius: '6px', padding: '2px 8px',
                     fontSize: '11px', fontWeight: '600',
                   }}>🗳️ <span style={{color: '#667eea', fontWeight: 700}}>{v.team}</span> · {v.points} pts</span>
-                  {v.winner && (
+                  {v.winner && v.winner !== 'NO_RESULT' && (
                     <span style={{
                       background: 'rgba(56,161,105,0.1)', color: '#2f855a',
                       borderRadius: '6px', padding: '2px 8px',

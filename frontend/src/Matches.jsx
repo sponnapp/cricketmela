@@ -339,6 +339,7 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
   // Get reason why voting is disabled
   function getVotingDisabledReason(match) {
     if (user?.role === 'admin') return 'Admin View'
+    if (match.winner === 'NO_RESULT') return 'No Result'
     if (match.winner) return 'Winner Declared'
     if (!parseMatchDateTime(match.scheduled_at)) return 'Schedule Invalid'
     if (isVotingClosed(match.scheduled_at)) return 'Voting Closed'
@@ -466,7 +467,7 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
               const disabledReason = getVotingDisabledReason(m)
               const isPending = !votingDisabled && !!votes[m.id]?.team && !!votes[m.id]?.points &&
                 (!userVotes[m.id] || votes[m.id].team !== userVotes[m.id].team || String(votes[m.id].points) !== String(userVotes[m.id].points))
-              const borderColor = isPending ? '#f39c12' : m.winner ? '#38a169' : votingDisabled ? '#a0aec0' : '#667eea'
+              const borderColor = isPending ? '#f39c12' : m.winner === 'NO_RESULT' ? '#a0aec0' : m.winner ? '#38a169' : votingDisabled ? '#a0aec0' : '#667eea'
               const globalIdx = matches.indexOf(m)
               return (
                 <div key={m.id} style={{
@@ -479,7 +480,9 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                 }}>
                   <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px 8px', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'}}>
                     <span style={{fontSize: '11px', fontWeight: '700', color: 'rgba(255,255,255,0.8)', letterSpacing: '0.5px'}}>MATCH {globalIdx + 1}</span>
-                    {m.winner ? (
+                    {m.winner === 'NO_RESULT' ? (
+                      <span style={{fontSize: '11px', color: '#cbd5e0', fontWeight: '700', background: 'rgba(255,255,255,0.15)', padding: '2px 8px', borderRadius: '10px'}}>⚪ No Result</span>
+                    ) : m.winner ? (
                       <span style={{fontSize: '11px', color: '#68d391', fontWeight: '700', background: 'rgba(255,255,255,0.15)', padding: '2px 8px', borderRadius: '10px'}}>✅ {m.winner} won</span>
                     ) : isVotingClosed(m.scheduled_at) ? (
                       <span style={{fontSize: '11px', color: '#fc8181', fontWeight: '700', background: 'rgba(255,255,255,0.15)', padding: '2px 8px', borderRadius: '10px'}}>🔒 Voting Closed</span>
@@ -647,7 +650,9 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                         ) : <span style={{color: '#a0aec0', fontSize: '12px'}}>-</span>}
                       </td>
                       <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', textAlign: 'center'}}>
-                        {m.winner ? (
+                        {m.winner === 'NO_RESULT' ? (
+                          <span style={{color: '#718096', fontWeight: '700', backgroundColor: '#edf2f7', padding: '6px 12px', borderRadius: '8px', fontSize: '12px', display: 'inline-block', border: '1px solid #cbd5e0'}}>⚪ No Result</span>
+                        ) : m.winner ? (
                           <span style={{color: '#38a169', fontWeight: '700', backgroundColor: '#f0fff4', padding: '6px 12px', borderRadius: '8px', fontSize: '12px', display: 'inline-block', border: '1px solid #c6f6d5'}}>{m.winner}</span>
                         ) : (
                           <span style={{color: '#a0aec0', fontSize: '12px', fontWeight: '600'}}>TBD</span>

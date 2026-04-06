@@ -2246,6 +2246,7 @@ app.get('/api/users/:userId/votes', (req, res) => {
 
         const withNet = rows.map(v => {
           if (!v.winner) return { ...v, net_points: null, total_payout: null };
+          if (v.winner === 'NO_RESULT') return { ...v, net_points: 0, total_payout: Number(v.points) };
           const totals = totalsByMatch[v.match_id] || {};
           const totalWinner = Number(totals[v.winner] || 0);
           const totalLoser = Object.keys(totals).reduce((sum, team) => team === v.winner ? sum : sum + Number(totals[team] || 0), 0);
@@ -2327,6 +2328,7 @@ app.get('/api/admin/vote-history', requireRole('admin'), (req, res) => {
 
         const withNet = rows.map(v => {
           if (!v.winner) return { ...v, net_points: null, total_payout: null };
+          if (v.winner === 'NO_RESULT') return { ...v, net_points: 0, total_payout: Number(v.points) };
           const totals = totalsByMatch[v.match_id] || {};
           const totalWinner = Number(totals[v.winner] || 0);
           const totalLoser = Object.keys(totals).reduce((sum, team) => team === v.winner ? sum : sum + Number(totals[team] || 0), 0);
@@ -2456,6 +2458,7 @@ app.get('/api/admin/analytics', requireRole('admin'), (req, res) => {
 
         const withNet = rows.map(vote => {
           if (!vote.winner) return { ...vote, net_points: null, total_payout: null };
+          if (vote.winner === 'NO_RESULT') return { ...vote, net_points: 0, total_payout: Number(vote.points) };
 
           const totals = totalsByMatch[vote.match_id] || {};
           const totalWinner = Number(totals[vote.winner] || 0);
@@ -2479,11 +2482,11 @@ app.get('/api/admin/analytics', requireRole('admin'), (req, res) => {
           return { ...vote, net_points: -Number(vote.points), total_payout: 0 };
         });
 
-        const settledVotes = withNet.filter(vote => vote.winner);
+        const settledVotes = withNet.filter(vote => vote.winner && vote.winner !== 'NO_RESULT');
         const totalVotes = withNet.length;
         const won = settledVotes.filter(vote => vote.team === vote.winner).length;
         const lost = settledVotes.filter(vote => vote.team !== vote.winner).length;
-        const pending = totalVotes - won - lost;
+        const pending = totalVotes - won - lost - withNet.filter(vote => vote.winner === 'NO_RESULT').length;
         const totalBet = withNet.reduce((sum, vote) => sum + Number(vote.points || 0), 0);
         const netProfit = settledVotes.reduce((sum, vote) => sum + Number(vote.net_points || 0), 0);
 
@@ -3136,6 +3139,16 @@ app.post('/api/admin/matches/:id/winner', requireRole(['admin', 'superuser']), (
       if (errMatch) { db.close(); return res.status(500).json({ error: 'DB error' }); }
       if (!match) { db.close(); return res.status(404).json({ error: 'Match not found' }); }
 
+      // Handle "No Result" — just mark match closed, no balance changes
+      if (winner === 'NO_RESULT') {
+        db.run('UPDATE matches SET winner = ? WHERE id = ?', ['NO_RESULT', id], function(errNR) {
+          db.close();
+          if (errNR) return res.status(500).json({ error: 'DB error' });
+          return res.json({ ok: true, noResult: true });
+        });
+        return;
+      }
+
       const losingTeam = match.home_team === winner ? match.away_team : match.home_team;
       const seasonId = match.season_id;
 
@@ -3341,6 +3354,16 @@ app.post('/api/admin/matches/:id/clear-winner', requireRole(['admin', 'superuser
 
       const winner = match.winner;
       const seasonId = match.season_id;
+
+      // If the match was marked as No Result, just clear the winner — no balances to revert
+      if (winner === 'NO_RESULT') {
+        db.run('UPDATE matches SET winner = NULL WHERE id = ?', [matchId], function(errNR) {
+          db.close();
+          if (errNR) return res.status(500).json({ error: 'Failed to clear no-result' });
+          res.json({ ok: true, message: 'No Result cleared' });
+        });
+        return;
+      }
 
       db.all('SELECT user_id, team, points FROM votes WHERE match_id = ?', [matchId], (err2, votes) => {
         if (err2) { db.close(); return res.status(500).json({ error: 'Failed to fetch votes' }); }
