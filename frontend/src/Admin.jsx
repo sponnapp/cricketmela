@@ -753,7 +753,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
 
   async function submitWinner() {
     if (!winnerModal.selectedTeam) {
-      toast('warning', 'Missing Input', 'Please select a winning team')
+      toast('warning', 'Missing Input', 'Please select a winning team or No Result')
       return
     }
     try {
@@ -761,7 +761,8 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
         { winner: winnerModal.selectedTeam },
         { headers: { 'x-user': user?.username || 'admin' } }
       )
-      toast('success', 'Success', 'Winner set successfully')
+      const msg = winnerModal.selectedTeam === 'NO_RESULT' ? 'Match marked as No Result' : 'Winner set successfully'
+      toast('success', 'Success', msg)
       setWinnerModal({show: false, matchId: null, team1: '', team2: '', selectedTeam: ''})
       fetchMatches(selectedSeason)
     } catch (e) {
@@ -1711,13 +1712,15 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
             {matches.length === 0 ? <p>No matches in this season</p> : isMobile ? (
               <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
                 {matches.map((m, idx) => (
-                  <div key={m.id} style={{background: 'white', borderRadius: '12px', padding: '14px 16px', boxShadow: '0 2px 8px rgba(0,0,0,0.07)', border: '1px solid #e8e8e8', borderLeft: m.winner ? '4px solid #2ecc71' : '4px solid #667eea'}}>
+                  <div key={m.id} style={{background: 'white', borderRadius: '12px', padding: '14px 16px', boxShadow: '0 2px 8px rgba(0,0,0,0.07)', border: '1px solid #e8e8e8', borderLeft: m.winner === 'NO_RESULT' ? '4px solid #a0aec0' : m.winner ? '4px solid #2ecc71' : '4px solid #667eea'}}>
                     <div style={{fontSize: '10px', fontWeight: '700', color: '#667eea', letterSpacing: '0.8px', textTransform: 'uppercase', marginBottom: '4px'}}>MATCH {idx + 1}</div>
                     <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px'}}>
                       <span style={{fontWeight: '700', fontSize: '14px', color: '#1a1a1a'}}>{m.home_team} vs {m.away_team}</span>
-                      {m.winner
-                        ? <span style={{backgroundColor: '#2ecc71', color: 'white', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600'}}>{m.winner}</span>
-                        : <span style={{color: '#a0aec0', fontSize: '12px', fontWeight: '600'}}>TBD</span>
+                      {m.winner === 'NO_RESULT'
+                        ? <span style={{backgroundColor: '#a0aec0', color: 'white', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600'}}>⚪ No Result</span>
+                        : m.winner
+                          ? <span style={{backgroundColor: '#2ecc71', color: 'white', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600'}}>{m.winner}</span>
+                          : <span style={{color: '#a0aec0', fontSize: '12px', fontWeight: '600'}}>TBD</span>
                       }
                     </div>
                     <div style={{fontSize: '12px', color: '#666', marginBottom: '2px'}}>📍 {m.venue || 'N/A'}</div>
@@ -1785,7 +1788,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                         <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{m.venue || 'N/A'}</td>
                         <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px', color: '#4a5568'}}>{formatMatchDateTime(m.scheduled_at)}</td>
                         <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', fontSize: '12px'}}>
-                          {m.winner ? <span style={{backgroundColor: '#2ecc71', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600'}}>{m.winner}</span> : <span style={{color: '#a0aec0', fontSize: '12px', fontWeight: '600'}}>TBD</span>}
+                          {m.winner === 'NO_RESULT' ? <span style={{backgroundColor: '#a0aec0', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600'}}>⚪ No Result</span> : m.winner ? <span style={{backgroundColor: '#2ecc71', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600'}}>{m.winner}</span> : <span style={{color: '#a0aec0', fontSize: '12px', fontWeight: '600'}}>TBD</span>}
                         </td>
                         <td style={{padding: '14px 12px', textAlign: 'center'}}>
                           <div style={{display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap'}}>
@@ -2017,6 +2020,10 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
               <label style={{display: 'block', marginBottom: '15px', cursor: 'pointer'}}>
                 <input type="radio" name="winner" value={winnerModal.team2} checked={winnerModal.selectedTeam === winnerModal.team2} onChange={e => setWinnerModal({...winnerModal, selectedTeam: e.target.value})} style={{marginRight: '10px'}} />
                 <span style={{fontSize: '16px'}}>{winnerModal.team2}</span>
+              </label>
+              <label style={{display: 'block', marginBottom: '15px', cursor: 'pointer', borderTop: '1px solid #eee', paddingTop: '12px'}}>
+                <input type="radio" name="winner" value="NO_RESULT" checked={winnerModal.selectedTeam === 'NO_RESULT'} onChange={e => setWinnerModal({...winnerModal, selectedTeam: e.target.value})} style={{marginRight: '10px'}} />
+                <span style={{fontSize: '16px', color: '#718096'}}>⚪ No Result (Match Cancelled)</span>
               </label>
             </div>
             <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px'}}>
