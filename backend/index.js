@@ -2253,9 +2253,9 @@ app.get('/api/users/:userId/votes', (req, res) => {
           if (v.team === v.winner) {
             if (totalWinner === 0 || totalLoser === 0) return { ...v, net_points: 0, total_payout: Number(v.points) };
             const share = (Number(v.points) / totalWinner) * totalLoser;
-            const netPoints = Number(share.toFixed(2));
+            const netPoints = Math.round(share);
             const totalPayout = Number(v.points) + netPoints;
-            return { ...v, net_points: netPoints, total_payout: Number(totalPayout.toFixed(2)) };
+            return { ...v, net_points: netPoints, total_payout: totalPayout };
           }
           return { ...v, net_points: -Number(v.points), total_payout: 0 };
         });
@@ -2335,9 +2335,9 @@ app.get('/api/admin/vote-history', requireRole('admin'), (req, res) => {
           if (v.team === v.winner) {
             if (totalWinner === 0 || totalLoser === 0) return { ...v, net_points: 0, total_payout: Number(v.points) };
             const share = (Number(v.points) / totalWinner) * totalLoser;
-            const netPoints = Number(share.toFixed(2));
+            const netPoints = Math.round(share);
             const totalPayout = Number(v.points) + netPoints;
-            return { ...v, net_points: netPoints, total_payout: Number(totalPayout.toFixed(2)) };
+            return { ...v, net_points: netPoints, total_payout: totalPayout };
           }
           return { ...v, net_points: -Number(v.points), total_payout: 0 };
         });
@@ -2471,11 +2471,11 @@ app.get('/api/admin/analytics', requireRole('admin'), (req, res) => {
               return { ...vote, net_points: 0, total_payout: Number(vote.points) };
             }
             const share = (Number(vote.points) / totalWinner) * totalLoser;
-            const netPoints = Number(share.toFixed(2));
+            const netPoints = Math.round(share);
             return {
               ...vote,
               net_points: netPoints,
-              total_payout: Number((Number(vote.points) + netPoints).toFixed(2)),
+              total_payout: Number(vote.points) + netPoints,
             };
           }
 
