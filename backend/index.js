@@ -2650,8 +2650,8 @@ app.get('/api/analytics/overview/:userId', requireRole('picker', 'superuser', 'a
   const overallQuery = `
     SELECT 
       COUNT(*) as total_votes,
-      COUNT(CASE WHEN v.team = m.winner THEN 1 END) as won,
-      COUNT(CASE WHEN m.winner IS NOT NULL AND v.team != m.winner THEN 1 END) as lost,
+      COUNT(CASE WHEN v.team = m.winner AND m.winner != 'NO_RESULT' THEN 1 END) as won,
+      COUNT(CASE WHEN m.winner IS NOT NULL AND m.winner != 'NO_RESULT' AND v.team != m.winner THEN 1 END) as lost,
       SUM(v.points) as total_bet,
       AVG(v.points) as avg_bet
     FROM votes v
@@ -2667,7 +2667,7 @@ app.get('/api/analytics/overview/:userId', requireRole('picker', 'superuser', 'a
       SELECT v.match_id, v.points, v.team, m.winner
       FROM votes v
       JOIN matches m ON v.match_id = m.id
-      WHERE v.user_id = ? AND m.winner IS NOT NULL
+      WHERE v.user_id = ? AND m.winner IS NOT NULL AND m.winner != 'NO_RESULT'
     `, [userId], (err2, userVotes) => {
       if (err2) { db.close(); return res.status(500).json({ error: err2.message }); }
 
