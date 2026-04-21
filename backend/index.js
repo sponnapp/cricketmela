@@ -18,6 +18,7 @@ const allowedOrigins = [
   'https://cricketmela.pages.dev',
   // Add your custom domain here when you set it up
   // 'https://your-custom-domain.com'
+  ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
 ];
 
 app.use(cors({
@@ -1843,7 +1844,7 @@ app.post('/api/signup', (req, res) => {
         const fromEmail = settings.from || settings.user;
         const appLink = process.env.NODE_ENV === 'production'
           ? 'https://cricketmela.pages.dev'
-          : 'http://localhost:5173';
+          : (process.env.FRONTEND_URL || 'http://localhost:5173');
 
         // Email 1: Confirmation email to the user who just signed up
         const confirmMailOptions = {
@@ -1884,7 +1885,7 @@ app.post('/api/signup', (req, res) => {
 
             const approvalLink = process.env.NODE_ENV === 'production'
               ? 'https://cricketmela.pages.dev/?page=admin&adminTab=users'
-              : 'http://localhost:5173/?page=admin&adminTab=users';
+              : `${process.env.FRONTEND_URL || 'http://localhost:5173'}/?page=admin&adminTab=users`;
 
             const adminEmails = adminRows && adminRows.length > 0
               ? adminRows.map(r => r.email).filter(Boolean)
@@ -2101,7 +2102,7 @@ app.get('/auth/google/callback',
       // User account pending approval
       const frontendUrl = process.env.NODE_ENV === 'production'
         ? 'https://cricketmela.pages.dev'
-        : 'http://localhost:5173';
+        : (process.env.FRONTEND_URL || 'http://localhost:5173');
       return res.redirect(`${frontendUrl}/?error=pending_approval`);
     }
 
@@ -2116,7 +2117,7 @@ app.get('/auth/google/callback',
 
     const frontendUrl = process.env.NODE_ENV === 'production'
       ? 'https://cricketmela.pages.dev'
-      : 'http://localhost:5173';
+      : (process.env.FRONTEND_URL || 'http://localhost:5173');
 
     res.redirect(`${frontendUrl}/?auth=success&user=${userData}`);
   }
@@ -2126,7 +2127,7 @@ app.get('/auth/google/callback',
 app.get('/auth/google/failure', (req, res) => {
   const frontendUrl = process.env.NODE_ENV === 'production'
     ? 'https://cricketmela.pages.dev'
-    : 'http://localhost:5173';
+    : (process.env.FRONTEND_URL || 'http://localhost:5173');
   res.redirect(`${frontendUrl}/?error=auth_failed`);
 });
 

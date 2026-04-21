@@ -15,7 +15,7 @@ module.exports = function(passport) {
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
       callbackURL: process.env.NODE_ENV === 'production'
         ? 'https://cricketmela-api.fly.dev/auth/google/callback'
-        : 'http://localhost:4000/auth/google/callback'
+        : `${process.env.BACKEND_URL || 'http://localhost:4000'}/auth/google/callback`
     },
     async function(accessToken, refreshToken, profile, done) {
       try {

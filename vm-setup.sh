@@ -42,7 +42,14 @@ if [ ! -f "$SCRIPT_DIR/backend/.env" ]; then
   cp "$SCRIPT_DIR/backend/.env.example" "$SCRIPT_DIR/backend/.env"
   # Patch for VM: keep NODE_ENV=development so SQLite lands in backend/
   sed -i 's/^NODE_ENV=.*/NODE_ENV=development/' "$SCRIPT_DIR/backend/.env"
-  echo "⚠️  Review backend/.env (SESSION_SECRET, etc.) before starting"
+
+  # Set BACKEND_URL and FRONTEND_URL to the VM's real IP
+  VM_IP=$(hostname -I | awk '{print $1}')
+  echo "" >> "$SCRIPT_DIR/backend/.env"
+  echo "# VM host overrides (auto-set by vm-setup.sh)" >> "$SCRIPT_DIR/backend/.env"
+  echo "BACKEND_URL=http://$VM_IP:4000" >> "$SCRIPT_DIR/backend/.env"
+  echo "FRONTEND_URL=http://$VM_IP:5173" >> "$SCRIPT_DIR/backend/.env"
+  echo "⚠️  Review backend/.env (SESSION_SECRET, Google OAuth, etc.) before starting"
 else
   echo "✅ backend/.env already exists"
 fi
