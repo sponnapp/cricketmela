@@ -653,43 +653,47 @@ app.get('/api/seasons/:id/matches', (req, res) => {
   loadSeasonMatches(db);
 
   function loadSeasonMatches(dbConn) {
-    dbConn.all('SELECT * FROM matches WHERE season_id = ?', [seasonId], (err, rows) => {
-      if (err) { dbConn.close(); return res.status(500).json({ error: 'DB error' }); }
-      // for each match, aggregate votes per team
-      const matches = [];
-      let pending = rows.length;
-      if (pending === 0) { dbConn.close(); return res.json([]); }
-      rows.forEach(row => {
-        db.all(
-          `SELECT v.team, SUM(v.points) as total
-           FROM votes v
-           JOIN users u ON u.id = v.user_id
-           WHERE v.match_id = ? AND u.role != 'admin'
-           GROUP BY v.team`,
-          [row.id],
-          (err2, sums) => {
-            const totals = {};
-            if (!err2 && sums) sums.forEach(s => totals[s.team] = s.total);
-            matches.push({
-              id: row.id,
-              season_id: row.season_id,
-              home_team: row.home_team,
-              away_team: row.away_team,
-              venue: row.venue,
-              scheduled_at: row.scheduled_at,
-              winner: row.winner || null,
-              vote_totals: totals
-            });
-            pending -= 1;
-            if (pending === 0) {
-              dbConn.close();
-              // sort by scheduled_at
-              matches.sort((a,b) => a.scheduled_at.localeCompare(b.scheduled_at));
-              res.json(matches);
-            }
-          }
-        );
-      });
+    // Single query: matches + all vote totals via subquery JOIN (eliminates N+1)
+    dbConn.all(`
+      SELECT m.id, m.season_id, m.home_team, m.away_team, m.venue, m.scheduled_at, m.winner,
+             vt.team AS vote_team, vt.total AS vote_total
+      FROM matches m
+      LEFT JOIN (
+        SELECT v.match_id, v.team, SUM(v.points) AS total
+        FROM votes v
+        JOIN users u ON u.id = v.user_id
+        WHERE u.role != 'admin'
+        GROUP BY v.match_id, v.team
+      ) vt ON vt.match_id = m.id
+      WHERE m.season_id = ?
+      ORDER BY m.scheduled_at ASC
+    `, [seasonId], (err, rows) => {
+      dbConn.close();
+      if (err) return res.status(500).json({ error: 'DB error' });
+
+      // Fold multiple rows per match (one per team) into { id, ..., vote_totals }
+      const matchMap = new Map();
+      for (const row of (rows || [])) {
+        if (!matchMap.has(row.id)) {
+          matchMap.set(row.id, {
+            id: row.id,
+            season_id: row.season_id,
+            home_team: row.home_team,
+            away_team: row.away_team,
+            venue: row.venue,
+            scheduled_at: row.scheduled_at,
+            winner: row.winner || null,
+            vote_totals: {}
+          });
+        }
+        if (row.vote_team) {
+          matchMap.get(row.id).vote_totals[row.vote_team] = row.vote_total;
+        }
+      }
+
+      const matches = Array.from(matchMap.values());
+      matches.sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
+      res.json(matches);
     });
   }
 });
@@ -726,6 +730,26 @@ app.get('/api/matches/:id/user-vote', (req, res) => {
       return res.json(vote);
     }
   );
+});
+
+// GET /api/seasons/:id/my-votes – all votes for this user in a season (bulk, avoids N+1)
+app.get('/api/seasons/:id/my-votes', (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+  const seasonId = Number(req.params.id);
+  const db = openDb();
+  db.all(`
+    SELECT v.match_id, v.team, v.points
+    FROM votes v
+    JOIN matches m ON m.id = v.match_id
+    WHERE m.season_id = ? AND v.user_id = ?
+  `, [seasonId, req.user.id], (err, rows) => {
+    db.close();
+    if (err) return res.status(500).json({ error: 'DB error' });
+    // Return as { matchId: { team, points } }
+    const result = {};
+    for (const row of (rows || [])) result[row.match_id] = { team: row.team, points: row.points };
+    res.json(result);
+  });
 });
 
 // Voting endpoint: record vote only — no balance change until winner is declared

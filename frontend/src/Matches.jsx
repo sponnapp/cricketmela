@@ -123,29 +123,27 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
       const sortedMatches = sortMatchesByDateTime(r.data)
       setMatches(sortedMatches)
 
-      // Fetch user's existing votes for all matches
+      // Fetch all user votes for this season in a single request
       const userVotesData = {}
+      try {
+        const voteRes = await axios.get(`/api/seasons/${seasonId}/my-votes`, {
+          headers: { 'x-user': user?.username }
+        })
+        Object.assign(userVotesData, voteRes.data || {})
+      } catch (err) {
+        // No votes yet or endpoint unavailable — safe to ignore
+      }
+
+      setUserVotes(userVotesData)
+
+      // Pre-populate vote UI state for matches not yet edited this session
       for (const match of sortedMatches) {
-        try {
-          const voteRes = await axios.get(`/api/matches/${match.id}/user-vote`, {
-            headers: { 'x-user': user?.username }
-          })
-          if (voteRes.data) {
-            userVotesData[match.id] = voteRes.data
-            // Only pre-populate if the user hasn't manually changed this match
-            // this session — prevents auto-refresh from clobbering in-progress edits
-            if (!dirtyVotes.current.has(match.id)) {
-              setVotes(prev => ({
-                ...prev,
-                [match.id]: { team: voteRes.data.team, points: voteRes.data.points }
-              }))
-            }
-          }
-        } catch (err) {
-          // No existing vote for this match
+        const v = userVotesData[match.id]
+        if (v && !dirtyVotes.current.has(match.id)) {
+          setVotes(prev => ({ ...prev, [match.id]: { team: v.team, points: v.points } }))
         }
       }
-      setUserVotes(userVotesData)
+
       setLoading(false)
     } catch (err) {
       setMatches([])
