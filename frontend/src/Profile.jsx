@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 
 export default function Profile({ user, refreshUser }) {
@@ -11,6 +11,71 @@ export default function Profile({ user, refreshUser }) {
   const [error, setError] = useState('')
   const [authMethod, setAuthMethod] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [avatar, setAvatar] = useState(user?.avatar || null)
+  const [avatarSaving, setAvatarSaving] = useState(false)
+  const fileInputRef = useRef(null)
+
+  function resizeAndUpload(file) {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setError('Please select an image file')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const img = new Image()
+      img.onload = () => {
+        const MAX = 150
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height))
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.round(img.width * scale)
+        canvas.height = Math.round(img.height * scale)
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85)
+        uploadAvatar(dataUrl)
+      }
+      img.src = e.target.result
+    }
+    reader.readAsDataURL(file)
+  }
+
+  async function uploadAvatar(dataUrl) {
+    setAvatarSaving(true)
+    setError('')
+    setMessage('')
+    try {
+      await axios.post(`/api/users/${user.id}/avatar`,
+        { avatar: dataUrl },
+        { headers: { 'x-user': user.username } }
+      )
+      setAvatar(dataUrl)
+      const me = await axios.get('/api/me', { headers: { 'x-user': user.username } })
+      refreshUser(me.data)
+      setMessage('Profile photo updated')
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to upload photo')
+    } finally {
+      setAvatarSaving(false)
+    }
+  }
+
+  async function removeAvatar() {
+    setAvatarSaving(true)
+    setError('')
+    setMessage('')
+    try {
+      await axios.delete(`/api/users/${user.id}/avatar`, { headers: { 'x-user': user.username } })
+      setAvatar(null)
+      const me = await axios.get('/api/me', { headers: { 'x-user': user.username } })
+      refreshUser(me.data)
+      setMessage('Profile photo removed')
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to remove photo')
+    } finally {
+      setAvatarSaving(false)
+    }
+  }
 
   useEffect(() => {
     // Check user's authentication method
@@ -120,6 +185,48 @@ export default function Profile({ user, refreshUser }) {
         <div style={{maxWidth: '500px', padding: '30px', textAlign: 'center'}}>Loading...</div>
       ) : (
         <form onSubmit={submit} style={{maxWidth: '500px', display: 'flex', flexDirection: 'column', gap: '18px', background: 'rgba(255,255,255,0.78)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', padding: '30px', borderRadius: '16px', boxShadow: '0 4px 24px rgba(0,0,0,0.10)', border: '1px solid rgba(255,255,255,0.6)'}}>
+
+          {/* Profile Photo */}
+          <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:'12px', padding:'20px', background:'rgba(102,126,234,0.06)', borderRadius:'14px', border:'1px solid rgba(102,126,234,0.15)'}}>
+            <div
+              onClick={() => !avatarSaving && fileInputRef.current?.click()}
+              style={{
+                width:'90px', height:'90px', borderRadius:'50%', overflow:'hidden',
+                cursor: avatarSaving ? 'default' : 'pointer',
+                border:'3px solid rgba(102,126,234,0.4)',
+                boxShadow:'0 4px 16px rgba(102,126,234,0.25)',
+                background: avatar ? 'transparent' : 'linear-gradient(135deg,#667eea,#764ba2)',
+                display:'flex', alignItems:'center', justifyContent:'center',
+                position:'relative', flexShrink:0,
+              }}
+            >
+              {avatar
+                ? <img src={avatar} alt="avatar" style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                : <span style={{fontSize:'32px',color:'#fff',fontWeight:'900',fontFamily:"'Poppins',sans-serif"}}>
+                    {(user?.display_name||user?.username||'?').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)}
+                  </span>
+              }
+              {avatarSaving && (
+                <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center',borderRadius:'50%'}}>
+                  <span style={{color:'#fff',fontSize:'11px',fontWeight:'700'}}>...</span>
+                </div>
+              )}
+            </div>
+            <input ref={fileInputRef} type="file" accept="image/*" style={{display:'none'}} onChange={e => resizeAndUpload(e.target.files[0])} />
+            <div style={{display:'flex', gap:'8px'}}>
+              <button type="button" onClick={() => fileInputRef.current?.click()} disabled={avatarSaving}
+                style={{padding:'7px 14px', fontSize:'12px', fontWeight:'600', background:'linear-gradient(135deg,#667eea,#764ba2)', color:'#fff', border:'none', borderRadius:'8px', cursor:'pointer', fontFamily:'Inter,sans-serif'}}>
+                {avatar ? '📷 Change' : '📷 Upload Photo'}
+              </button>
+              {avatar && (
+                <button type="button" onClick={removeAvatar} disabled={avatarSaving}
+                  style={{padding:'7px 14px', fontSize:'12px', fontWeight:'600', background:'rgba(229,62,62,0.1)', color:'#e53e3e', border:'1px solid rgba(229,62,62,0.3)', borderRadius:'8px', cursor:'pointer', fontFamily:'Inter,sans-serif'}}>
+                  Remove
+                </button>
+              )}
+            </div>
+            <p style={{margin:0, fontSize:'11px', color:'#718096', textAlign:'center'}}>JPG, PNG or WebP · Auto-resized to 150px</p>
+          </div>
 
           {/* Authentication Method Indicator */}
           {authMethod && authMethod.authMethod === 'google' && (

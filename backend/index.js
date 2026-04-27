@@ -566,7 +566,7 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 app.get('/api/me', (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Not logged in' });
   const db = openDb();
-  db.get('SELECT id, username, display_name, role, balance, approved FROM users WHERE id = ?', [req.user.id], (err, row) => {
+  db.get('SELECT id, username, display_name, role, balance, approved, avatar FROM users WHERE id = ?', [req.user.id], (err, row) => {
     db.close();
     if (err) return res.status(500).json({ error: 'DB error' });
     res.json(row);
@@ -2174,7 +2174,7 @@ app.get('/api/standings', (req, res) => {
   if (seasonId) {
     // Season-specific standings: use user_seasons.balance for that season
     db.all(`
-      SELECT u.id, u.username, u.display_name, u.role, us.balance
+      SELECT u.id, u.username, u.display_name, u.role, us.balance, u.avatar
       FROM users u
       JOIN user_seasons us ON us.user_id = u.id
       WHERE us.season_id = ? AND u.role != 'admin' AND u.approved = 1
@@ -2187,7 +2187,7 @@ app.get('/api/standings', (req, res) => {
   } else {
     // Overall standings: sum of all season balances (only for currently existing seasons)
     db.all(`
-      SELECT u.id, u.username, u.display_name, u.role,
+      SELECT u.id, u.username, u.display_name, u.role, u.avatar,
         COALESCE(
           (SELECT SUM(us.balance)
            FROM user_seasons us
@@ -3602,6 +3602,52 @@ app.put('/api/users/:id/profile', (req, res) => {
       res.json({ ok: true, message: 'Profile updated' });
     });
   }
+});
+
+// POST /api/users/:id/avatar – upload profile photo (base64 data URL, max 200KB)
+app.post('/api/users/:id/avatar', (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+  const id = Number(req.params.id);
+  if (req.user.id !== id && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  const { avatar } = req.body;
+  if (!avatar) return res.status(400).json({ error: 'avatar required' });
+
+  // Validate it's a base64 image data URL
+  if (!/^data:image\/(jpeg|jpg|png|webp|gif);base64,/.test(avatar)) {
+    return res.status(400).json({ error: 'Invalid image format. Must be a base64 data URL.' });
+  }
+
+  // Limit size to 200KB
+  const sizeBytes = Buffer.byteLength(avatar, 'utf8');
+  if (sizeBytes > 200 * 1024) {
+    return res.status(400).json({ error: 'Image too large. Max 200KB.' });
+  }
+
+  const db = openDb();
+  db.run('UPDATE users SET avatar = ? WHERE id = ?', [avatar, id], function(err) {
+    db.close();
+    if (err) return res.status(500).json({ error: 'DB error' });
+    if (this.changes === 0) return res.status(404).json({ error: 'User not found' });
+    res.json({ ok: true, avatar });
+  });
+});
+
+// DELETE /api/users/:id/avatar – remove profile photo
+app.delete('/api/users/:id/avatar', (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+  const id = Number(req.params.id);
+  if (req.user.id !== id && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const db = openDb();
+  db.run('UPDATE users SET avatar = NULL WHERE id = ?', [id], function(err) {
+    db.close();
+    if (err) return res.status(500).json({ error: 'DB error' });
+    res.json({ ok: true });
+  });
 });
 
 // Admin: Get user's assigned seasons (with per-season balance)

@@ -3,10 +3,20 @@ import axios from 'axios'
 import { celebratePodium } from './celebrations'
 
 // ── Avatar ────────────────────────────────────────────────────────────────────
-function Avatar({ name, size = 40 }) {
+function Avatar({ name, avatar, size = 40 }) {
   const initials = name ? name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2) : '?'
   const colours = ['#e74c3c','#e67e22','#f39c12','#2ecc71','#1abc9c','#3498db','#9b59b6','#e91e8c']
   const idx = name ? [...name].reduce((a,c)=>a+c.charCodeAt(0),0) % colours.length : 0
+  if (avatar) {
+    return (
+      <div style={{
+        width:size, height:size, borderRadius:'50%', overflow:'hidden', flexShrink:0,
+        boxShadow:`0 3px 10px rgba(0,0,0,0.22)`,
+      }}>
+        <img src={avatar} alt={name} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+      </div>
+    )
+  }
   return (
     <div style={{
       width:size, height:size, borderRadius:'50%',
@@ -55,7 +65,7 @@ function PodiumCard({ u, rank, denseRank, isMe }) {
       <div style={{fontSize:styleIdx===0?'32px':'22px', marginBottom:'6px', filter:'drop-shadow(0 2px 4px rgba(0,0,0,0.3))'}}>{medals[styleIdx]}</div>
 
       <div style={{marginBottom:'8px', transform:styleIdx===0?'scale(1.12)':'scale(1)', transition:'transform 0.3s'}}>
-        <Avatar name={u.display_name||u.username} size={styleIdx===0?58:44}/>
+        <Avatar name={u.display_name||u.username} avatar={u.avatar} size={styleIdx===0?58:44}/>
       </div>
 
       <div style={{
@@ -286,7 +296,7 @@ export default function Standings({ user: currentUser, refreshTrigger }) {
                     <td style={{padding:'12px 16px', textAlign:'center', fontWeight:'700', fontSize:'15px', color:'#667eea'}}>#{rank}</td>
                     <td style={{padding:'12px 16px'}}>
                       <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-                        <Avatar name={u.display_name||u.username} size={32}/>
+                        <Avatar name={u.display_name||u.username} avatar={u.avatar} size={32}/>
                         <span style={{fontWeight:'700', fontSize:'13px', color: isMe ? '#4a3ea8' : '#2d3748'}}>
                           {u.display_name||u.username}{isMe?' (You)':''}
                         </span>
