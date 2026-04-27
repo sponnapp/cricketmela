@@ -1925,14 +1925,14 @@ app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'username and password required' });
   const db = openDb();
-  db.get('SELECT id, username, display_name, role, balance, approved, password FROM users WHERE username = ? COLLATE NOCASE', [username], (err, row) => {
+  db.get('SELECT id, username, display_name, role, balance, approved, password, avatar FROM users WHERE username = ? COLLATE NOCASE', [username], (err, row) => {
     db.close();
     if (err) return res.status(500).json({ error: 'DB error' });
     if (!row) return res.status(401).json({ error: 'Invalid credentials' });
     const passwordOk = row.password ? password === row.password : password === 'password';
     if (!passwordOk) return res.status(401).json({ error: 'Invalid credentials' });
     if (!row.approved) return res.status(403).json({ error: 'Account pending admin approval' });
-    res.json({ id: row.id, username: row.username, display_name: row.display_name, role: row.role, balance: row.balance });
+    res.json({ id: row.id, username: row.username, display_name: row.display_name, role: row.role, balance: row.balance, avatar: row.avatar || null });
   });
 });
 
@@ -2111,7 +2111,8 @@ app.get('/auth/google/callback',
       username: req.user.username,
       display_name: req.user.display_name,
       role: req.user.role,
-      balance: req.user.balance
+      balance: req.user.balance,
+      avatar: req.user.avatar || null
     }));
 
     const frontendUrl = process.env.NODE_ENV === 'production'
