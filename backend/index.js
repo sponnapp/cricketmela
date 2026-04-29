@@ -443,12 +443,13 @@ function processAutoLossForNewSeasons(userId, newSeasonIds, callback) {
   const db = openDb();
 
   db.serialize(() => {
-    // Get all completed matches (with winners) in the newly assigned seasons
+    // Get all completed matches (with winners, excluding NO_RESULT) in the newly assigned seasons
     db.all(
       `SELECT m.id, m.season_id, m.home_team, m.away_team, m.winner
        FROM matches m
        WHERE m.season_id IN (${newSeasonIds.map(() => '?').join(',')})
-       AND m.winner IS NOT NULL`,
+       AND m.winner IS NOT NULL
+       AND m.winner != 'NO_RESULT'`,
       newSeasonIds,
       (err1, matches) => {
         if (err1) {
@@ -479,7 +480,7 @@ function processAutoLossForNewSeasons(userId, newSeasonIds, callback) {
                   if (err3) console.error('Error deducting auto-loss season balance:', err3);
 
                   // 2. Create auto-loss vote record
-                  db.run('INSERT INTO votes (match_id, user_id, team, points) VALUES (?, ?, ?, ?)',
+                  db.run('INSERT INTO votes (match_id, user_id, team, points, is_auto_loss) VALUES (?, ?, ?, ?, 1)',
                     [match.id, userId, losingTeam, autoPoints], (err4) => {
                       if (err4) console.error('Error creating auto-loss vote:', err4);
 
