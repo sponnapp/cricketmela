@@ -1565,8 +1565,11 @@ app.post('/api/admin/users', requireRole('admin'), (req, res) => {
           db.run('INSERT OR REPLACE INTO user_seasons (user_id, season_id, balance) VALUES (?, ?, ?)', [userId, seasonId, userBalance], () => {
             pending--;
             if (pending === 0) {
-              db.close();
-              res.status(201).json({ id: userId, username, display_name: displayName, role: userRole, balance: userBalance, approved: 1 });
+              // Process auto-loss for completed matches in newly assigned seasons
+              processAutoLossForNewSeasons(userId, seasonIds, (autoLossErr) => {
+                if (autoLossErr) console.error('Error processing auto-loss for newly created user:', autoLossErr);
+                res.status(201).json({ id: userId, username, display_name: displayName, role: userRole, balance: userBalance, approved: 1 });
+              });
             }
           });
         });
@@ -1638,7 +1641,8 @@ app.post('/api/admin/users/:id/approve', requireRole('admin'), (req, res) => {
                   console.log('Error assigning season:', insErr);
                 }
                 if (completed === season_ids.length) {
-                  db.close();
+                  // Note: do NOT close db here — processAutoLossForNewSeasons uses the same
+                  // shared connection (openDb returns singleton) and closes it when done
 
                   // Process auto-loss for completed matches in newly assigned seasons
                   processAutoLossForNewSeasons(id, season_ids, (autoLossErr) => {
@@ -3732,14 +3736,16 @@ app.put('/api/admin/users/:id/seasons', requireRole('admin'), (req, res) => {
                 if (err2) console.error('Error inserting season assignment:', err2);
                 pending--;
                 if (pending === 0) {
-                  db.close();
                   // If there are new seasons, process auto-loss for them
+                  // Note: do NOT close db here — processAutoLossForNewSeasons uses the same
+                  // shared connection (openDb returns singleton) and closes it when done
                   if (newSeasonIds.length > 0) {
                     processAutoLossForNewSeasons(userId, newSeasonIds, (autoLossErr) => {
                       if (autoLossErr) console.error('Error processing auto-loss for newly assigned seasons:', autoLossErr);
                       res.json({ ok: true, message: 'Seasons updated' });
                     });
                   } else {
+                    db.close();
                     res.json({ ok: true, message: 'Seasons updated' });
                   }
                 }
