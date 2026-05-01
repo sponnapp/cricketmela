@@ -443,12 +443,13 @@ function processAutoLossForNewSeasons(userId, newSeasonIds, callback) {
   const db = openDb();
 
   db.serialize(() => {
-    // Get all completed matches (with winners) in the newly assigned seasons
+    // Get all completed matches (with winners, excluding NO_RESULT) in the newly assigned seasons
     db.all(
       `SELECT m.id, m.season_id, m.home_team, m.away_team, m.winner
        FROM matches m
        WHERE m.season_id IN (${newSeasonIds.map(() => '?').join(',')})
-       AND m.winner IS NOT NULL`,
+       AND m.winner IS NOT NULL
+       AND m.winner != 'NO_RESULT'`,
       newSeasonIds,
       (err1, matches) => {
         if (err1) {
@@ -479,7 +480,7 @@ function processAutoLossForNewSeasons(userId, newSeasonIds, callback) {
                   if (err3) console.error('Error deducting auto-loss season balance:', err3);
 
                   // 2. Create auto-loss vote record
-                  db.run('INSERT INTO votes (match_id, user_id, team, points) VALUES (?, ?, ?, ?)',
+                  db.run('INSERT INTO votes (match_id, user_id, team, points, is_auto_loss) VALUES (?, ?, ?, ?, 1)',
                     [match.id, userId, losingTeam, autoPoints], (err4) => {
                       if (err4) console.error('Error creating auto-loss vote:', err4);
 
@@ -1564,8 +1565,11 @@ app.post('/api/admin/users', requireRole('admin'), (req, res) => {
           db.run('INSERT OR REPLACE INTO user_seasons (user_id, season_id, balance) VALUES (?, ?, ?)', [userId, seasonId, userBalance], () => {
             pending--;
             if (pending === 0) {
-              db.close();
-              res.status(201).json({ id: userId, username, display_name: displayName, role: userRole, balance: userBalance, approved: 1 });
+              // Process auto-loss for completed matches in newly assigned seasons
+              processAutoLossForNewSeasons(userId, seasonIds, (autoLossErr) => {
+                if (autoLossErr) console.error('Error processing auto-loss for newly created user:', autoLossErr);
+                res.status(201).json({ id: userId, username, display_name: displayName, role: userRole, balance: userBalance, approved: 1 });
+              });
             }
           });
         });
@@ -1637,7 +1641,8 @@ app.post('/api/admin/users/:id/approve', requireRole('admin'), (req, res) => {
                   console.log('Error assigning season:', insErr);
                 }
                 if (completed === season_ids.length) {
-                  db.close();
+                  // Note: do NOT close db here — processAutoLossForNewSeasons uses the same
+                  // shared connection (openDb returns singleton) and closes it when done
 
                   // Process auto-loss for completed matches in newly assigned seasons
                   processAutoLossForNewSeasons(id, season_ids, (autoLossErr) => {
@@ -2472,8 +2477,7 @@ app.get('/api/admin/analytics', requireRole('admin'), (req, res) => {
        GROUP BY match_id, team`,
       matchIds,
       (err2, totalsRows) => {
-        db.close();
-        if (err2) return res.status(500).json({ error: 'DB error' });
+        if (err2) { db.close(); return res.status(500).json({ error: 'DB error' }); }
 
         const totalsByMatch = {};
         (totalsRows || []).forEach(total => {
@@ -2656,7 +2660,29 @@ app.get('/api/admin/analytics', requireRole('admin'), (req, res) => {
             })),
         };
 
-        res.json({ overview, teams, timeline, streaks, patterns });
+        // For user-specific analytics, use actual season balance as authoritative net_profit
+        // to avoid multi-step rounding discrepancies from retroactive auto-loss distributions
+        if (requestedUserId) {
+          db.get(`
+            SELECT COALESCE(SUM(us.balance), 0) as total_balance, COUNT(*) as season_count
+            FROM user_seasons us
+            JOIN seasons s ON s.id = us.season_id
+            WHERE us.user_id = ?
+          `, [requestedUserId], (err3, balanceRow) => {
+            db.close();
+            if (!err3 && balanceRow && balanceRow.season_count > 0) {
+              const actualNetProfit = Math.round(balanceRow.total_balance - 1000 * balanceRow.season_count);
+              overview.net_profit = actualNetProfit;
+              if (overview.total_bet > 0) {
+                overview.roi = Number(((actualNetProfit / overview.total_bet) * 100).toFixed(1));
+              }
+            }
+            res.json({ overview, teams, timeline, streaks, patterns });
+          });
+        } else {
+          db.close();
+          res.json({ overview, teams, timeline, streaks, patterns });
+        }
       }
     );
   });
@@ -2720,8 +2746,7 @@ app.get('/api/analytics/overview/:userId', requireRole('picker', 'superuser', 'a
         WHERE match_id IN (${placeholders})
         GROUP BY match_id, team
       `, matchIds, (err3, totals) => {
-        db.close();
-        if (err3) return res.status(500).json({ error: err3.message });
+        if (err3) { db.close(); return res.status(500).json({ error: err3.message }); }
 
         const totalsByMatch = {};
         totals.forEach(t => {
@@ -2734,7 +2759,7 @@ app.get('/api/analytics/overview/:userId', requireRole('picker', 'superuser', 'a
           if (!v.winner) return;
           const totals = totalsByMatch[v.match_id] || {};
           const totalWinner = totals[v.winner] || 0;
-          const totalLoser = Object.keys(totals).reduce((sum, team) => 
+          const totalLoser = Object.keys(totals).reduce((sum, team) =>
             team === v.winner ? sum : sum + (totals[team] || 0), 0);
 
           if (v.team === v.winner && totalWinner > 0) {
@@ -2745,19 +2770,34 @@ app.get('/api/analytics/overview/:userId', requireRole('picker', 'superuser', 'a
           }
         });
 
-        const winRate = overall.total_votes > 0 ? (overall.won / overall.total_votes * 100).toFixed(1) : 0;
-        const roi = overall.total_bet > 0 ? ((netProfit / overall.total_bet) * 100).toFixed(1) : 0;
+        // Use actual season balance as the authoritative net_profit to avoid
+        // multi-step rounding discrepancies from retroactive auto-loss distributions
+        db.get(`
+          SELECT COALESCE(SUM(us.balance), 0) as total_balance, COUNT(*) as season_count
+          FROM user_seasons us
+          JOIN seasons s ON s.id = us.season_id
+          WHERE us.user_id = ?
+        `, [userId], (err4, balanceRow) => {
+          db.close();
+          let actualNetProfit = netProfit;
+          if (!err4 && balanceRow && balanceRow.season_count > 0) {
+            actualNetProfit = Math.round(balanceRow.total_balance - 1000 * balanceRow.season_count);
+          }
 
-        res.json({
-          total_votes: overall.total_votes || 0,
-          won: overall.won || 0,
-          lost: overall.lost || 0,
-          pending: (overall.total_votes || 0) - (overall.won || 0) - (overall.lost || 0),
-          win_rate: parseFloat(winRate),
-          total_bet: overall.total_bet || 0,
-          avg_bet: Math.round(overall.avg_bet || 0),
-          net_profit: netProfit,
-          roi: parseFloat(roi)
+          const winRate = overall.total_votes > 0 ? (overall.won / overall.total_votes * 100).toFixed(1) : 0;
+          const roi = overall.total_bet > 0 ? ((actualNetProfit / overall.total_bet) * 100).toFixed(1) : 0;
+
+          res.json({
+            total_votes: overall.total_votes || 0,
+            won: overall.won || 0,
+            lost: overall.lost || 0,
+            pending: (overall.total_votes || 0) - (overall.won || 0) - (overall.lost || 0),
+            win_rate: parseFloat(winRate),
+            total_bet: overall.total_bet || 0,
+            avg_bet: Math.round(overall.avg_bet || 0),
+            net_profit: actualNetProfit,
+            roi: parseFloat(roi)
+          });
         });
       });
     });
@@ -3731,14 +3771,16 @@ app.put('/api/admin/users/:id/seasons', requireRole('admin'), (req, res) => {
                 if (err2) console.error('Error inserting season assignment:', err2);
                 pending--;
                 if (pending === 0) {
-                  db.close();
                   // If there are new seasons, process auto-loss for them
+                  // Note: do NOT close db here — processAutoLossForNewSeasons uses the same
+                  // shared connection (openDb returns singleton) and closes it when done
                   if (newSeasonIds.length > 0) {
                     processAutoLossForNewSeasons(userId, newSeasonIds, (autoLossErr) => {
                       if (autoLossErr) console.error('Error processing auto-loss for newly assigned seasons:', autoLossErr);
                       res.json({ ok: true, message: 'Seasons updated' });
                     });
                   } else {
+                    db.close();
                     res.json({ ok: true, message: 'Seasons updated' });
                   }
                 }
