@@ -2477,8 +2477,7 @@ app.get('/api/admin/analytics', requireRole('admin'), (req, res) => {
        GROUP BY match_id, team`,
       matchIds,
       (err2, totalsRows) => {
-        db.close();
-        if (err2) return res.status(500).json({ error: 'DB error' });
+        if (err2) { db.close(); return res.status(500).json({ error: 'DB error' }); }
 
         const totalsByMatch = {};
         (totalsRows || []).forEach(total => {
@@ -2661,7 +2660,29 @@ app.get('/api/admin/analytics', requireRole('admin'), (req, res) => {
             })),
         };
 
-        res.json({ overview, teams, timeline, streaks, patterns });
+        // For user-specific analytics, use actual season balance as authoritative net_profit
+        // to avoid multi-step rounding discrepancies from retroactive auto-loss distributions
+        if (requestedUserId) {
+          db.get(`
+            SELECT COALESCE(SUM(us.balance), 0) as total_balance, COUNT(*) as season_count
+            FROM user_seasons us
+            JOIN seasons s ON s.id = us.season_id
+            WHERE us.user_id = ?
+          `, [requestedUserId], (err3, balanceRow) => {
+            db.close();
+            if (!err3 && balanceRow && balanceRow.season_count > 0) {
+              const actualNetProfit = Math.round(balanceRow.total_balance - 1000 * balanceRow.season_count);
+              overview.net_profit = actualNetProfit;
+              if (overview.total_bet > 0) {
+                overview.roi = Number(((actualNetProfit / overview.total_bet) * 100).toFixed(1));
+              }
+            }
+            res.json({ overview, teams, timeline, streaks, patterns });
+          });
+        } else {
+          db.close();
+          res.json({ overview, teams, timeline, streaks, patterns });
+        }
       }
     );
   });
@@ -2725,8 +2746,7 @@ app.get('/api/analytics/overview/:userId', requireRole('picker', 'superuser', 'a
         WHERE match_id IN (${placeholders})
         GROUP BY match_id, team
       `, matchIds, (err3, totals) => {
-        db.close();
-        if (err3) return res.status(500).json({ error: err3.message });
+        if (err3) { db.close(); return res.status(500).json({ error: err3.message }); }
 
         const totalsByMatch = {};
         totals.forEach(t => {
@@ -2739,7 +2759,7 @@ app.get('/api/analytics/overview/:userId', requireRole('picker', 'superuser', 'a
           if (!v.winner) return;
           const totals = totalsByMatch[v.match_id] || {};
           const totalWinner = totals[v.winner] || 0;
-          const totalLoser = Object.keys(totals).reduce((sum, team) => 
+          const totalLoser = Object.keys(totals).reduce((sum, team) =>
             team === v.winner ? sum : sum + (totals[team] || 0), 0);
 
           if (v.team === v.winner && totalWinner > 0) {
@@ -2750,19 +2770,34 @@ app.get('/api/analytics/overview/:userId', requireRole('picker', 'superuser', 'a
           }
         });
 
-        const winRate = overall.total_votes > 0 ? (overall.won / overall.total_votes * 100).toFixed(1) : 0;
-        const roi = overall.total_bet > 0 ? ((netProfit / overall.total_bet) * 100).toFixed(1) : 0;
+        // Use actual season balance as the authoritative net_profit to avoid
+        // multi-step rounding discrepancies from retroactive auto-loss distributions
+        db.get(`
+          SELECT COALESCE(SUM(us.balance), 0) as total_balance, COUNT(*) as season_count
+          FROM user_seasons us
+          JOIN seasons s ON s.id = us.season_id
+          WHERE us.user_id = ?
+        `, [userId], (err4, balanceRow) => {
+          db.close();
+          let actualNetProfit = netProfit;
+          if (!err4 && balanceRow && balanceRow.season_count > 0) {
+            actualNetProfit = Math.round(balanceRow.total_balance - 1000 * balanceRow.season_count);
+          }
 
-        res.json({
-          total_votes: overall.total_votes || 0,
-          won: overall.won || 0,
-          lost: overall.lost || 0,
-          pending: (overall.total_votes || 0) - (overall.won || 0) - (overall.lost || 0),
-          win_rate: parseFloat(winRate),
-          total_bet: overall.total_bet || 0,
-          avg_bet: Math.round(overall.avg_bet || 0),
-          net_profit: netProfit,
-          roi: parseFloat(roi)
+          const winRate = overall.total_votes > 0 ? (overall.won / overall.total_votes * 100).toFixed(1) : 0;
+          const roi = overall.total_bet > 0 ? ((actualNetProfit / overall.total_bet) * 100).toFixed(1) : 0;
+
+          res.json({
+            total_votes: overall.total_votes || 0,
+            won: overall.won || 0,
+            lost: overall.lost || 0,
+            pending: (overall.total_votes || 0) - (overall.won || 0) - (overall.lost || 0),
+            win_rate: parseFloat(winRate),
+            total_bet: overall.total_bet || 0,
+            avg_bet: Math.round(overall.avg_bet || 0),
+            net_profit: actualNetProfit,
+            roi: parseFloat(roi)
+          });
         });
       });
     });
