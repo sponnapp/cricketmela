@@ -5,6 +5,14 @@ import CoinFlip from './CoinFlip'
 
 const POINTS = [10, 20, 50]
 
+function getMatchPoints(match) {
+  if (match?.bet_options) {
+    const parsed = match.bet_options.split(',').map(s => parseInt(s.trim(), 10)).filter(n => n > 0)
+    if (parsed.length >= 2) return parsed
+  }
+  return POINTS
+}
+
 // ── Next Match Vote-Closes Banner ───────────────────────────────────────────
 function NextMatchCountdown({ matches, parseMatchDateTime, seasonBalance }) {
   const [state, setState] = useState({ match: null, timeLeft: null })
@@ -546,7 +554,7 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                           style={{width: '100%', padding: '10px 12px', borderRadius: '10px', border: '2px solid #e2e8f0', fontSize: '13px', fontWeight: '600', fontFamily: 'Inter, sans-serif', backgroundColor: 'white', cursor: 'pointer'}}
                         >
                           <option value="">Select points</option>
-                          {POINTS.map(p => <option key={p} value={p}>{p} pts</option>)}
+                          {getMatchPoints(m).map(p => <option key={p} value={p}>{p} pts</option>)}
                         </select>
                       </div>
                     )}
@@ -633,7 +641,7 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                             style={{padding: '6px 8px', width: '100%', minWidth: '70px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px', fontWeight: '500', fontFamily: 'Inter, sans-serif', backgroundColor: 'white', cursor: 'pointer'}}
                             disabled={votingDisabled}>
                             <option value="">Select</option>
-                            {POINTS.map(p => <option key={p} value={p}>{p}</option>)}
+                            {getMatchPoints(m).map(p => <option key={p} value={p}>{p}</option>)}
                           </select>
                         )}
                       </td>
