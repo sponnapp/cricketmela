@@ -127,6 +127,20 @@ function openDb() {
         console.log('✅ [MIGRATION] is_auto_loss column already exists');
       }
     });
+
+    // Add bet_options column to matches if missing
+    db.all('PRAGMA table_info(matches)', (err, cols) => {
+      if (err) { console.error('[MIGRATION] Failed to inspect matches table:', err); return; }
+      const hasCol = cols && cols.some(c => c.name === 'bet_options');
+      if (!hasCol) {
+        db.run('ALTER TABLE matches ADD COLUMN bet_options TEXT DEFAULT NULL', (e) => {
+          if (e) console.error('[MIGRATION] Failed to add bet_options column:', e);
+          else console.log('✅ [MIGRATION] bet_options column added to matches');
+        });
+      } else {
+        console.log('✅ [MIGRATION] bet_options column already exists');
+      }
+    });
   });
 })();
 
@@ -656,7 +670,7 @@ app.get('/api/seasons/:id/matches', (req, res) => {
   function loadSeasonMatches(dbConn) {
     // Single query: matches + all vote totals via subquery JOIN (eliminates N+1)
     dbConn.all(`
-      SELECT m.id, m.season_id, m.home_team, m.away_team, m.venue, m.scheduled_at, m.winner,
+      SELECT m.id, m.season_id, m.home_team, m.away_team, m.venue, m.scheduled_at, m.winner, m.bet_options,
              vt.team AS vote_team, vt.total AS vote_total
       FROM matches m
       LEFT JOIN (
@@ -684,6 +698,7 @@ app.get('/api/seasons/:id/matches', (req, res) => {
             venue: row.venue,
             scheduled_at: row.scheduled_at,
             winner: row.winner || null,
+            bet_options: row.bet_options || null,
             vote_totals: {}
           });
         }
@@ -704,7 +719,7 @@ app.get('/api/matches', (req, res) => {
   const db = openDb();
   // Admin can see all matches
   if (req.user && req.user.role === 'admin') {
-    db.all('SELECT id, season_id, home_team, away_team, venue, scheduled_at, winner FROM matches', (err, rows) => {
+    db.all('SELECT id, season_id, home_team, away_team, venue, scheduled_at, winner, bet_options FROM matches', (err, rows) => {
       db.close();
       if (err) return res.status(500).json({ error: 'DB error' });
       res.json(rows || []);
@@ -797,12 +812,6 @@ app.post('/api/matches/:id/vote', (req, res) => {
               return res.json({ ok: true, season_balance: seasonBalance, balance: req.user.balance, message: 'Vote unchanged' });
             }
 
-            // Changing vote — check new points against season balance
-            if (points > seasonBalance) {
-              db.close();
-              return res.status(400).json({ error: `Insufficient season balance. Available: ${seasonBalance} pts` });
-            }
-
             // Update vote (delete old, insert new)
             db.run('DELETE FROM votes WHERE id = ?', [existingVote.id], function(err3) {
               if (err3) { db.close(); return res.status(500).json({ error: 'DB error' }); }
@@ -813,12 +822,6 @@ app.post('/api/matches/:id/vote', (req, res) => {
               });
             });
             return;
-          }
-
-          // New vote — check points against season balance
-          if (points > seasonBalance) {
-            db.close();
-            return res.status(400).json({ error: `Insufficient season balance. Available: ${seasonBalance} pts` });
           }
 
           db.run('INSERT INTO votes (match_id, user_id, team, points) VALUES (?, ?, ?, ?)', [matchId, req.user.id, team, points], function(err3) {
@@ -1265,12 +1268,13 @@ app.get('/api/admin/cricbuzz/series', requireRole('admin', 'superuser'), (req, r
       return res.json({ series: [] });
     }
     
-    // Flatten series from all months and filter by date range (next 6 months)
+    // Filter: series that started within 90 days ago (to include ongoing tournaments)
+    // OR series starting in the next 6 months (upcoming)
     const now = new Date();
     const sixMonthsLater = new Date(now);
     sixMonthsLater.setMonth(sixMonthsLater.getMonth() + 6);
-    const thirtyDaysAgo = new Date(now);
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const ninetyDaysAgo = new Date(now);
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
     
     const allSeries = [];
     data.seriesMapProto.forEach(monthGroup => {
@@ -1278,7 +1282,12 @@ app.get('/api/admin/cricbuzz/series', requireRole('admin', 'superuser'), (req, r
         monthGroup.series.forEach(s => {
           // Filter by date range
           const startDate = s.startDt ? new Date(parseInt(s.startDt)) : null;
-          if (startDate && startDate >= thirtyDaysAgo && startDate <= sixMonthsLater) {
+          const endDate = s.endDt ? new Date(parseInt(s.endDt)) : null;
+          // Include if: started within 90 days ago AND (no end date OR ends in future)
+          // OR: starts in the future within 6 months
+          const isOngoing = startDate && startDate >= ninetyDaysAgo && (!endDate || endDate >= now);
+          const isUpcoming = startDate && startDate > now && startDate <= sixMonthsLater;
+          if (isOngoing || isUpcoming) {
             const seriesItem = {
               id: s.id,
               name: s.name,
@@ -3130,9 +3139,16 @@ app.post('/api/admin/matches', requireRole('admin'), (req, res) => {
 // Admin edit match
 app.put('/api/admin/matches/:id', requireRole('admin'), (req, res) => {
   const id = Number(req.params.id);
-  const { home_team, away_team, scheduled_at, venue } = req.body;
+  const { home_team, away_team, scheduled_at, venue, bet_options } = req.body;
+  // Validate bet_options if provided: must be comma-separated positive integers
+  if (bet_options) {
+    const parts = String(bet_options).split(',').map(s => s.trim());
+    const valid = parts.length >= 2 && parts.every(p => /^\d+$/.test(p) && Number(p) > 0);
+    if (!valid) return res.status(400).json({ error: 'bet_options must be comma-separated positive integers e.g. 20,50,100' });
+  }
   const db = openDb();
-  db.run('UPDATE matches SET home_team = ?, away_team = ?, scheduled_at = ?, venue = ? WHERE id = ?', [home_team, away_team, scheduled_at, venue || null, id], function(err) {
+  db.run('UPDATE matches SET home_team = ?, away_team = ?, scheduled_at = ?, venue = ?, bet_options = ? WHERE id = ?',
+    [home_team, away_team, scheduled_at, venue || null, bet_options || null, id], function(err) {
     db.close();
     if (err) return res.status(500).json({ error: 'DB error' });
     if (this.changes === 0) return res.status(404).json({ error: 'Match not found' });
