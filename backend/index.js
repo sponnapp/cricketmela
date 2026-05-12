@@ -812,12 +812,6 @@ app.post('/api/matches/:id/vote', (req, res) => {
               return res.json({ ok: true, season_balance: seasonBalance, balance: req.user.balance, message: 'Vote unchanged' });
             }
 
-            // Changing vote — check new points against season balance
-            if (points > seasonBalance) {
-              db.close();
-              return res.status(400).json({ error: `Insufficient season balance. Available: ${seasonBalance} pts` });
-            }
-
             // Update vote (delete old, insert new)
             db.run('DELETE FROM votes WHERE id = ?', [existingVote.id], function(err3) {
               if (err3) { db.close(); return res.status(500).json({ error: 'DB error' }); }
@@ -828,12 +822,6 @@ app.post('/api/matches/:id/vote', (req, res) => {
               });
             });
             return;
-          }
-
-          // New vote — check points against season balance
-          if (points > seasonBalance) {
-            db.close();
-            return res.status(400).json({ error: `Insufficient season balance. Available: ${seasonBalance} pts` });
           }
 
           db.run('INSERT INTO votes (match_id, user_id, team, points) VALUES (?, ?, ?, ?)', [matchId, req.user.id, team, points], function(err3) {
