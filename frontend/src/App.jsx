@@ -16,10 +16,20 @@ import NewsTicker from './NewsTicker'
 import './styles.css'
 
 // ── User Avatar ───────────────────────────────────────────────────────────────
-function UserAvatar({ name, size = 38 }) {
+function UserAvatar({ name, avatar, size = 38 }) {
   const initials = name ? name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2) : '?'
   const colours = ['#e74c3c','#e67e22','#f39c12','#2ecc71','#1abc9c','#3498db','#9b59b6','#e91e8c']
   const idx = name ? [...name].reduce((a,c)=>a+c.charCodeAt(0),0) % colours.length : 0
+  if (avatar) {
+    return (
+      <div style={{
+        width:size, height:size, borderRadius:'50%', overflow:'hidden', flexShrink:0,
+        boxShadow:`0 0 0 2px rgba(255,255,255,0.6), 0 4px 14px rgba(0,0,0,0.25)`,
+      }}>
+        <img src={avatar} alt={name} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+      </div>
+    )
+  }
   return (
     <div style={{
       width:size, height:size, borderRadius:'50%',
@@ -327,7 +337,7 @@ export default function App() {
               backdropFilter:'blur(6px)',
               minWidth: 0,
             }}>
-              <UserAvatar name={user.display_name||user.username} size={34}/>
+              <UserAvatar name={user.display_name||user.username} avatar={user.avatar} size={34}/>
               <div className="header-user-meta" style={{lineHeight:1.3, paddingRight:'4px'}}>
                 <div style={{
                   fontSize:'13px', fontWeight:'700', color:'#fff',

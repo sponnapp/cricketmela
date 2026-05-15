@@ -778,7 +778,8 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
         home_team: match.home_team,
         away_team: match.away_team,
         venue: match.venue || '',
-        scheduled_at: match.scheduled_at || ''
+        scheduled_at: match.scheduled_at || '',
+        bet_options: match.bet_options || ''
       }
     })
   }
@@ -2148,6 +2149,19 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
             <div style={{margin: '15px 0'}}>
               <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Date & Time:</label>
               <input type="text" value={editModal.formData.scheduled_at} onChange={e => setEditModal({...editModal, formData: {...editModal.formData, scheduled_at: e.target.value}})} placeholder="YYYY-MM-DDTHH:MM" style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd'}} />
+            </div>
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Bet Options:</label>
+              <select value={editModal.formData.bet_options} onChange={e => setEditModal({...editModal, formData: {...editModal.formData, bet_options: e.target.value}})} style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px'}}>
+                <option value="">Default (10, 20, 50)</option>
+                <option value="20,50,100">20, 50, 100 — Playoffs</option>
+                <option value="50,100,200">50, 100, 200 — Semis / Final</option>
+                <option value="10,20,50">10, 20, 50 — Standard</option>
+                <option value="20,50,100,200">20, 50, 100, 200 — Custom</option>
+              </select>
+              {editModal.formData.bet_options && (
+                <p style={{margin: '4px 0 0', fontSize: '12px', color: '#718096'}}>Users will see options: {editModal.formData.bet_options.split(',').join(' / ')} pts</p>
+              )}
             </div>
             <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px'}}>
               <button onClick={() => setEditModal({show: false, match: null, formData: {}})} style={{padding: '8px 16px', backgroundColor: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Cancel</button>

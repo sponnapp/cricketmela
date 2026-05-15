@@ -128,6 +128,20 @@ function openDb() {
         console.log('✅ [MIGRATION] is_auto_loss column already exists');
       }
     });
+
+    // Add bet_options column to matches if missing
+    db.all('PRAGMA table_info(matches)', (err, cols) => {
+      if (err) { console.error('[MIGRATION] Failed to inspect matches table:', err); return; }
+      const hasCol = cols && cols.some(c => c.name === 'bet_options');
+      if (!hasCol) {
+        db.run('ALTER TABLE matches ADD COLUMN bet_options TEXT DEFAULT NULL', (e) => {
+          if (e) console.error('[MIGRATION] Failed to add bet_options column:', e);
+          else console.log('✅ [MIGRATION] bet_options column added to matches');
+        });
+      } else {
+        console.log('✅ [MIGRATION] bet_options column already exists');
+      }
+    });
   });
 })();
 
@@ -444,12 +458,13 @@ function processAutoLossForNewSeasons(userId, newSeasonIds, callback) {
   const db = openDb();
 
   db.serialize(() => {
-    // Get all completed matches (with winners) in the newly assigned seasons
+    // Get all completed matches (with winners, excluding NO_RESULT) in the newly assigned seasons
     db.all(
       `SELECT m.id, m.season_id, m.home_team, m.away_team, m.winner
        FROM matches m
        WHERE m.season_id IN (${newSeasonIds.map(() => '?').join(',')})
-       AND m.winner IS NOT NULL`,
+       AND m.winner IS NOT NULL
+       AND m.winner != 'NO_RESULT'`,
       newSeasonIds,
       (err1, matches) => {
         if (err1) {
@@ -480,7 +495,7 @@ function processAutoLossForNewSeasons(userId, newSeasonIds, callback) {
                   if (err3) console.error('Error deducting auto-loss season balance:', err3);
 
                   // 2. Create auto-loss vote record
-                  db.run('INSERT INTO votes (match_id, user_id, team, points) VALUES (?, ?, ?, ?)',
+                  db.run('INSERT INTO votes (match_id, user_id, team, points, is_auto_loss) VALUES (?, ?, ?, ?, 1)',
                     [match.id, userId, losingTeam, autoPoints], (err4) => {
                       if (err4) console.error('Error creating auto-loss vote:', err4);
 
@@ -567,7 +582,7 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 app.get('/api/me', (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Not logged in' });
   const db = openDb();
-  db.get('SELECT id, username, display_name, role, balance, approved FROM users WHERE id = ?', [req.user.id], (err, row) => {
+  db.get('SELECT id, username, display_name, role, balance, approved, avatar FROM users WHERE id = ?', [req.user.id], (err, row) => {
     db.close();
     if (err) return res.status(500).json({ error: 'DB error' });
     res.json(row);
@@ -654,43 +669,48 @@ app.get('/api/seasons/:id/matches', (req, res) => {
   loadSeasonMatches(db);
 
   function loadSeasonMatches(dbConn) {
-    dbConn.all('SELECT * FROM matches WHERE season_id = ?', [seasonId], (err, rows) => {
-      if (err) { dbConn.close(); return res.status(500).json({ error: 'DB error' }); }
-      // for each match, aggregate votes per team
-      const matches = [];
-      let pending = rows.length;
-      if (pending === 0) { dbConn.close(); return res.json([]); }
-      rows.forEach(row => {
-        db.all(
-          `SELECT v.team, SUM(v.points) as total
-           FROM votes v
-           JOIN users u ON u.id = v.user_id
-           WHERE v.match_id = ? AND u.role != 'admin'
-           GROUP BY v.team`,
-          [row.id],
-          (err2, sums) => {
-            const totals = {};
-            if (!err2 && sums) sums.forEach(s => totals[s.team] = s.total);
-            matches.push({
-              id: row.id,
-              season_id: row.season_id,
-              home_team: row.home_team,
-              away_team: row.away_team,
-              venue: row.venue,
-              scheduled_at: row.scheduled_at,
-              winner: row.winner || null,
-              vote_totals: totals
-            });
-            pending -= 1;
-            if (pending === 0) {
-              dbConn.close();
-              // sort by scheduled_at
-              matches.sort((a,b) => a.scheduled_at.localeCompare(b.scheduled_at));
-              res.json(matches);
-            }
-          }
-        );
-      });
+    // Single query: matches + all vote totals via subquery JOIN (eliminates N+1)
+    dbConn.all(`
+      SELECT m.id, m.season_id, m.home_team, m.away_team, m.venue, m.scheduled_at, m.winner, m.bet_options,
+             vt.team AS vote_team, vt.total AS vote_total
+      FROM matches m
+      LEFT JOIN (
+        SELECT v.match_id, v.team, SUM(v.points) AS total
+        FROM votes v
+        JOIN users u ON u.id = v.user_id
+        WHERE u.role != 'admin'
+        GROUP BY v.match_id, v.team
+      ) vt ON vt.match_id = m.id
+      WHERE m.season_id = ?
+      ORDER BY m.scheduled_at ASC
+    `, [seasonId], (err, rows) => {
+      dbConn.close();
+      if (err) return res.status(500).json({ error: 'DB error' });
+
+      // Fold multiple rows per match (one per team) into { id, ..., vote_totals }
+      const matchMap = new Map();
+      for (const row of (rows || [])) {
+        if (!matchMap.has(row.id)) {
+          matchMap.set(row.id, {
+            id: row.id,
+            season_id: row.season_id,
+            home_team: row.home_team,
+            away_team: row.away_team,
+            venue: row.venue,
+            scheduled_at: row.scheduled_at,
+            winner: row.winner || null,
+            bet_options: row.bet_options || null,
+            vote_totals: {}
+          });
+        }
+        if (row.vote_team) {
+          matchMap.get(row.id).vote_totals[row.vote_team] = row.vote_total;
+        }
+      }
+
+      const matches = Array.from(matchMap.values());
+      matches.sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
+      res.json(matches);
     });
   }
 });
@@ -700,7 +720,7 @@ app.get('/api/matches', (req, res) => {
   const db = openDb();
   // Admin can see all matches
   if (req.user && req.user.role === 'admin') {
-    db.all('SELECT id, season_id, home_team, away_team, venue, scheduled_at, winner FROM matches', (err, rows) => {
+    db.all('SELECT id, season_id, home_team, away_team, venue, scheduled_at, winner, bet_options FROM matches', (err, rows) => {
       db.close();
       if (err) return res.status(500).json({ error: 'DB error' });
       res.json(rows || []);
@@ -727,6 +747,26 @@ app.get('/api/matches/:id/user-vote', (req, res) => {
       return res.json(vote);
     }
   );
+});
+
+// GET /api/seasons/:id/my-votes – all votes for this user in a season (bulk, avoids N+1)
+app.get('/api/seasons/:id/my-votes', (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+  const seasonId = Number(req.params.id);
+  const db = openDb();
+  db.all(`
+    SELECT v.match_id, v.team, v.points
+    FROM votes v
+    JOIN matches m ON m.id = v.match_id
+    WHERE m.season_id = ? AND v.user_id = ?
+  `, [seasonId, req.user.id], (err, rows) => {
+    db.close();
+    if (err) return res.status(500).json({ error: 'DB error' });
+    // Return as { matchId: { team, points } }
+    const result = {};
+    for (const row of (rows || [])) result[row.match_id] = { team: row.team, points: row.points };
+    res.json(result);
+  });
 });
 
 // Voting endpoint: record vote only — no balance change until winner is declared
@@ -773,12 +813,6 @@ app.post('/api/matches/:id/vote', (req, res) => {
               return res.json({ ok: true, season_balance: seasonBalance, balance: req.user.balance, message: 'Vote unchanged' });
             }
 
-            // Changing vote — check new points against season balance
-            if (points > seasonBalance) {
-              db.close();
-              return res.status(400).json({ error: `Insufficient season balance. Available: ${seasonBalance} pts` });
-            }
-
             // Update vote (delete old, insert new)
             db.run('DELETE FROM votes WHERE id = ?', [existingVote.id], function(err3) {
               if (err3) { db.close(); return res.status(500).json({ error: 'DB error' }); }
@@ -789,12 +823,6 @@ app.post('/api/matches/:id/vote', (req, res) => {
               });
             });
             return;
-          }
-
-          // New vote — check points against season balance
-          if (points > seasonBalance) {
-            db.close();
-            return res.status(400).json({ error: `Insufficient season balance. Available: ${seasonBalance} pts` });
           }
 
           db.run('INSERT INTO votes (match_id, user_id, team, points) VALUES (?, ?, ?, ?)', [matchId, req.user.id, team, points], function(err3) {
@@ -1241,12 +1269,13 @@ app.get('/api/admin/cricbuzz/series', requireRole('admin', 'superuser'), (req, r
       return res.json({ series: [] });
     }
     
-    // Flatten series from all months and filter by date range (next 6 months)
+    // Filter: series that started within 90 days ago (to include ongoing tournaments)
+    // OR series starting in the next 6 months (upcoming)
     const now = new Date();
     const sixMonthsLater = new Date(now);
     sixMonthsLater.setMonth(sixMonthsLater.getMonth() + 6);
-    const thirtyDaysAgo = new Date(now);
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const ninetyDaysAgo = new Date(now);
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
     
     const allSeries = [];
     data.seriesMapProto.forEach(monthGroup => {
@@ -1254,7 +1283,12 @@ app.get('/api/admin/cricbuzz/series', requireRole('admin', 'superuser'), (req, r
         monthGroup.series.forEach(s => {
           // Filter by date range
           const startDate = s.startDt ? new Date(parseInt(s.startDt)) : null;
-          if (startDate && startDate >= thirtyDaysAgo && startDate <= sixMonthsLater) {
+          const endDate = s.endDt ? new Date(parseInt(s.endDt)) : null;
+          // Include if: started within 90 days ago AND (no end date OR ends in future)
+          // OR: starts in the future within 6 months
+          const isOngoing = startDate && startDate >= ninetyDaysAgo && (!endDate || endDate >= now);
+          const isUpcoming = startDate && startDate > now && startDate <= sixMonthsLater;
+          if (isOngoing || isUpcoming) {
             const seriesItem = {
               id: s.id,
               name: s.name,
@@ -1541,8 +1575,11 @@ app.post('/api/admin/users', requireRole('admin'), (req, res) => {
           db.run('INSERT OR REPLACE INTO user_seasons (user_id, season_id, balance) VALUES (?, ?, ?)', [userId, seasonId, userBalance], () => {
             pending--;
             if (pending === 0) {
-              db.close();
-              res.status(201).json({ id: userId, username, display_name: displayName, role: userRole, balance: userBalance, approved: 1 });
+              // Process auto-loss for completed matches in newly assigned seasons
+              processAutoLossForNewSeasons(userId, seasonIds, (autoLossErr) => {
+                if (autoLossErr) console.error('Error processing auto-loss for newly created user:', autoLossErr);
+                res.status(201).json({ id: userId, username, display_name: displayName, role: userRole, balance: userBalance, approved: 1 });
+              });
             }
           });
         });
@@ -1614,7 +1651,8 @@ app.post('/api/admin/users/:id/approve', requireRole('admin'), (req, res) => {
                   console.log('Error assigning season:', insErr);
                 }
                 if (completed === season_ids.length) {
-                  db.close();
+                  // Note: do NOT close db here — processAutoLossForNewSeasons uses the same
+                  // shared connection (openDb returns singleton) and closes it when done
 
                   // Process auto-loss for completed matches in newly assigned seasons
                   processAutoLossForNewSeasons(id, season_ids, (autoLossErr) => {
@@ -1926,14 +1964,14 @@ app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'username and password required' });
   const db = openDb();
-  db.get('SELECT id, username, display_name, role, balance, approved, password FROM users WHERE username = ? COLLATE NOCASE', [username], (err, row) => {
+  db.get('SELECT id, username, display_name, role, balance, approved, password, avatar FROM users WHERE username = ? COLLATE NOCASE', [username], (err, row) => {
     db.close();
     if (err) return res.status(500).json({ error: 'DB error' });
     if (!row) return res.status(401).json({ error: 'Invalid credentials' });
     const passwordOk = row.password ? password === row.password : password === 'password';
     if (!passwordOk) return res.status(401).json({ error: 'Invalid credentials' });
     if (!row.approved) return res.status(403).json({ error: 'Account pending admin approval' });
-    res.json({ id: row.id, username: row.username, display_name: row.display_name, role: row.role, balance: row.balance });
+    res.json({ id: row.id, username: row.username, display_name: row.display_name, role: row.role, balance: row.balance, avatar: row.avatar || null });
   });
 });
 
@@ -2112,7 +2150,8 @@ app.get('/auth/google/callback',
       username: req.user.username,
       display_name: req.user.display_name,
       role: req.user.role,
-      balance: req.user.balance
+      balance: req.user.balance,
+      avatar: req.user.avatar || null
     }));
 
     const frontendUrl = process.env.NODE_ENV === 'production'
@@ -2175,7 +2214,7 @@ app.get('/api/standings', (req, res) => {
   if (seasonId) {
     // Season-specific standings: use user_seasons.balance for that season
     db.all(`
-      SELECT u.id, u.username, u.display_name, u.role, us.balance
+      SELECT u.id, u.username, u.display_name, u.role, us.balance, u.avatar
       FROM users u
       JOIN user_seasons us ON us.user_id = u.id
       WHERE us.season_id = ? AND u.role != 'admin' AND u.approved = 1
@@ -2188,7 +2227,7 @@ app.get('/api/standings', (req, res) => {
   } else {
     // Overall standings: sum of all season balances (only for currently existing seasons)
     db.all(`
-      SELECT u.id, u.username, u.display_name, u.role,
+      SELECT u.id, u.username, u.display_name, u.role, u.avatar,
         COALESCE(
           (SELECT SUM(us.balance)
            FROM user_seasons us
@@ -2448,8 +2487,7 @@ app.get('/api/admin/analytics', requireRole('admin'), (req, res) => {
        GROUP BY match_id, team`,
       matchIds,
       (err2, totalsRows) => {
-        db.close();
-        if (err2) return res.status(500).json({ error: 'DB error' });
+        if (err2) { db.close(); return res.status(500).json({ error: 'DB error' }); }
 
         const totalsByMatch = {};
         (totalsRows || []).forEach(total => {
@@ -2632,7 +2670,29 @@ app.get('/api/admin/analytics', requireRole('admin'), (req, res) => {
             })),
         };
 
-        res.json({ overview, teams, timeline, streaks, patterns });
+        // For user-specific analytics, use actual season balance as authoritative net_profit
+        // to avoid multi-step rounding discrepancies from retroactive auto-loss distributions
+        if (requestedUserId) {
+          db.get(`
+            SELECT COALESCE(SUM(us.balance), 0) as total_balance, COUNT(*) as season_count
+            FROM user_seasons us
+            JOIN seasons s ON s.id = us.season_id
+            WHERE us.user_id = ?
+          `, [requestedUserId], (err3, balanceRow) => {
+            db.close();
+            if (!err3 && balanceRow && balanceRow.season_count > 0) {
+              const actualNetProfit = Math.round(balanceRow.total_balance - 1000 * balanceRow.season_count);
+              overview.net_profit = actualNetProfit;
+              if (overview.total_bet > 0) {
+                overview.roi = Number(((actualNetProfit / overview.total_bet) * 100).toFixed(1));
+              }
+            }
+            res.json({ overview, teams, timeline, streaks, patterns });
+          });
+        } else {
+          db.close();
+          res.json({ overview, teams, timeline, streaks, patterns });
+        }
       }
     );
   });
@@ -2696,8 +2756,7 @@ app.get('/api/analytics/overview/:userId', requireRole('picker', 'superuser', 'a
         WHERE match_id IN (${placeholders})
         GROUP BY match_id, team
       `, matchIds, (err3, totals) => {
-        db.close();
-        if (err3) return res.status(500).json({ error: err3.message });
+        if (err3) { db.close(); return res.status(500).json({ error: err3.message }); }
 
         const totalsByMatch = {};
         totals.forEach(t => {
@@ -2710,7 +2769,7 @@ app.get('/api/analytics/overview/:userId', requireRole('picker', 'superuser', 'a
           if (!v.winner) return;
           const totals = totalsByMatch[v.match_id] || {};
           const totalWinner = totals[v.winner] || 0;
-          const totalLoser = Object.keys(totals).reduce((sum, team) => 
+          const totalLoser = Object.keys(totals).reduce((sum, team) =>
             team === v.winner ? sum : sum + (totals[team] || 0), 0);
 
           if (v.team === v.winner && totalWinner > 0) {
@@ -2721,19 +2780,34 @@ app.get('/api/analytics/overview/:userId', requireRole('picker', 'superuser', 'a
           }
         });
 
-        const winRate = overall.total_votes > 0 ? (overall.won / overall.total_votes * 100).toFixed(1) : 0;
-        const roi = overall.total_bet > 0 ? ((netProfit / overall.total_bet) * 100).toFixed(1) : 0;
+        // Use actual season balance as the authoritative net_profit to avoid
+        // multi-step rounding discrepancies from retroactive auto-loss distributions
+        db.get(`
+          SELECT COALESCE(SUM(us.balance), 0) as total_balance, COUNT(*) as season_count
+          FROM user_seasons us
+          JOIN seasons s ON s.id = us.season_id
+          WHERE us.user_id = ?
+        `, [userId], (err4, balanceRow) => {
+          db.close();
+          let actualNetProfit = netProfit;
+          if (!err4 && balanceRow && balanceRow.season_count > 0) {
+            actualNetProfit = Math.round(balanceRow.total_balance - 1000 * balanceRow.season_count);
+          }
 
-        res.json({
-          total_votes: overall.total_votes || 0,
-          won: overall.won || 0,
-          lost: overall.lost || 0,
-          pending: (overall.total_votes || 0) - (overall.won || 0) - (overall.lost || 0),
-          win_rate: parseFloat(winRate),
-          total_bet: overall.total_bet || 0,
-          avg_bet: Math.round(overall.avg_bet || 0),
-          net_profit: netProfit,
-          roi: parseFloat(roi)
+          const winRate = overall.total_votes > 0 ? (overall.won / overall.total_votes * 100).toFixed(1) : 0;
+          const roi = overall.total_bet > 0 ? ((actualNetProfit / overall.total_bet) * 100).toFixed(1) : 0;
+
+          res.json({
+            total_votes: overall.total_votes || 0,
+            won: overall.won || 0,
+            lost: overall.lost || 0,
+            pending: (overall.total_votes || 0) - (overall.won || 0) - (overall.lost || 0),
+            win_rate: parseFloat(winRate),
+            total_bet: overall.total_bet || 0,
+            avg_bet: Math.round(overall.avg_bet || 0),
+            net_profit: actualNetProfit,
+            roi: parseFloat(roi)
+          });
         });
       });
     });
@@ -3066,9 +3140,16 @@ app.post('/api/admin/matches', requireRole('admin'), (req, res) => {
 // Admin edit match
 app.put('/api/admin/matches/:id', requireRole('admin'), (req, res) => {
   const id = Number(req.params.id);
-  const { home_team, away_team, scheduled_at, venue } = req.body;
+  const { home_team, away_team, scheduled_at, venue, bet_options } = req.body;
+  // Validate bet_options if provided: must be comma-separated positive integers
+  if (bet_options) {
+    const parts = String(bet_options).split(',').map(s => s.trim());
+    const valid = parts.length >= 2 && parts.every(p => /^\d+$/.test(p) && Number(p) > 0);
+    if (!valid) return res.status(400).json({ error: 'bet_options must be comma-separated positive integers e.g. 20,50,100' });
+  }
   const db = openDb();
-  db.run('UPDATE matches SET home_team = ?, away_team = ?, scheduled_at = ?, venue = ? WHERE id = ?', [home_team, away_team, scheduled_at, venue || null, id], function(err) {
+  db.run('UPDATE matches SET home_team = ?, away_team = ?, scheduled_at = ?, venue = ?, bet_options = ? WHERE id = ?',
+    [home_team, away_team, scheduled_at, venue || null, bet_options || null, id], function(err) {
     db.close();
     if (err) return res.status(500).json({ error: 'DB error' });
     if (this.changes === 0) return res.status(404).json({ error: 'Match not found' });
@@ -3605,6 +3686,52 @@ app.put('/api/users/:id/profile', (req, res) => {
   }
 });
 
+// POST /api/users/:id/avatar – upload profile photo (base64 data URL, max 200KB)
+app.post('/api/users/:id/avatar', (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+  const id = Number(req.params.id);
+  if (req.user.id !== id && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  const { avatar } = req.body;
+  if (!avatar) return res.status(400).json({ error: 'avatar required' });
+
+  // Validate it's a base64 image data URL
+  if (!/^data:image\/(jpeg|jpg|png|webp|gif);base64,/.test(avatar)) {
+    return res.status(400).json({ error: 'Invalid image format. Must be a base64 data URL.' });
+  }
+
+  // Limit size to 200KB
+  const sizeBytes = Buffer.byteLength(avatar, 'utf8');
+  if (sizeBytes > 200 * 1024) {
+    return res.status(400).json({ error: 'Image too large. Max 200KB.' });
+  }
+
+  const db = openDb();
+  db.run('UPDATE users SET avatar = ? WHERE id = ?', [avatar, id], function(err) {
+    db.close();
+    if (err) return res.status(500).json({ error: 'DB error' });
+    if (this.changes === 0) return res.status(404).json({ error: 'User not found' });
+    res.json({ ok: true, avatar });
+  });
+});
+
+// DELETE /api/users/:id/avatar – remove profile photo
+app.delete('/api/users/:id/avatar', (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+  const id = Number(req.params.id);
+  if (req.user.id !== id && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const db = openDb();
+  db.run('UPDATE users SET avatar = NULL WHERE id = ?', [id], function(err) {
+    db.close();
+    if (err) return res.status(500).json({ error: 'DB error' });
+    res.json({ ok: true });
+  });
+});
+
 // Admin: Get user's assigned seasons (with per-season balance)
 app.get('/api/admin/users/:id/seasons', requireRole('admin'), (req, res) => {
   const userId = Number(req.params.id);
@@ -3661,14 +3788,16 @@ app.put('/api/admin/users/:id/seasons', requireRole('admin'), (req, res) => {
                 if (err2) console.error('Error inserting season assignment:', err2);
                 pending--;
                 if (pending === 0) {
-                  db.close();
                   // If there are new seasons, process auto-loss for them
+                  // Note: do NOT close db here — processAutoLossForNewSeasons uses the same
+                  // shared connection (openDb returns singleton) and closes it when done
                   if (newSeasonIds.length > 0) {
                     processAutoLossForNewSeasons(userId, newSeasonIds, (autoLossErr) => {
                       if (autoLossErr) console.error('Error processing auto-loss for newly assigned seasons:', autoLossErr);
                       res.json({ ok: true, message: 'Seasons updated' });
                     });
                   } else {
+                    db.close();
                     res.json({ ok: true, message: 'Seasons updated' });
                   }
                 }

@@ -304,6 +304,20 @@ db.serialize(() => {
     }
   });
 
+  // Migration: Add avatar column if not present
+  db.all(`PRAGMA table_info(users)`, (err, columns) => {
+    if (err) return;
+    const hasAvatar = columns && columns.some(c => c.name === 'avatar');
+    if (!hasAvatar) {
+      db.run('ALTER TABLE users ADD COLUMN avatar TEXT', (err) => {
+        if (err) console.error('Error adding avatar column:', err);
+        else console.log('✅ Added avatar column to users table');
+      });
+    } else {
+      console.log('✅ avatar column already exists');
+    }
+  });
+
   // Migration: Add email column if not present
   db.all(`PRAGMA table_info(users)`, (err, columns) => {
     if (err) {

@@ -160,9 +160,24 @@ export default function VoteHistory({ user, refreshTrigger }) {
     const settled = filteredVotes.filter(v => v.winner && v.winner !== 'NO_RESULT')
     const won = settled.filter(v => v.team === v.winner).length
     const lost = settled.filter(v => v.team !== v.winner).length
-    const netTotal = settled.reduce((sum, v) => sum + (v.net_points ?? 0), 0)
+
+    // Use authoritative season balances (balance - 1000 starting balance) to avoid
+    // rounding discrepancies caused by multi-step auto-loss distributions
+    let netTotal
+    if (user?.role !== 'admin') {
+      if (selectedSeason === 'all') {
+        netTotal = seasons.reduce((sum, s) => sum + ((s.season_balance ?? 1000) - 1000), 0)
+      } else if (selectedSeasonData) {
+        netTotal = (selectedSeasonData.season_balance ?? 1000) - 1000
+      } else {
+        netTotal = settled.reduce((sum, v) => sum + (v.net_points ?? 0), 0)
+      }
+    } else {
+      netTotal = settled.reduce((sum, v) => sum + (v.net_points ?? 0), 0)
+    }
+
     return { won, lost, netTotal }
-  }, [filteredVotes])
+  }, [filteredVotes, selectedSeason, seasons, selectedSeasonData, user])
 
   return (
     <div style={{padding: '20px', fontFamily: 'Inter, sans-serif'}}>

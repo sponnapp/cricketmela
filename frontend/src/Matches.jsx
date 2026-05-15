@@ -5,6 +5,14 @@ import CoinFlip from './CoinFlip'
 
 const POINTS = [10, 20, 50]
 
+function getMatchPoints(match) {
+  if (match?.bet_options) {
+    const parsed = match.bet_options.split(',').map(s => parseInt(s.trim(), 10)).filter(n => n > 0)
+    if (parsed.length >= 2) return parsed
+  }
+  return POINTS
+}
+
 // ── Next Match Vote-Closes Banner ───────────────────────────────────────────
 function NextMatchCountdown({ matches, parseMatchDateTime, seasonBalance }) {
   const [state, setState] = useState({ match: null, timeLeft: null })
@@ -123,29 +131,27 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
       const sortedMatches = sortMatchesByDateTime(r.data)
       setMatches(sortedMatches)
 
-      // Fetch user's existing votes for all matches
+      // Fetch all user votes for this season in a single request
       const userVotesData = {}
+      try {
+        const voteRes = await axios.get(`/api/seasons/${seasonId}/my-votes`, {
+          headers: { 'x-user': user?.username }
+        })
+        Object.assign(userVotesData, voteRes.data || {})
+      } catch (err) {
+        // No votes yet or endpoint unavailable — safe to ignore
+      }
+
+      setUserVotes(userVotesData)
+
+      // Pre-populate vote UI state for matches not yet edited this session
       for (const match of sortedMatches) {
-        try {
-          const voteRes = await axios.get(`/api/matches/${match.id}/user-vote`, {
-            headers: { 'x-user': user?.username }
-          })
-          if (voteRes.data) {
-            userVotesData[match.id] = voteRes.data
-            // Only pre-populate if the user hasn't manually changed this match
-            // this session — prevents auto-refresh from clobbering in-progress edits
-            if (!dirtyVotes.current.has(match.id)) {
-              setVotes(prev => ({
-                ...prev,
-                [match.id]: { team: voteRes.data.team, points: voteRes.data.points }
-              }))
-            }
-          }
-        } catch (err) {
-          // No existing vote for this match
+        const v = userVotesData[match.id]
+        if (v && !dirtyVotes.current.has(match.id)) {
+          setVotes(prev => ({ ...prev, [match.id]: { team: v.team, points: v.points } }))
         }
       }
-      setUserVotes(userVotesData)
+
       setLoading(false)
     } catch (err) {
       setMatches([])
@@ -548,7 +554,7 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                           style={{width: '100%', padding: '10px 12px', borderRadius: '10px', border: '2px solid #e2e8f0', fontSize: '13px', fontWeight: '600', fontFamily: 'Inter, sans-serif', backgroundColor: 'white', cursor: 'pointer'}}
                         >
                           <option value="">Select points</option>
-                          {POINTS.map(p => <option key={p} value={p}>{p} pts</option>)}
+                          {getMatchPoints(m).map(p => <option key={p} value={p}>{p} pts</option>)}
                         </select>
                       </div>
                     )}
@@ -635,7 +641,7 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                             style={{padding: '6px 8px', width: '100%', minWidth: '70px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px', fontWeight: '500', fontFamily: 'Inter, sans-serif', backgroundColor: 'white', cursor: 'pointer'}}
                             disabled={votingDisabled}>
                             <option value="">Select</option>
-                            {POINTS.map(p => <option key={p} value={p}>{p}</option>)}
+                            {getMatchPoints(m).map(p => <option key={p} value={p}>{p}</option>)}
                           </select>
                         )}
                       </td>
