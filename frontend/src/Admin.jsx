@@ -43,6 +43,8 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
   const [predictionResultsModal, setPredictionResultsModal] = useState({show: false, matchId: null, matchName: '', team1: '', team2: '', seasonId: null, players: [], loadingPlayers: false, formData: {toss_winner: '', man_of_match: '', best_bowler: ''}})
   const [emailSettings, setEmailSettings] = useState({ user: '', password: '', from: '' })
   const [emailMessage, setEmailMessage] = useState('')
+  const [appSettings, setAppSettings] = useState({ standings_name_display: 'display_name' })
+  const [appSettingsMsg, setAppSettingsMsg] = useState('')
   const [userSearch, setUserSearch] = useState('')
   const [cricApiModal, setCricApiModal] = useState({
     show: false,
@@ -64,6 +66,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
     fetchPendingUsers()
     fetchAllMatches()
     fetchEmailSettings()
+    fetchAppSettings()
   }, [refreshTrigger])
 
   async function fetchSeasons() {
@@ -228,6 +231,27 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
       setEmailSettings(r.data)
     } catch (e) {
       console.log('Error fetching email settings:', e)
+    }
+  }
+
+  async function fetchAppSettings() {
+    try {
+      const r = await axios.get('/api/app-settings')
+      setAppSettings(prev => ({ ...prev, ...r.data }))
+    } catch (e) {
+      console.log('Error fetching app settings:', e)
+    }
+  }
+
+  async function saveAppSettings() {
+    try {
+      await axios.post('/api/admin/app-settings', appSettings, {
+        headers: { 'x-user': user?.username || 'admin' }
+      })
+      setAppSettingsMsg('✅ Settings saved successfully!')
+      setTimeout(() => setAppSettingsMsg(''), 3000)
+    } catch (e) {
+      setAppSettingsMsg('❌ Failed to save: ' + (e.response?.data?.error || e.message))
     }
   }
 
@@ -2005,6 +2029,33 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                 <li>Click "Save & Test Configuration" to verify it works</li>
               </ul>
             </div>
+          </section>
+
+          <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
+            <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '6px', fontSize: '18px', fontWeight: 'bold'}}>⚙️ App Settings</h3>
+            <p style={{color: '#666', fontSize: '14px', marginBottom: '20px'}}>Configure display preferences across the app.</p>
+
+            <div style={{marginBottom: '20px'}}>
+              <label style={{display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#333', fontSize: '14px'}}>Standings — Show Name As:</label>
+              <div style={{display: 'flex', gap: '12px', flexWrap: 'wrap'}}>
+                {[{value: 'display_name', label: '🪪 Display Name', desc: 'e.g. Senthil Kumar'}, {value: 'username', label: '🔑 Username', desc: 'e.g. senthil123'}].map(opt => (
+                  <label key={opt.value} style={{display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', flex: '1', minWidth: '180px', padding: '14px 18px', borderRadius: '12px', border: `2px solid ${appSettings.standings_name_display === opt.value ? '#667eea' : '#e2e8f0'}`, background: appSettings.standings_name_display === opt.value ? 'rgba(102,126,234,0.08)' : 'white', transition: 'all 0.15s'}}>
+                    <input type="radio" name="standings_name_display" value={opt.value} checked={appSettings.standings_name_display === opt.value} onChange={() => setAppSettings({...appSettings, standings_name_display: opt.value})} style={{accentColor: '#667eea'}} />
+                    <div>
+                      <div style={{fontWeight: '700', fontSize: '14px', color: appSettings.standings_name_display === opt.value ? '#667eea' : '#333'}}>{opt.label}</div>
+                      <div style={{fontSize: '12px', color: '#718096'}}>{opt.desc}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {appSettingsMsg && <p style={{fontSize: '13px', color: appSettingsMsg.startsWith('✅') ? '#2ecc71' : '#e53e3e', marginBottom: '12px'}}>{appSettingsMsg}</p>}
+            <button onClick={saveAppSettings} style={{padding: '12px 30px', backgroundColor: '#667eea', color: 'white', border: 'none', borderRadius: '25px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px'}}
+              onMouseOver={e => e.target.style.backgroundColor = '#5a67d8'}
+              onMouseOut={e => e.target.style.backgroundColor = '#667eea'}>
+              Save Settings
+            </button>
           </section>
         </>
       )}
