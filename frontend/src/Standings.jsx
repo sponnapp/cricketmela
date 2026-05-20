@@ -30,7 +30,7 @@ function Avatar({ name, avatar, size = 40 }) {
 }
 
 // ── Podium Card ───────────────────────────────────────────────────────────────
-function PodiumCard({ u, rank, denseRank, isMe }) {
+function PodiumCard({ u, rank, denseRank, isMe, nameOf }) {
   const medals  = ['🥇','🥈','🥉']
   const heights = ['130px','100px','80px']
   const displayOrder = [1, 0, 2]   // centre=gold, left=silver, right=bronze
@@ -65,7 +65,7 @@ function PodiumCard({ u, rank, denseRank, isMe }) {
       <div style={{fontSize:styleIdx===0?'32px':'22px', marginBottom:'6px', filter:'drop-shadow(0 2px 4px rgba(0,0,0,0.3))'}}>{medals[styleIdx]}</div>
 
       <div style={{marginBottom:'8px', transform:styleIdx===0?'scale(1.12)':'scale(1)', transition:'transform 0.3s'}}>
-        <Avatar name={u.display_name||u.username} avatar={u.avatar} size={styleIdx===0?58:44}/>
+        <Avatar name={nameOf(u)} avatar={u.avatar} size={styleIdx===0?58:44}/>
       </div>
 
       <div style={{
@@ -75,7 +75,7 @@ function PodiumCard({ u, rank, denseRank, isMe }) {
         fontFamily:"'Poppins',sans-serif",
         maxWidth:'130px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
       }}>
-        {u.display_name||u.username}{isMe?' (You)':''}
+        {nameOf(u)}{isMe?' (You)':''}
       </div>
 
       <div style={{
@@ -111,6 +111,16 @@ export default function Standings({ user: currentUser, refreshTrigger }) {
   const [seasons, setSeasons] = useState([])
   const allowOverall = currentUser?.role === 'admin'
   const [selectedSeason, setSelectedSeason] = useState(allowOverall ? 'all' : '')
+  const [nameField, setNameField] = useState('display_name')
+
+  // Fetch app-wide display settings
+  useEffect(() => {
+    axios.get('/api/app-settings')
+      .then(r => { if (r.data?.standings_name_display) setNameField(r.data.standings_name_display) })
+      .catch(() => {})
+  }, [])
+
+  const nameOf = u => nameField === 'username' ? u.username : (u.display_name || u.username)
 
   // Fetch seasons: admin gets all, other users get only assigned seasons
   useEffect(() => {
@@ -256,7 +266,7 @@ export default function Standings({ user: currentUser, refreshTrigger }) {
         }}>
           <div style={{display:'flex', justifyContent:'center', alignItems:'flex-end', gap:'10px', flexWrap:'wrap'}}>
             {top3.map((u, rank) => (
-              <PodiumCard key={u.id} u={u} rank={rank} denseRank={rankMap.get(u.id)} isMe={currentUser?.username === u.username} />
+              <PodiumCard key={u.id} u={u} rank={rank} denseRank={rankMap.get(u.id)} isMe={currentUser?.username === u.username} nameOf={nameOf} />
             ))}
           </div>
         </div>
@@ -296,9 +306,9 @@ export default function Standings({ user: currentUser, refreshTrigger }) {
                     <td style={{padding:'12px 16px', textAlign:'center', fontWeight:'700', fontSize:'15px', color:'#667eea'}}>#{rank}</td>
                     <td style={{padding:'12px 16px'}}>
                       <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-                        <Avatar name={u.display_name||u.username} avatar={u.avatar} size={32}/>
+                        <Avatar name={nameOf(u)} avatar={u.avatar} size={32}/>
                         <span style={{fontWeight:'700', fontSize:'13px', color: isMe ? '#4a3ea8' : '#2d3748'}}>
-                          {u.display_name||u.username}{isMe?' (You)':''}
+                          {nameOf(u)}{isMe?' (You)':''}
                         </span>
                       </div>
                     </td>

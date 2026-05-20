@@ -4002,6 +4002,40 @@ app.post('/api/admin/email-settings', requireRole('admin'), (req, res) => {
   });
 });
 
+// ── App-wide Settings (public read, admin write) ──────────────────────────────
+
+// Public: Get app settings (readable by all — used by Standings etc.)
+app.get('/api/app-settings', (req, res) => {
+  const db = openDb();
+  db.all("SELECT key, value FROM settings WHERE key IN ('standings_name_display')", (err, rows) => {
+    db.close();
+    if (err) return res.status(500).json({ error: 'DB error' });
+    const result = {};
+    (rows || []).forEach(r => { result[r.key] = r.value; });
+    res.json(result);
+  });
+});
+
+// Admin: Save app settings
+app.post('/api/admin/app-settings', requireRole('admin'), (req, res) => {
+  const { standings_name_display } = req.body;
+  const allowed = ['display_name', 'username'];
+  if (standings_name_display && !allowed.includes(standings_name_display)) {
+    return res.status(400).json({ error: 'Invalid value for standings_name_display' });
+  }
+  const db = openDb();
+  db.run(
+    `INSERT INTO settings (key, value) VALUES ('standings_name_display', ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [standings_name_display || 'display_name'],
+    function(err) {
+      db.close();
+      if (err) return res.status(500).json({ error: 'DB error' });
+      res.json({ ok: true });
+    }
+  );
+});
+
 // Diagnostic endpoint to check admin emails
 app.get('/api/admin/check-emails', (req, res) => {
   const db = openDb();
