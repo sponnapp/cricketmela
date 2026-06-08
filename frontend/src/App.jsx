@@ -288,7 +288,7 @@ export default function App() {
 
             {/* Brand */}
             <div className="header-brand" style={{display:'flex',alignItems:'center',gap:'8px',whiteSpace:'nowrap'}}>
-              <span style={{fontSize:'clamp(20px,3.5vw,28px)',lineHeight:1,filter:'drop-shadow(0 0 6px rgba(255,180,0,0.5))'}}>⚽</span>
+              <span style={{fontSize:'clamp(20px,3.5vw,28px)',lineHeight:1,filter:'drop-shadow(0 0 6px rgba(255,180,0,0.5))'}}>⭐</span>
               <span style={{
                 fontFamily:"'Poppins',sans-serif",
                 fontSize:'clamp(18px,3.5vw,26px)',
