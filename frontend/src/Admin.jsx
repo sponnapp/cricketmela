@@ -31,6 +31,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
   const [seasonBalancesLoading, setSeasonBalancesLoading] = useState({})
   const [expandedUserRows, setExpandedUserRows] = useState({})
   const [newSeason, setNewSeason] = useState('')
+  const [newSeasonSport, setNewSeasonSport] = useState('cricket')
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'picker', balance: 500, display_name: '', email: '', season_ids: [] })
   const [csvInput, setCsvInput] = useState('')
   const [selectedSeason, setSelectedSeason] = useState('')
@@ -154,14 +155,22 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
       monthIndex = parseInt(isoDate[2], 10) - 1
       day = parseInt(isoDate[3], 10)
     } else {
-      const dmy = datePart.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2}|\d{4})$/)
-      if (!dmy) return null
-      day = parseInt(dmy[1], 10)
-      const monthKey = dmy[2].toLowerCase()
-      if (monthMap[monthKey] === undefined) return null
-      monthIndex = monthMap[monthKey]
-      const yearRaw = dmy[3]
-      year = yearRaw.length === 2 ? 2000 + parseInt(yearRaw, 10) : parseInt(yearRaw, 10)
+      // Handle DD/MM/YYYY or D/M/YYYY (slash-separated, day first)
+      const slashDmy = datePart.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+      if (slashDmy) {
+        day = parseInt(slashDmy[1], 10)
+        monthIndex = parseInt(slashDmy[2], 10) - 1
+        year = parseInt(slashDmy[3], 10)
+      } else {
+        const dmy = datePart.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2}|\d{4})$/)
+        if (!dmy) return null
+        day = parseInt(dmy[1], 10)
+        const monthKey = dmy[2].toLowerCase()
+        if (monthMap[monthKey] === undefined) return null
+        monthIndex = monthMap[monthKey]
+        const yearRaw = dmy[3]
+        year = yearRaw.length === 2 ? 2000 + parseInt(yearRaw, 10) : parseInt(yearRaw, 10)
+      }
     }
 
     const timePart = timePartRaw.trim()
@@ -178,6 +187,10 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
     }
 
     if (isoDate && !ampm) {
+      return new Date(Date.UTC(year, monthIndex, day, hour, minute, second, 0))
+    }
+    // For slash/dmy dates: 24h time (no AM/PM) means GMT/UTC; AM/PM means local time (cricket CSVs in IST)
+    if (!ampm) {
       return new Date(Date.UTC(year, monthIndex, day, hour, minute, second, 0))
     }
     return new Date(year, monthIndex, day, hour, minute, second, 0)
@@ -491,10 +504,11 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
   async function addSeason() {
     if (!newSeason) return toast('warning', 'Missing Input', 'Enter season name')
     try {
-      await axios.post('/api/admin/seasons', { name: newSeason }, {
+      await axios.post('/api/admin/seasons', { name: newSeason, sport: newSeasonSport }, {
         headers: { 'x-user': user?.username || 'admin' }
       })
       setNewSeason('')
+      setNewSeasonSport('cricket')
       fetchSeasons()
       toast('success', 'Success', 'Season created successfully')
     } catch (e) {
@@ -706,7 +720,8 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
       show: true,
       season: season,
       formData: {
-        name: season.name
+        name: season.name,
+        sport: season.sport || 'cricket'
       }
     })
   }
@@ -718,7 +733,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
     }
     try {
       await axios.put(`/api/admin/seasons/${editSeasonModal.season.id}`,
-        { name: editSeasonModal.formData.name },
+        { name: editSeasonModal.formData.name, sport: editSeasonModal.formData.sport || 'cricket' },
         { headers: { 'x-user': user?.username || 'admin' } }
       )
       toast('success', 'Success', 'Season updated successfully')
@@ -1145,8 +1160,12 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
 
           <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
             <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Create Season</h3>
-            <div style={{display: 'flex', gap: '10px'}}>
-              <input value={newSeason} onChange={e => setNewSeason(e.target.value)} placeholder="Season name" style={{flex: 1, padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none'}} onFocus={(e) => e.target.style.borderColor = '#2ecc71'} onBlur={(e) => e.target.style.borderColor = '#ddd'} />
+            <div style={{display: 'flex', gap: '10px', flexWrap: 'wrap'}}>
+              <input value={newSeason} onChange={e => setNewSeason(e.target.value)} placeholder="Season name" style={{flex: 1, minWidth: '140px', padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none'}} onFocus={(e) => e.target.style.borderColor = '#2ecc71'} onBlur={(e) => e.target.style.borderColor = '#ddd'} />
+              <select value={newSeasonSport} onChange={e => setNewSeasonSport(e.target.value)} style={{padding: '12px 15px', border: '1px solid #ddd', borderRadius: '25px', fontSize: '14px', outline: 'none', cursor: 'pointer', background: 'white'}}>
+                <option value="cricket">🏏 Cricket</option>
+                <option value="football">⚽ Football</option>
+              </select>
               <button onClick={addSeason} style={{padding: '12px 30px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '25px', cursor: 'pointer', fontWeight: 'bold'}} onMouseOver={(e) => e.target.style.backgroundColor = '#27ae60'} onMouseOut={(e) => e.target.style.backgroundColor = '#2ecc71'}>Create</button>
             </div>
           </section>
@@ -1702,6 +1721,14 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
           {!isSuperuser && (
             <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
               <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '15px', fontSize: '18px', fontWeight: 'bold'}}>Bulk Upload CSV Matches</h3>
+              <div style={{marginBottom: '12px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap'}}>
+                <label style={{fontWeight: 'bold', color: '#1a1a1a', whiteSpace: 'nowrap'}}>Upload to Season:</label>
+                <select value={selectedSeason} onChange={e => { setSelectedSeason(e.target.value); fetchMatches(e.target.value) }}
+                  style={{padding: '10px 15px', border: '2px solid #2ecc71', borderRadius: '25px', fontSize: '14px', outline: 'none', cursor: 'pointer', flex: 1, maxWidth: '280px', fontWeight: '600', background: 'white'}}>
+                  <option value="">-- Select Season --</option>
+                  {seasons.map(s => <option key={s.id} value={s.id}>{s.sport === 'football' ? '⚽' : '🏏'} {s.name}</option>)}
+                </select>
+              </div>
               <small style={{display: 'block', marginBottom: '10px', color: '#666'}}>Format: Date,Venue,Team 1,Team 2,Time</small>
               <textarea
                 value={csvInput}
@@ -2356,6 +2383,13 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
             <div style={{margin: '15px 0'}}>
               <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Season Name:</label>
               <input type="text" value={editSeasonModal.formData.name} onChange={e => setEditSeasonModal({...editSeasonModal, formData: {...editSeasonModal.formData, name: e.target.value}})} style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd'}} />
+            </div>
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Sport:</label>
+              <select value={editSeasonModal.formData.sport || 'cricket'} onChange={e => setEditSeasonModal({...editSeasonModal, formData: {...editSeasonModal.formData, sport: e.target.value}})} style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd', cursor: 'pointer'}}>
+                <option value="cricket">🏏 Cricket</option>
+                <option value="football">⚽ Football</option>
+              </select>
             </div>
             <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px'}}>
               <button onClick={() => setEditSeasonModal({show: false, season: null, formData: {}})} style={{padding: '8px 16px', backgroundColor: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Cancel</button>

@@ -90,10 +90,10 @@ export default function Seasons({ user, onSelect, refreshTrigger }) {
 
   return (
     <div style={styles.container}>
-      <h2 style={styles.title}>🏆 Cricket Seasons</h2>
+      <h2 style={styles.title}>🏆 My Seasons</h2>
       {seasons.length === 0 ? (
         <div style={styles.emptyState}>
-          <div style={{fontSize: '60px', marginBottom: '20px'}}>🏏</div>
+          <div style={{fontSize: '60px', marginBottom: '20px'}}>🏆</div>
           <p style={{fontSize: '18px'}}>No seasons available yet</p>
         </div>
       ) : (
@@ -104,13 +104,13 @@ export default function Seasons({ user, onSelect, refreshTrigger }) {
               style={styles.card(hoveredId === s.id)}
               onMouseEnter={() => setHoveredId(s.id)}
               onMouseLeave={() => setHoveredId(null)}
-              onClick={() => onSelect(s.id)}
+              onClick={() => onSelect(s.id, s.sport || 'cricket')}  
             >
               <div style={styles.badge(hoveredId === s.id)}>
                 LIVE
               </div>
               <div style={styles.iconContainer}>
-                🏏
+                {s.sport === 'football' ? '⚽' : '🏏'}
               </div>
               <div style={styles.seasonName}>
                 {s.name}
