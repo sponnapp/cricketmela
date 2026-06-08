@@ -358,6 +358,7 @@ export default function Matches({ seasonId, sport, user, refreshUser, refreshTri
   function getVotingDisabledReason(match) {
     if (user?.role === 'admin') return 'Admin View'
     if (match.winner === 'NO_RESULT') return 'No Result'
+    if (match.winner === 'Draw') return 'Draw'
     if (match.winner) return 'Winner Declared'
     if (!parseMatchDateTime(match.scheduled_at)) return 'Schedule Invalid'
     if (isVotingClosed(match.scheduled_at)) return 'Voting Closed'
@@ -485,7 +486,7 @@ export default function Matches({ seasonId, sport, user, refreshUser, refreshTri
               const disabledReason = getVotingDisabledReason(m)
               const isPending = !votingDisabled && !!votes[m.id]?.team && !!votes[m.id]?.points &&
                 (!userVotes[m.id] || votes[m.id].team !== userVotes[m.id].team || String(votes[m.id].points) !== String(userVotes[m.id].points))
-              const borderColor = isPending ? '#f39c12' : m.winner === 'NO_RESULT' ? '#a0aec0' : m.winner ? '#38a169' : votingDisabled ? '#a0aec0' : '#667eea'
+              const borderColor = isPending ? '#f39c12' : m.winner === 'NO_RESULT' ? '#a0aec0' : m.winner === 'Draw' ? '#667eea' : m.winner ? '#38a169' : votingDisabled ? '#a0aec0' : '#667eea'
               const globalIdx = matches.indexOf(m)
               return (
                 <div key={m.id} style={{
@@ -500,6 +501,8 @@ export default function Matches({ seasonId, sport, user, refreshUser, refreshTri
                     <span style={{fontSize: '11px', fontWeight: '700', color: 'rgba(255,255,255,0.8)', letterSpacing: '0.5px'}}>MATCH {globalIdx + 1}</span>
                     {m.winner === 'NO_RESULT' ? (
                       <span style={{fontSize: '11px', color: '#cbd5e0', fontWeight: '700', background: 'rgba(255,255,255,0.15)', padding: '2px 8px', borderRadius: '10px'}}>⚪ No Result</span>
+                    ) : m.winner === 'Draw' ? (
+                      <span style={{fontSize: '11px', color: '#bee3f8', fontWeight: '700', background: 'rgba(255,255,255,0.15)', padding: '2px 8px', borderRadius: '10px'}}>🤝 Draw</span>
                     ) : m.winner ? (
                       <span style={{fontSize: '11px', color: '#68d391', fontWeight: '700', background: 'rgba(255,255,255,0.15)', padding: '2px 8px', borderRadius: '10px'}}>✅ {m.winner} won</span>
                     ) : isVotingClosed(m.scheduled_at) ? (
@@ -591,6 +594,9 @@ export default function Matches({ seasonId, sport, user, refreshUser, refreshTri
                   <th style={{padding: '14px 12px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Points</th>
                   <th style={{padding: '14px 12px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>T1<br/>Odds</th>
                   <th style={{padding: '14px 12px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>T2<br/>Odds</th>
+                  {sport === 'football' && (
+                    <th style={{padding: '14px 12px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Draw<br/>Odds</th>
+                  )}
                   <th style={{padding: '14px 12px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Winner</th>
                 </tr>
               </thead>
@@ -675,9 +681,18 @@ export default function Matches({ seasonId, sport, user, refreshUser, refreshTri
                           <span style={{fontWeight: '700', fontSize: '15px', color: '#667eea', backgroundColor: '#edf2f7', padding: '4px 12px', borderRadius: '8px', display: 'inline-block'}}>{m.vote_totals && m.vote_totals[m.away_team] ? m.vote_totals[m.away_team] : 0}</span>
                         ) : <span style={{color: '#a0aec0', fontSize: '12px'}}>-</span>}
                       </td>
+                      {sport === 'football' && (
+                        <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', textAlign: 'center'}}>
+                          {votingDisabled ? (
+                            <span style={{fontWeight: '700', fontSize: '15px', color: '#667eea', backgroundColor: '#edf2f7', padding: '4px 12px', borderRadius: '8px', display: 'inline-block'}}>{m.vote_totals && m.vote_totals['Draw'] ? m.vote_totals['Draw'] : 0}</span>
+                          ) : <span style={{color: '#a0aec0', fontSize: '12px'}}>-</span>}
+                        </td>
+                      )}
                       <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', textAlign: 'center'}}>
                         {m.winner === 'NO_RESULT' ? (
                           <span style={{color: '#718096', fontWeight: '700', backgroundColor: '#edf2f7', padding: '6px 12px', borderRadius: '8px', fontSize: '12px', display: 'inline-block', border: '1px solid #cbd5e0'}}>⚪ No Result</span>
+                        ) : m.winner === 'Draw' ? (
+                          <span style={{color: '#553c9a', fontWeight: '700', backgroundColor: '#e9d8fd', padding: '6px 12px', borderRadius: '8px', fontSize: '12px', display: 'inline-block', border: '1px solid #d6bcfa'}}>🤝 Draw</span>
                         ) : m.winner ? (
                           <span style={{color: '#38a169', fontWeight: '700', backgroundColor: '#f0fff4', padding: '6px 12px', borderRadius: '8px', fontSize: '12px', display: 'inline-block', border: '1px solid #c6f6d5'}}>{m.winner}</span>
                         ) : (
