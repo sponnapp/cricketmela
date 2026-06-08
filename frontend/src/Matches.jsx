@@ -96,7 +96,7 @@ function NextMatchCountdown({ matches, parseMatchDateTime, seasonBalance }) {
   )
 }
 
-export default function Matches({ seasonId, user, refreshUser, refreshTrigger }) {
+export default function Matches({ seasonId, sport, user, refreshUser, refreshTrigger }) {
   const [matches, setMatches] = useState([])
   const [loading, setLoading] = useState(true)
   const [votes, setVotes] = useState({})
@@ -259,14 +259,22 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
       monthIndex = parseInt(isoDate[2], 10) - 1
       day = parseInt(isoDate[3], 10)
     } else {
-      const dmy = datePart.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2}|\d{4})$/)
-      if (!dmy) return null
-      day = parseInt(dmy[1], 10)
-      const monthKey = dmy[2].toLowerCase()
-      if (monthMap[monthKey] === undefined) return null
-      monthIndex = monthMap[monthKey]
-      const yearRaw = dmy[3]
-      year = yearRaw.length === 2 ? 2000 + parseInt(yearRaw, 10) : parseInt(yearRaw, 10)
+      // Handle DD/MM/YYYY or D/M/YYYY (slash-separated, day first)
+      const slashDmy = datePart.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+      if (slashDmy) {
+        day = parseInt(slashDmy[1], 10)
+        monthIndex = parseInt(slashDmy[2], 10) - 1
+        year = parseInt(slashDmy[3], 10)
+      } else {
+        const dmy = datePart.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2}|\d{4})$/)
+        if (!dmy) return null
+        day = parseInt(dmy[1], 10)
+        const monthKey = dmy[2].toLowerCase()
+        if (monthMap[monthKey] === undefined) return null
+        monthIndex = monthMap[monthKey]
+        const yearRaw = dmy[3]
+        year = yearRaw.length === 2 ? 2000 + parseInt(yearRaw, 10) : parseInt(yearRaw, 10)
+      }
     }
 
     const timePart = timePartRaw.trim()
@@ -283,6 +291,10 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
     }
 
     if (isoDate && !ampm) {
+      return new Date(Date.UTC(year, monthIndex, day, hour, minute, second, 0))
+    }
+    // For slash/dmy dates: 24h time (no AM/PM) means GMT/UTC; AM/PM means local time (cricket CSVs in IST)
+    if (!ampm) {
       return new Date(Date.UTC(year, monthIndex, day, hour, minute, second, 0))
     }
     return new Date(year, monthIndex, day, hour, minute, second, 0)
@@ -537,14 +549,14 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                     ) : (
                       <div>
                         <div style={{display: 'flex', gap: '8px', marginBottom: '10px'}}>
-                          {[m.home_team, m.away_team].map(team => {
+                          {[m.home_team, ...(sport === 'football' ? ['Draw'] : []), m.away_team].map(team => {
                             const selected = votes[m.id]?.team === team
                             return (
                               <label key={team} style={{flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '10px 6px', borderRadius: '10px', cursor: 'pointer', border: `2px solid ${selected ? '#667eea' : '#e2e8f0'}`, background: selected ? 'rgba(102,126,234,0.12)' : 'white', fontSize: '12px', fontWeight: '700', color: selected ? '#667eea' : '#4a5568', textAlign: 'center', transition: 'all 0.15s ease'}}>
                                 <input type="radio" name={`vote-${m.id}`} value={team} checked={selected}
                                   onChange={e => { dirtyVotes.current.add(m.id); setVotes({...votes, [m.id]: {...(votes[m.id] || {}), team: e.target.value}}) }}
                                   style={{display: 'none'}} />
-                                {team}
+                                {team === 'Draw' ? '🤝 Draw' : team}
                               </label>
                             )
                           })}
@@ -623,6 +635,14 @@ export default function Matches({ seasonId, user, refreshUser, refreshTrigger })
                                 disabled={votingDisabled} style={{accentColor: '#667eea'}} />
                               <span style={{fontWeight: '500'}}>{m.home_team}</span>
                             </label>
+                            {sport === 'football' && (
+                              <label style={{display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px'}}>
+                                <input type="radio" name={`vote-${m.id}`} value="Draw" checked={votes[m.id]?.team === 'Draw'}
+                                  onChange={e => { dirtyVotes.current.add(m.id); setVotes({...votes, [m.id]: {...(votes[m.id] || {}), team: e.target.value}}) }}
+                                  disabled={votingDisabled} style={{accentColor: '#667eea'}} />
+                                <span style={{fontWeight: '500'}}>🤝 Draw</span>
+                              </label>
+                            )}
                             <label style={{display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px'}}>
                               <input type="radio" name={`vote-${m.id}`} value={m.away_team} checked={votes[m.id]?.team === m.away_team}
                                 onChange={e => { dirtyVotes.current.add(m.id); setVotes({...votes, [m.id]: {...(votes[m.id] || {}), team: e.target.value}}) }}

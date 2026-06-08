@@ -253,7 +253,7 @@ export default function Login({ onLogin }) {
           background:'linear-gradient(180deg, #FFD700 0%, #FF8C00 50%, #FF4500 100%)',
           WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent',
           filter:'drop-shadow(0 2px 10px rgba(255,160,0,0.6))',
-        }}>🏏 CRICKET MELA</h1>
+        }}>⭐ SPORTS MELA</h1>
         <div style={{ fontSize:'clamp(11px, 2vw, 13px)', color:'#acd8ff',
           letterSpacing:'4px', textTransform:'uppercase', marginTop:'5px', fontWeight:'600' }}>
           IPL &amp; International Prediction Game
@@ -580,7 +580,7 @@ export default function Login({ onLogin }) {
           border:'1px solid rgba(255,200,50,0.22)',
           fontSize:'10.5px', color:'rgba(255,240,180,0.8)', lineHeight:'1.6', textAlign:'center',
         }}>
-          ⚠️ <strong style={{ color:'#f9d423' }}>Disclaimer:</strong> Cricket Mela is a{' '}
+          ⚠️ <strong style={{ color:'#f9d423' }}>Disclaimer:</strong> Sports Mela is a{' '}
           <strong>fun prediction game only</strong>. No real money involved.
           Points are virtual with no monetary value. Must{' '}
           <strong style={{ color:'#ff7070' }}>not</strong> be used for real-money gambling.

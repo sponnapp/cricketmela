@@ -97,6 +97,7 @@ export default function App() {
 
   const [toasts, setToasts] = useState([])
   const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const [seasonSport, setSeasonSport] = useState('cricket')
   const [headerBalance, setHeaderBalance] = useState(null)
 
   // Fetch overall balance for header chip
@@ -189,7 +190,7 @@ export default function App() {
         const parsed=JSON.parse(decodeURIComponent(params.get('user')||''))
         localStorage.setItem('user',JSON.stringify(parsed));setUser(parsed)
         window.history.replaceState({ page:'seasons', seasonId:null, adminTab:'season' },'','/')
-        toast('success',`Welcome, ${parsed.display_name||parsed.username}! 🏏`,'Ready to make your picks?')
+        toast('success',`Welcome, ${parsed.display_name||parsed.username}! �`,'Ready to make your picks?')
       }catch(e){console.error(e)}
     }
     if(params.get('error')==='pending_approval'){
@@ -287,7 +288,7 @@ export default function App() {
 
             {/* Brand */}
             <div className="header-brand" style={{display:'flex',alignItems:'center',gap:'8px',whiteSpace:'nowrap'}}>
-              <span style={{fontSize:'clamp(20px,3.5vw,28px)',lineHeight:1,filter:'drop-shadow(0 0 6px rgba(255,180,0,0.5))'}}>🏏</span>
+              <span style={{fontSize:'clamp(20px,3.5vw,28px)',lineHeight:1,filter:'drop-shadow(0 0 6px rgba(255,180,0,0.5))'}}>⭐</span>
               <span style={{
                 fontFamily:"'Poppins',sans-serif",
                 fontSize:'clamp(18px,3.5vw,26px)',
@@ -297,7 +298,7 @@ export default function App() {
                 backgroundClip:'text', color:'transparent',
                 filter:'drop-shadow(0 0 10px rgba(255,180,0,0.4))',
                 lineHeight:1.2,
-              }}>Cricket Mela</span>
+              }}>Sports Mela</span>
               <button
                 className="header-sparkle-btn"
                 onClick={() => celebrateVictory()}
@@ -446,11 +447,11 @@ export default function App() {
 
       <main className={disclaimerHidden ? '' : 'disclaimer-visible'}>
         {!user ? (
-          <Login onLogin={u=>{ setUser(u); toast('success',`Welcome, ${u.display_name||u.username}! 🏏`,'Ready to make your picks?') }}/>
+          <Login onLogin={u=>{ setUser(u); toast('success',`Welcome, ${u.display_name||u.username}! �`,'Ready to make your picks?') }}/>
         ):(
           <>
-            {page==='seasons'    && <Seasons user={user} onSelect={id=>{setSeasonId(id);setPage('matches')}} refreshTrigger={refreshTrigger}/>}
-            {page==='matches'    && seasonId && <Matches seasonId={seasonId} user={user} refreshUser={u=>setUser(u)} refreshTrigger={refreshTrigger}/>}
+            {page==='seasons'    && <Seasons user={user} onSelect={(id, sport) => { setSeasonId(id); setSeasonSport(sport || 'cricket'); setPage('matches') }} refreshTrigger={refreshTrigger}/>}
+            {page==='matches'    && seasonId && <Matches seasonId={seasonId} sport={seasonSport} user={user} refreshUser={u=>setUser(u)} refreshTrigger={refreshTrigger}/>}
             {page==='admin'      && <Admin user={user} initialTab={adminTab} onTabChange={setAdminTab} addToast={addToast} refreshTrigger={refreshTrigger}/>}
             {page==='history'    && <VoteHistory user={user} refreshTrigger={refreshTrigger}/>}
             {page==='analytics'  && <Analytics user={user} refreshTrigger={refreshTrigger}/>}
@@ -463,10 +464,10 @@ export default function App() {
 
       <footer className={`disclaimer-ribbon${disclaimerHidden ? ' hidden' : ''}`}>
         <span style={{color:'#ffe082',fontWeight:'bold'}}>⚠️ Disclaimer:</span>{' '}
-        Cricket Mela is a <strong style={{color:'#fff'}}>fun prediction game only</strong> — no real money involved.
+        Sports Mela is a <strong style={{color:'#fff'}}>fun prediction game only</strong> — no real money involved.
         Virtual points have no monetary value and cannot be exchanged for cash.
         This platform must <strong style={{color:'#ff6b6b'}}>not</strong> be used for real-money gambling.
-        &nbsp;|&nbsp; 🏏 Play responsibly &amp; enjoy the game!
+        &nbsp;|&nbsp; 🏆 Play responsibly &amp; enjoy the game!
       </footer>
     </div>
     </>

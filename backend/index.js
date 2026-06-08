@@ -177,14 +177,22 @@ function parseMatchDateTime(value) {
     monthIndex = parseInt(isoDate[2], 10) - 1;
     day = parseInt(isoDate[3], 10);
   } else {
-    const dmy = datePart.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2}|\d{4})$/);
-    if (!dmy) return null;
-    day = parseInt(dmy[1], 10);
-    const monthKey = dmy[2].toLowerCase();
-    if (monthMap[monthKey] === undefined) return null;
-    monthIndex = monthMap[monthKey];
-    const yearRaw = dmy[3];
-    year = yearRaw.length === 2 ? 2000 + parseInt(yearRaw, 10) : parseInt(yearRaw, 10);
+    // Handle DD/MM/YYYY or D/M/YYYY (slash-separated, day first — FIFA/international format)
+    const slashDmy = datePart.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (slashDmy) {
+      day = parseInt(slashDmy[1], 10);
+      monthIndex = parseInt(slashDmy[2], 10) - 1;
+      year = parseInt(slashDmy[3], 10);
+    } else {
+      const dmy = datePart.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2}|\d{4})$/);
+      if (!dmy) return null;
+      day = parseInt(dmy[1], 10);
+      const monthKey = dmy[2].toLowerCase();
+      if (monthMap[monthKey] === undefined) return null;
+      monthIndex = monthMap[monthKey];
+      const yearRaw = dmy[3];
+      year = yearRaw.length === 2 ? 2000 + parseInt(yearRaw, 10) : parseInt(yearRaw, 10);
+    }
   }
 
   const timePart = timePartRaw.trim();
@@ -200,8 +208,9 @@ function parseMatchDateTime(value) {
     if (ampm === 'PM') hour += 12;
   }
 
-  // YYYY-MM-DD + 24h format is treated as UTC (CricAPI GMT); other formats stay local.
-  if (isoDate && !ampm) {
+  // 24h time (no AM/PM) → treat as UTC (covers ISO dates and slash/FIFA dates in GMT)
+  // AM/PM times → local time (cricket CSVs stored in IST)
+  if (!ampm) {
     return new Date(Date.UTC(year, monthIndex, day, hour, minute, second, 0));
   }
   return new Date(year, monthIndex, day, hour, minute, second, 0);
@@ -405,6 +414,17 @@ function initializeDatabase() {
         });
       } else {
         console.log('✅ seasons.cricbuzz_series_id column already exists');
+      }
+
+      // Migration: Add sport column to seasons if it doesn't exist
+      const hasSport = columns && columns.some(c => c.name === 'sport');
+      if (!hasSport) {
+        db.run(`ALTER TABLE seasons ADD COLUMN sport TEXT DEFAULT 'cricket'`, (alterErr) => {
+          if (alterErr) console.log('Note: Could not add sport to seasons:', alterErr.message);
+          else console.log('✅ Added sport column to seasons table');
+        });
+      } else {
+        console.log('✅ seasons.sport column already exists');
       }
     });
 
@@ -1466,10 +1486,11 @@ app.post('/api/admin/cricbuzz/import-season', requireRole('admin'), (req, res) =
 
 // Admin endpoints: create season
 app.post('/api/admin/seasons', requireRole('admin'), (req, res) => {
-  const { name } = req.body;
+  const { name, sport } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
+  const sportValue = (sport === 'football') ? 'football' : 'cricket';
   const db = openDb();
-  db.run('INSERT INTO seasons (name) VALUES (?)', [name], function(err) {
+  db.run('INSERT INTO seasons (name, sport) VALUES (?, ?)', [name, sportValue], function(err) {
     db.close();
     if (err) return res.status(500).json({ error: 'DB error' });
     res.status(201).json({ id: this.lastID });
@@ -1479,11 +1500,12 @@ app.post('/api/admin/seasons', requireRole('admin'), (req, res) => {
 // Admin: update season
 app.put('/api/admin/seasons/:id', requireRole('admin'), (req, res) => {
   const id = Number(req.params.id);
-  const { name } = req.body;
+  const { name, sport } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
+  const sportValue = (sport === 'football') ? 'football' : 'cricket';
 
   const db = openDb();
-  db.run('UPDATE seasons SET name = ? WHERE id = ?', [name, id], function(err) {
+  db.run('UPDATE seasons SET name = ?, sport = ? WHERE id = ?', [name, sportValue, id], function(err) {
     db.close();
     if (err) return res.status(500).json({ error: 'DB error' });
     if (this.changes === 0) return res.status(404).json({ error: 'Season not found' });
@@ -3531,9 +3553,20 @@ app.post('/api/admin/upload-matches', requireRole('admin'), (req, res) => {
 
   const db = openDb();
   const lines = csvData.trim().split('\n').slice(1); // skip header
+  // Normalize DD/MM/YYYY or D/M/YYYY to YYYY-MM-DD so parsers handle it consistently
+  function normalizeDateStr(d) {
+    const slash = d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (slash) {
+      const dd = slash[1].padStart(2, '0');
+      const mm = slash[2].padStart(2, '0');
+      return `${slash[3]}-${mm}-${dd}`;
+    }
+    return d; // already in another format, leave as-is
+  }
+
   const insertMatch = (date, venue, team1, team2, time) => new Promise((resolve, reject) => {
     // Combine date and time into scheduled_at
-    const scheduled_at = `${date}T${time}`;
+    const scheduled_at = `${normalizeDateStr(date)}T${time}`;
     db.run('INSERT INTO matches (season_id, home_team, away_team, scheduled_at, venue) VALUES (?, ?, ?, ?, ?)',
       [seasonId, team1, team2, scheduled_at, venue], function(err) {
         if (err) return reject(err);
