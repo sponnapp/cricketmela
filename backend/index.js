@@ -294,6 +294,13 @@ function initializeDatabase() {
       toss_winner TEXT,
       man_of_match TEXT,
       best_bowler TEXT,
+      century_scorer TEXT,
+      top_wicket_taker TEXT,
+      toss_points INTEGER DEFAULT 10,
+      mom_points INTEGER DEFAULT 10,
+      bowler_points INTEGER DEFAULT 10,
+      century_points INTEGER DEFAULT 10,
+      wicket_points INTEGER DEFAULT 10,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(match_id, user_id),
       FOREIGN KEY(match_id) REFERENCES matches(id),
@@ -307,8 +314,40 @@ function initializeDatabase() {
       toss_winner TEXT,
       man_of_match TEXT,
       best_bowler TEXT,
+      century_scorer TEXT,
+      top_wicket_taker TEXT,
       FOREIGN KEY(match_id) REFERENCES matches(id)
     )`);
+
+    // Migration: Add all missing columns to predictions table
+    db.all(`PRAGMA table_info(predictions)`, (err, predCols) => {
+      if (err || !predCols) return;
+      const pCols = predCols.map(c => c.name);
+      if (!pCols.includes('century_scorer'))
+        db.run(`ALTER TABLE predictions ADD COLUMN century_scorer TEXT`, e => { if (!e) console.log('✅ Added century_scorer to predictions'); });
+      if (!pCols.includes('top_wicket_taker'))
+        db.run(`ALTER TABLE predictions ADD COLUMN top_wicket_taker TEXT`, e => { if (!e) console.log('✅ Added top_wicket_taker to predictions'); });
+      if (!pCols.includes('toss_points'))
+        db.run(`ALTER TABLE predictions ADD COLUMN toss_points INTEGER DEFAULT 10`, e => { if (!e) console.log('✅ Added toss_points to predictions'); });
+      if (!pCols.includes('mom_points'))
+        db.run(`ALTER TABLE predictions ADD COLUMN mom_points INTEGER DEFAULT 10`, e => { if (!e) console.log('✅ Added mom_points to predictions'); });
+      if (!pCols.includes('bowler_points'))
+        db.run(`ALTER TABLE predictions ADD COLUMN bowler_points INTEGER DEFAULT 10`, e => { if (!e) console.log('✅ Added bowler_points to predictions'); });
+      if (!pCols.includes('century_points'))
+        db.run(`ALTER TABLE predictions ADD COLUMN century_points INTEGER DEFAULT 10`, e => { if (!e) console.log('✅ Added century_points to predictions'); });
+      if (!pCols.includes('wicket_points'))
+        db.run(`ALTER TABLE predictions ADD COLUMN wicket_points INTEGER DEFAULT 10`, e => { if (!e) console.log('✅ Added wicket_points to predictions'); });
+    });
+
+    // Migration: Add century_scorer + top_wicket_taker to prediction_results table
+    db.all(`PRAGMA table_info(prediction_results)`, (err, resCols) => {
+      if (err || !resCols) return;
+      const rCols = resCols.map(c => c.name);
+      if (!rCols.includes('century_scorer'))
+        db.run(`ALTER TABLE prediction_results ADD COLUMN century_scorer TEXT`, e => { if (!e) console.log('✅ Added century_scorer to prediction_results'); });
+      if (!rCols.includes('top_wicket_taker'))
+        db.run(`ALTER TABLE prediction_results ADD COLUMN top_wicket_taker TEXT`, e => { if (!e) console.log('✅ Added top_wicket_taker to prediction_results'); });
+    });
 
     // Add venue column if it doesn't exist (migration for old tables)
     db.all(`PRAGMA table_info(matches)`, (err, columns) => {
@@ -3764,6 +3803,91 @@ app.delete('/api/users/:id/avatar', (req, res) => {
   });
 });
 
+// Admin: Bulk add/remove seasons for multiple users
+app.post('/api/admin/bulk-assign-seasons', requireRole('admin'), (req, res) => {
+  const { user_ids, season_ids, action } = req.body;
+  if (!Array.isArray(user_ids) || !Array.isArray(season_ids) || !['add', 'remove'].includes(action)) {
+    return res.status(400).json({ error: 'user_ids array, season_ids array, and action (add|remove) required' });
+  }
+  const userIds = user_ids.map(Number).filter(Boolean);
+  const seasonIds = season_ids.map(Number).filter(Boolean);
+  if (userIds.length === 0 || seasonIds.length === 0) {
+    return res.status(400).json({ error: 'At least one user and one season required' });
+  }
+
+  const db = openDb();
+  db.serialize(() => {
+    if (action === 'remove') {
+      // Build parameterized query for bulk delete
+      const placeholders = userIds.map(() => '?').join(',');
+      const seasonPlaceholders = seasonIds.map(() => '?').join(',');
+      db.run(
+        `DELETE FROM user_seasons WHERE user_id IN (${placeholders}) AND season_id IN (${seasonPlaceholders})`,
+        [...userIds, ...seasonIds],
+        function(err) {
+          db.close();
+          if (err) return res.status(500).json({ error: 'DB error' });
+          res.json({ ok: true, action: 'remove', affected: this.changes });
+        }
+      );
+    } else {
+      // For add: get existing assignments to avoid duplicates; always start new seasons at 1000
+      const userPlaceholders = userIds.map(() => '?').join(',');
+      db.all(`SELECT user_id, season_id FROM user_seasons WHERE user_id IN (${userPlaceholders})`,
+          userIds, (err2, existing) => {
+            if (err2) { db.close(); return res.status(500).json({ error: 'DB error' }); }
+            const existingSet = new Set((existing || []).map(r => `${r.user_id}_${r.season_id}`));
+
+            const toInsert = [];
+            for (const uid of userIds) {
+              for (const sid of seasonIds) {
+                if (!existingSet.has(`${uid}_${sid}`)) {
+                  toInsert.push([uid, sid, 1000]);
+                }
+              }
+            }
+
+            if (toInsert.length === 0) {
+              db.close();
+              return res.json({ ok: true, action: 'add', added: 0, skipped: userIds.length * seasonIds.length });
+            }
+
+            let pending = toInsert.length;
+            let added = 0;
+            const newUserSeasonPairs = {}; // track which user gets which new seasons
+            toInsert.forEach(([uid, sid, bal]) => {
+              db.run('INSERT INTO user_seasons (user_id, season_id, balance) VALUES (?, ?, ?)',
+                [uid, sid, bal], function(err3) {
+                  if (!err3) {
+                    added++;
+                    if (!newUserSeasonPairs[uid]) newUserSeasonPairs[uid] = [];
+                    newUserSeasonPairs[uid].push(sid);
+                  }
+                  pending--;
+                  if (pending === 0) {
+                    // Process auto-loss for each user's newly assigned seasons
+                    const userEntries = Object.entries(newUserSeasonPairs);
+                    let autoPending = userEntries.length;
+                    if (autoPending === 0) {
+                      db.close();
+                      return res.json({ ok: true, action: 'add', added, skipped: toInsert.length - added });
+                    }
+                    userEntries.forEach(([uid, newSids]) => {
+                      processAutoLossForNewSeasons(Number(uid), newSids, () => {
+                        autoPending--;
+                        if (autoPending === 0) {
+                          res.json({ ok: true, action: 'add', added, skipped: toInsert.length - added });
+                        }
+                      });
+                    });
+                  }
+                });
+            });
+          });
+    }
+  });
+});
+
 // Admin: Get user's assigned seasons (with per-season balance)
 app.get('/api/admin/users/:id/seasons', requireRole('admin'), (req, res) => {
   const userId = Number(req.params.id);
@@ -4779,20 +4903,16 @@ app.get('/api/predictions/upcoming', requireRole('picker', 'superuser', 'admin')
   // Only admin sees all seasons (no user_seasons filter needed)
   if (req.user.role === 'admin') {
     const params = [];
-    let query = `
-      SELECT m.id, m.season_id, m.home_team, m.away_team, m.scheduled_at, m.venue, m.winner, s.name as season_name
+    const conditions = [`(s.sport = 'cricket' OR s.sport IS NULL)`];
+    if (seasonId) { conditions.push('m.season_id = ?'); params.push(seasonId); }
+    const query = `
+      SELECT m.id, m.season_id, m.home_team, m.away_team, m.scheduled_at, m.venue, m.winner, s.name as season_name, s.sport
       FROM matches m
       JOIN seasons s ON s.id = m.season_id
+      WHERE ${conditions.join(' AND ')}
     `;
-    if (seasonId) {
-      query += ' WHERE m.season_id = ?';
-      params.push(seasonId);
-    }
     db.all(query, params, (err, rows) => {
-      if (err) {
-        db.close();
-        return res.status(500).json({ error: 'DB error' });
-      }
+      if (err) { db.close(); return res.status(500).json({ error: 'DB error' }); }
       finish(rows);
     });
     return;
@@ -4801,11 +4921,11 @@ app.get('/api/predictions/upcoming', requireRole('picker', 'superuser', 'admin')
   // Regular pickers and superusers: only see matches for seasons they are assigned to
   const params = [req.user.id];
   let query = `
-    SELECT m.id, m.season_id, m.home_team, m.away_team, m.scheduled_at, m.venue, m.winner, s.name as season_name
+    SELECT m.id, m.season_id, m.home_team, m.away_team, m.scheduled_at, m.venue, m.winner, s.name as season_name, s.sport
     FROM matches m
     JOIN seasons s ON s.id = m.season_id
     JOIN user_seasons us ON us.season_id = m.season_id
-    WHERE us.user_id = ?
+    WHERE us.user_id = ? AND (s.sport = 'cricket' OR s.sport IS NULL)
   `;
   if (seasonId) {
     query += ' AND m.season_id = ?';
@@ -4916,7 +5036,8 @@ app.get('/api/predictions/:matchId', requireRole('picker', 'superuser', 'admin')
 // POST /api/predictions - Submit or update prediction
 app.post('/api/predictions', requireRole('picker', 'superuser', 'admin'), (req, res) => {
   const username = req.headers['x-user'];
-  const { match_id, toss_winner, man_of_match, best_bowler, toss_points, mom_points, bowler_points } = req.body;
+  const { match_id, toss_winner, man_of_match, best_bowler, century_scorer, top_wicket_taker,
+          toss_points, mom_points, bowler_points, century_points, wicket_points } = req.body;
 
   if (!match_id) {
     return res.status(400).json({ error: 'Match ID required' });
@@ -4929,37 +5050,35 @@ app.post('/api/predictions', requireRole('picker', 'superuser', 'admin'), (req, 
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Check if match exists and prediction window is open (1 hour before match)
+    // Check if match exists and prediction window is open
     db.get('SELECT scheduled_at, winner FROM matches WHERE id = ?', [match_id], (err, match) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
-      if (!match) {
-        return res.status(404).json({ error: 'Match not found' });
-      }
-      if (match.winner) {
-        return res.status(400).json({ error: 'Match winner has been set. Voting is now closed.' });
-      }
+      if (err) { return res.status(500).json({ error: 'Database error' }); }
+      if (!match) { return res.status(404).json({ error: 'Match not found' }); }
+      if (match.winner) { return res.status(400).json({ error: 'Match winner has been set. Voting is now closed.' }); }
 
-      // Check voting window (30 minutes cutoff - same as team voting)
       const matchTime = parseMatchDateTime(match.scheduled_at);
       if (!matchTime) { return res.status(400).json({ error: 'Invalid match schedule. Please contact admin.' }); }
       const cutoffTime = new Date(matchTime.getTime() - 30 * 60 * 1000);
       if (new Date() >= cutoffTime) { return res.status(400).json({ error: 'Prediction window closed (closes 30 minutes before match)' }); }
 
-      // Upsert prediction with points
       db.run(`
-        INSERT INTO predictions (match_id, user_id, toss_winner, man_of_match, best_bowler, toss_points, mom_points, bowler_points, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO predictions (match_id, user_id, toss_winner, man_of_match, best_bowler, century_scorer, top_wicket_taker,
+                                 toss_points, mom_points, bowler_points, century_points, wicket_points, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(match_id, user_id) DO UPDATE SET
           toss_winner = excluded.toss_winner,
           man_of_match = excluded.man_of_match,
           best_bowler = excluded.best_bowler,
+          century_scorer = excluded.century_scorer,
+          top_wicket_taker = excluded.top_wicket_taker,
           toss_points = excluded.toss_points,
           mom_points = excluded.mom_points,
           bowler_points = excluded.bowler_points,
+          century_points = excluded.century_points,
+          wicket_points = excluded.wicket_points,
           updated_at = CURRENT_TIMESTAMP
-      `, [match_id, user.id, toss_winner, man_of_match, best_bowler, toss_points || 10, mom_points || 10, bowler_points || 10], function(err) {
+      `, [match_id, user.id, toss_winner, man_of_match, best_bowler, century_scorer, top_wicket_taker,
+          toss_points || 10, mom_points || 10, bowler_points || 10, century_points || 10, wicket_points || 10], function(err) {
         if (err) return res.status(500).json({ error: 'Failed to save prediction' });
         res.json({ ok: true, message: 'Prediction saved successfully' });
       });
@@ -4984,32 +5103,22 @@ app.get('/api/predictions/odds/:matchId', (req, res) => {
   const { matchId } = req.params;
   const db = openDb();
 
-  // Get all predictions for this match with points
-  db.all('SELECT toss_winner, man_of_match, best_bowler, toss_points, mom_points, bowler_points FROM predictions WHERE match_id = ?', [matchId], (err, predictions) => {
+  db.all('SELECT toss_winner, man_of_match, best_bowler, century_scorer, top_wicket_taker, toss_points, mom_points, bowler_points, century_points, wicket_points FROM predictions WHERE match_id = ?', [matchId], (err, predictions) => {
     db.close();
     if (err) return res.status(500).json({ error: 'Database error' });
 
-    // Calculate odds for each category
-    const tossOdds = {};
-    const momOdds = {};
-    const bowlerOdds = {};
+    const tossOdds = {}, momOdds = {}, bowlerOdds = {}, centuryOdds = {}, wicketOdds = {};
 
     predictions.forEach(p => {
-      if (p.toss_winner) {
-        tossOdds[p.toss_winner] = (tossOdds[p.toss_winner] || 0) + (p.toss_points || 10);
-      }
-      if (p.man_of_match) {
-        momOdds[p.man_of_match] = (momOdds[p.man_of_match] || 0) + (p.mom_points || 10);
-      }
-      if (p.best_bowler) {
-        bowlerOdds[p.best_bowler] = (bowlerOdds[p.best_bowler] || 0) + (p.bowler_points || 10);
-      }
+      if (p.toss_winner) tossOdds[p.toss_winner] = (tossOdds[p.toss_winner] || 0) + (p.toss_points || 10);
+      if (p.man_of_match) momOdds[p.man_of_match] = (momOdds[p.man_of_match] || 0) + (p.mom_points || 10);
+      if (p.best_bowler) bowlerOdds[p.best_bowler] = (bowlerOdds[p.best_bowler] || 0) + (p.bowler_points || 10);
+      if (p.century_scorer) centuryOdds[p.century_scorer] = (centuryOdds[p.century_scorer] || 0) + (p.century_points || 10);
+      if (p.top_wicket_taker) wicketOdds[p.top_wicket_taker] = (wicketOdds[p.top_wicket_taker] || 0) + (p.wicket_points || 10);
     });
 
     res.json({
-      toss: tossOdds,
-      mom: momOdds,
-      bowler: bowlerOdds,
+      toss: tossOdds, mom: momOdds, bowler: bowlerOdds, century: centuryOdds, wicket: wicketOdds,
       totalPredictions: predictions.length
     });
   });
@@ -5017,7 +5126,7 @@ app.get('/api/predictions/odds/:matchId', (req, res) => {
 
 // POST /api/predictions/results - Set prediction results (admin only)
 app.post('/api/predictions/results', requireRole('admin', 'superuser'), (req, res) => {
-  const { match_id, toss_winner, man_of_match, best_bowler } = req.body;
+  const { match_id, toss_winner, man_of_match, best_bowler, century_scorer, top_wicket_taker } = req.body;
 
   if (!match_id) {
     return res.status(400).json({ error: 'Match ID required' });
@@ -5026,13 +5135,15 @@ app.post('/api/predictions/results', requireRole('admin', 'superuser'), (req, re
   const db = openDb();
 
   db.run(`
-    INSERT INTO prediction_results (match_id, toss_winner, man_of_match, best_bowler)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO prediction_results (match_id, toss_winner, man_of_match, best_bowler, century_scorer, top_wicket_taker)
+    VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(match_id) DO UPDATE SET
       toss_winner = excluded.toss_winner,
       man_of_match = excluded.man_of_match,
-      best_bowler = excluded.best_bowler
-  `, [match_id, toss_winner, man_of_match, best_bowler], function(err) {
+      best_bowler = excluded.best_bowler,
+      century_scorer = excluded.century_scorer,
+      top_wicket_taker = excluded.top_wicket_taker
+  `, [match_id, toss_winner, man_of_match, best_bowler, century_scorer, top_wicket_taker], function(err) {
     db.close();
     if (err) return res.status(500).json({ error: 'Failed to save results' });
     res.json({ ok: true, message: 'Prediction results saved successfully' });

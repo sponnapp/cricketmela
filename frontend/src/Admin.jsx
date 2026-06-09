@@ -47,6 +47,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
   const [appSettings, setAppSettings] = useState({ standings_name_display: 'display_name' })
   const [appSettingsMsg, setAppSettingsMsg] = useState('')
   const [userSearch, setUserSearch] = useState('')
+  const [bulkAssign, setBulkAssign] = useState({ selectedUsers: new Set(), selectedSeasons: new Set(), loading: false, result: null })
   const [cricApiModal, setCricApiModal] = useState({
     show: false,
     step: 'series', // 'series' | 'matches' | 'importing'
@@ -93,7 +94,6 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
     const isOpen = !!expandedUserRows[userId]
     setExpandedUserRows(prev => ({ ...prev, [userId]: !isOpen }))
     if (isOpen) return
-    if (userSeasonBalances[userId]) return
 
     try {
       setSeasonBalancesLoading(prev => ({ ...prev, [userId]: true }))
@@ -532,6 +532,30 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
       toast('success', 'Success', 'User approved')
     } catch (e) {
       toast('error', 'Error', e.response?.data?.error || 'Failed to approve user')
+    }
+  }
+
+  async function bulkAssignSeasons(action) {
+    const userIds = Array.from(bulkAssign.selectedUsers)
+    const seasonIds = Array.from(bulkAssign.selectedSeasons)
+    if (userIds.length === 0) return toast('warning', 'No Users', 'Select at least one user')
+    if (seasonIds.length === 0) return toast('warning', 'No Seasons', 'Select at least one season')
+    setBulkAssign(prev => ({ ...prev, loading: true, result: null }))
+    try {
+      const r = await axios.post('/api/admin/bulk-assign-seasons',
+        { user_ids: userIds, season_ids: seasonIds, action },
+        { headers: { 'x-user': user?.username || 'admin' } }
+      )
+      const msg = action === 'add'
+        ? `Added ${r.data.added} assignment(s)${r.data.skipped ? ` (${r.data.skipped} already existed)` : ''}`
+        : `Removed ${r.data.affected} assignment(s)`
+      setBulkAssign(prev => ({ ...prev, loading: false, result: { type: 'success', msg } }))
+      toast('success', 'Done', msg)
+      fetchUsers()
+    } catch (e) {
+      const msg = e.response?.data?.error || 'Bulk assignment failed'
+      setBulkAssign(prev => ({ ...prev, loading: false, result: { type: 'error', msg } }))
+      toast('error', 'Error', msg)
     }
   }
 
@@ -1459,6 +1483,89 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
             >
               Create User
             </button>
+          </section>
+
+          {/* ── Bulk Season Assignment ── */}
+          <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
+            <h3 style={{color: '#1a1a1a', marginTop: '0', marginBottom: '5px', fontSize: '18px', fontWeight: 'bold'}}>Bulk Season Assignment</h3>
+            <p style={{color: '#666', fontSize: '13px', margin: '0 0 18px 0'}}>Select multiple users and seasons, then add or remove them all at once.</p>
+            <div style={{display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px', marginBottom: '16px'}}>
+              {/* Users column */}
+              <div style={{border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden'}}>
+                <div style={{background: 'linear-gradient(135deg,#667eea,#764ba2)', color: 'white', padding: '10px 14px', fontSize: '13px', fontWeight: '700', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                  <span>Users ({bulkAssign.selectedUsers.size} selected)</span>
+                  <button onClick={() => {
+                    const nonAdmins = users.filter(u => u.role !== 'admin').map(u => u.id)
+                    const allSelected = nonAdmins.every(id => bulkAssign.selectedUsers.has(id))
+                    setBulkAssign(prev => ({ ...prev, result: null, selectedUsers: allSelected ? new Set() : new Set(nonAdmins) }))
+                  }} style={{background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', fontSize: '11px', padding: '3px 8px', borderRadius: '6px', cursor: 'pointer', fontWeight: '600'}}>
+                    {users.filter(u => u.role !== 'admin').every(u => bulkAssign.selectedUsers.has(u.id)) ? 'Deselect All' : 'Select All'}
+                  </button>
+                </div>
+                <div style={{maxHeight: '220px', overflowY: 'auto', padding: '8px'}}>
+                  {users.filter(u => u.role !== 'admin').map(u => (
+                    <label key={u.id} style={{display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 8px', borderRadius: '8px', cursor: 'pointer', background: bulkAssign.selectedUsers.has(u.id) ? 'rgba(102,126,234,0.1)' : 'transparent', marginBottom: '2px'}}>
+                      <input type="checkbox" checked={bulkAssign.selectedUsers.has(u.id)} onChange={() => {
+                        setBulkAssign(prev => {
+                          const s = new Set(prev.selectedUsers)
+                          s.has(u.id) ? s.delete(u.id) : s.add(u.id)
+                          return { ...prev, result: null, selectedUsers: s }
+                        })
+                      }} style={{width: '15px', height: '15px', accentColor: '#667eea', cursor: 'pointer', flexShrink: 0}} />
+                      <span style={{fontSize: '13px', fontWeight: '600', color: '#1a1a1a'}}>{u.display_name || u.username}</span>
+                      <span style={{fontSize: '11px', color: '#888', marginLeft: 'auto'}}>@{u.username}</span>
+                    </label>
+                  ))}
+                  {users.filter(u => u.role !== 'admin').length === 0 && <p style={{color: '#888', fontSize: '13px', textAlign: 'center', padding: '12px'}}>No users found</p>}
+                </div>
+              </div>
+              {/* Seasons column */}
+              <div style={{border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden'}}>
+                <div style={{background: 'linear-gradient(135deg,#f093fb,#f5576c)', color: 'white', padding: '10px 14px', fontSize: '13px', fontWeight: '700', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                  <span>Seasons ({bulkAssign.selectedSeasons.size} selected)</span>
+                  <button onClick={() => {
+                    const allIds = seasons.map(s => s.id)
+                    const allSelected = allIds.every(id => bulkAssign.selectedSeasons.has(id))
+                    setBulkAssign(prev => ({ ...prev, result: null, selectedSeasons: allSelected ? new Set() : new Set(allIds) }))
+                  }} style={{background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', fontSize: '11px', padding: '3px 8px', borderRadius: '6px', cursor: 'pointer', fontWeight: '600'}}>
+                    {seasons.every(s => bulkAssign.selectedSeasons.has(s.id)) ? 'Deselect All' : 'Select All'}
+                  </button>
+                </div>
+                <div style={{maxHeight: '220px', overflowY: 'auto', padding: '8px'}}>
+                  {seasons.map(s => (
+                    <label key={s.id} style={{display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 8px', borderRadius: '8px', cursor: 'pointer', background: bulkAssign.selectedSeasons.has(s.id) ? 'rgba(240,147,251,0.1)' : 'transparent', marginBottom: '2px'}}>
+                      <input type="checkbox" checked={bulkAssign.selectedSeasons.has(s.id)} onChange={() => {
+                        setBulkAssign(prev => {
+                          const s2 = new Set(prev.selectedSeasons)
+                          s2.has(s.id) ? s2.delete(s.id) : s2.add(s.id)
+                          return { ...prev, result: null, selectedSeasons: s2 }
+                        })
+                      }} style={{width: '15px', height: '15px', accentColor: '#f5576c', cursor: 'pointer', flexShrink: 0}} />
+                      <span style={{fontSize: '13px', fontWeight: '600', color: '#1a1a1a'}}>{s.sport === 'football' ? '\u26BD' : '\uD83C\uDFCF'} {s.name}</span>
+                    </label>
+                  ))}
+                  {seasons.length === 0 && <p style={{color: '#888', fontSize: '13px', textAlign: 'center', padding: '12px'}}>No seasons found</p>}
+                </div>
+              </div>
+            </div>
+            {bulkAssign.result && (
+              <div style={{padding: '10px 14px', borderRadius: '8px', marginBottom: '12px', fontSize: '13px', fontWeight: '600',
+                background: bulkAssign.result.type === 'success' ? '#f0fff4' : '#fff5f5',
+                color: bulkAssign.result.type === 'success' ? '#276749' : '#c53030',
+                border: `1px solid ${bulkAssign.result.type === 'success' ? '#9ae6b4' : '#feb2b2'}`}}>
+                {bulkAssign.result.type === 'success' ? '\u2705' : '\u274C'} {bulkAssign.result.msg}
+              </div>
+            )}
+            <div style={{display: 'flex', gap: '10px', flexWrap: 'wrap'}}>
+              <button onClick={() => bulkAssignSeasons('add')} disabled={bulkAssign.loading}
+                style={{padding: '10px 24px', background: bulkAssign.loading ? '#aaa' : 'linear-gradient(135deg,#2ecc71,#27ae60)', color: 'white', border: 'none', borderRadius: '25px', cursor: bulkAssign.loading ? 'not-allowed' : 'pointer', fontWeight: '700', fontSize: '13px'}}>
+                {bulkAssign.loading ? 'Processing...' : '\u2795 Add to Selected Users'}
+              </button>
+              <button onClick={() => bulkAssignSeasons('remove')} disabled={bulkAssign.loading}
+                style={{padding: '10px 24px', background: bulkAssign.loading ? '#aaa' : 'linear-gradient(135deg,#e74c3c,#c0392b)', color: 'white', border: 'none', borderRadius: '25px', cursor: bulkAssign.loading ? 'not-allowed' : 'pointer', fontWeight: '700', fontSize: '13px'}}>
+                {bulkAssign.loading ? 'Processing...' : '\u2796 Remove from Selected Users'}
+              </button>
+            </div>
           </section>
 
           <section style={{background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '16px', padding: '22px', marginBottom: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.55)'}}>
