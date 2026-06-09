@@ -53,15 +53,15 @@ function readNavState() {
     if (!raw) return null
     const parsed = JSON.parse(raw)
     if (!VALID_PAGES.has(parsed?.page)) return null
-    return { page: parsed.page, seasonId: Number(parsed.seasonId) || null, adminTab: parsed.adminTab || null }
+    return { page: parsed.page, seasonId: Number(parsed.seasonId) || null, adminTab: parsed.adminTab || null, seasonSport: parsed.seasonSport || 'cricket' }
   } catch {
     return null
   }
 }
 
-function writeNavState(page, seasonId, adminTab) {
+function writeNavState(page, seasonId, adminTab, seasonSport) {
   try {
-    localStorage.setItem(NAV_STATE_KEY, JSON.stringify({ page, seasonId: seasonId || null, adminTab: adminTab || null }))
+    localStorage.setItem(NAV_STATE_KEY, JSON.stringify({ page, seasonId: seasonId || null, adminTab: adminTab || null, seasonSport: seasonSport || 'cricket' }))
   } catch {
     // ignore storage failures
   }
@@ -97,7 +97,11 @@ export default function App() {
 
   const [toasts, setToasts] = useState([])
   const [refreshTrigger, setRefreshTrigger] = useState(0)
-  const [seasonSport, setSeasonSport] = useState('cricket')
+  const [seasonSport, setSeasonSport] = useState(() => {
+    const sport = new URLSearchParams(window.location.search).get('sport')
+    if (sport === 'football' || sport === 'cricket') return sport
+    return readNavState()?.seasonSport || 'cricket'
+  })
   const [headerBalance, setHeaderBalance] = useState(null)
 
   // Fetch overall balance for header chip
@@ -137,8 +141,8 @@ export default function App() {
 
   // Persist nav state so hard refresh can recover even if URL is reset externally
   useEffect(() => {
-    writeNavState(page, seasonId, page === 'admin' ? adminTab : null)
-  }, [page, seasonId, adminTab])
+    writeNavState(page, seasonId, page === 'admin' ? adminTab : null, page === 'matches' ? seasonSport : 'cricket')
+  }, [page, seasonId, adminTab, seasonSport])
 
   const isMounted = useRef(false)
 
@@ -152,6 +156,7 @@ export default function App() {
     const params = new URLSearchParams()
     if(page && page !== 'seasons') params.set('page', page)
     if(page === 'matches' && seasonId) params.set('season', String(seasonId))
+    if(page === 'matches' && seasonSport && seasonSport !== 'cricket') params.set('sport', seasonSport)
     if(page === 'admin' && adminTab) params.set('adminTab', adminTab)
     const newSearch = params.toString() ? '?' + params.toString() : '/'
     const current = window.location.pathname + window.location.search
@@ -159,9 +164,9 @@ export default function App() {
     if(current !== newSearch){
       if(!isMounted.current){
         // First render — use replaceState so we don't add a history entry
-        window.history.replaceState({ page, seasonId: seasonId || null, adminTab }, '', newSearch)
+        window.history.replaceState({ page, seasonId: seasonId || null, adminTab, seasonSport }, '', newSearch)
       } else {
-        window.history.pushState({ page, seasonId: seasonId || null, adminTab }, '', newSearch)
+        window.history.pushState({ page, seasonId: seasonId || null, adminTab, seasonSport }, '', newSearch)
       }
     }
     isMounted.current = true
@@ -173,9 +178,11 @@ export default function App() {
       const p = e.state?.page || new URLSearchParams(window.location.search).get('page') || 'seasons'
       const s = e.state?.seasonId || (Number(new URLSearchParams(window.location.search).get('season')) || null)
       const tab = e.state?.adminTab || new URLSearchParams(window.location.search).get('adminTab') || 'season'
+      const sp = e.state?.seasonSport || new URLSearchParams(window.location.search).get('sport') || 'cricket'
       setPage(p)
       setSeasonId(s)
       setAdminTab(tab)
+      setSeasonSport(sp)
     }
     window.addEventListener('popstate', onPopState)
     return ()=> window.removeEventListener('popstate', onPopState)
