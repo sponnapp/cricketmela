@@ -206,6 +206,42 @@ function OddsDisplay({ odds, accent }) {
   )
 }
 
+// ── Player Dropdown ───────────────────────────────────────────────────────────
+function PlayerDropdown({ team1, players1, team2, players2, value, locked, accent, onChange, noOption = 'Other' }) {
+  const hasPlayers = players1.length > 0 || players2.length > 0
+  return (
+    <select
+      value={value || ''}
+      disabled={locked}
+      onChange={e => onChange(e.target.value || null)}
+      style={{
+        width: '100%', padding: '10px 14px', borderRadius: '10px',
+        border: `2px solid ${value ? accent : 'rgba(0,0,0,0.12)'}`,
+        fontSize: '13px', fontWeight: value ? '700' : '500',
+        color: value ? '#1a1a1a' : '#888',
+        background: value ? `${accent}14` : 'rgba(255,255,255,0.9)',
+        cursor: locked ? 'not-allowed' : 'pointer',
+        outline: 'none', opacity: locked ? 0.6 : 1,
+        fontFamily: 'Inter, sans-serif',
+      }}
+    >
+      <option value="">— Select player —</option>
+      {!hasPlayers && <option disabled>No squad data available</option>}
+      {players1.length > 0 && (
+        <optgroup label={team1}>
+          {players1.map(p => { const n = typeof p === 'string' ? p : p.name; return <option key={n} value={n}>{n}</option> })}
+        </optgroup>
+      )}
+      {players2.length > 0 && (
+        <optgroup label={team2}>
+          {players2.map(p => { const n = typeof p === 'string' ? p : p.name; return <option key={n} value={n}>{n}</option> })}
+        </optgroup>
+      )}
+      <option value={noOption}>{noOption}</option>
+    </select>
+  )
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -242,7 +278,8 @@ export default function Predictions({ user, refreshTrigger }) {
   async function fetchSeasons() {
     try {
       const r = await axios.get('/api/seasons', { headers: { 'x-user': user?.username } })
-      setSeasons(r.data)
+      const cricketSeasons = (r.data || []).filter(s => !s.sport || s.sport === 'cricket')
+      setSeasons(cricketSeasons)
       if (!selectedSeason) setSelectedSeason('')
     } catch (e) { console.error('Error fetching seasons:', e) }
   }
@@ -254,19 +291,21 @@ export default function Predictions({ user, refreshTrigger }) {
         params: selectedSeason ? { season_id: selectedSeason } : {},
         headers: { 'x-user': user?.username }
       })
-      setUpcomingMatches(r.data)
+      // Filter out football seasons client-side as double-check
+      const cricketMatches = (r.data || []).filter(m => !m.sport || m.sport === 'cricket')
+      setUpcomingMatches(cricketMatches)
 
       const predResults = await Promise.all(
-        r.data.map(m =>
+        cricketMatches.map(m =>
           axios.get(`/api/predictions/${m.id}`, { headers: { 'x-user': user?.username } }).catch(() => ({ data: null }))
         )
       )
       const predMap = {}
-      r.data.forEach((m, idx) => { if (predResults[idx]?.data) predMap[m.id] = predResults[idx].data })
+      cricketMatches.forEach((m, idx) => { if (predResults[idx]?.data) predMap[m.id] = predResults[idx].data })
       setPredictions(predMap)
 
       const playerResults = await Promise.all(
-        r.data.map(async m => {
+        cricketMatches.map(async m => {
           try {
             const pr = await axios.get(`/api/predictions/players-by-season/${m.season_id}`, {
               params: { team1: m.home_team, team2: m.away_team },
@@ -281,7 +320,7 @@ export default function Predictions({ user, refreshTrigger }) {
       setPlayerOptionsByMatch(playerMap)
 
       const oddsResults = await Promise.all(
-        r.data.map(async m => {
+        cricketMatches.map(async m => {
           try {
             const or = await axios.get(`/api/predictions/odds/${m.id}`, { headers: { 'x-user': user?.username } })
             return { matchId: m.id, odds: or.data }
@@ -319,9 +358,9 @@ export default function Predictions({ user, refreshTrigger }) {
         toss_winner: pred.toss_winner || null,
         man_of_match: pred.man_of_match || null,
         best_bowler: pred.best_bowler || null,
-        toss_points: 10,
-        mom_points: 10,
-        bowler_points: 10,
+        century_scorer: pred.century_scorer || null,
+        top_wicket_taker: pred.top_wicket_taker || null,
+        toss_points: 10, mom_points: 10, bowler_points: 10, century_points: 10, wicket_points: 10,
       }, { headers: { 'x-user': user?.username } })
       setMessage('✅ Prediction saved!')
       toast('success', 'Prediction Saved', 'Your prediction and points were updated')
@@ -403,6 +442,8 @@ export default function Predictions({ user, refreshTrigger }) {
     if (pred.actual_toss) { total++; if (pred.toss_winner === pred.actual_toss) correct++ }
     if (pred.actual_mom) { total++; if (pred.man_of_match === pred.actual_mom) correct++ }
     if (pred.actual_bowler) { total++; if (pred.best_bowler === pred.actual_bowler) correct++ }
+    if (pred.actual_century) { total++; if (pred.century_scorer === pred.actual_century) correct++ }
+    if (pred.actual_wicket) { total++; if (pred.top_wicket_taker === pred.actual_wicket) correct++ }
     return total > 0 ? `${correct}/${total}` : 'N/A'
   }
 
@@ -411,6 +452,8 @@ export default function Predictions({ user, refreshTrigger }) {
     if (pred.actual_toss) { total++; if (pred.toss_winner === pred.actual_toss) correct++ }
     if (pred.actual_mom) { total++; if (pred.man_of_match === pred.actual_mom) correct++ }
     if (pred.actual_bowler) { total++; if (pred.best_bowler === pred.actual_bowler) correct++ }
+    if (pred.actual_century) { total++; if (pred.century_scorer === pred.actual_century) correct++ }
+    if (pred.actual_wicket) { total++; if (pred.top_wicket_taker === pred.actual_wicket) correct++ }
     return { correct, total }
   }
 
@@ -594,6 +637,8 @@ export default function Predictions({ user, refreshTrigger }) {
               const isOpen = isPredictionOpen(match.scheduled_at)
               const momExpanded = isTileExpanded(match.id, 'mom')
               const bowlerExpanded = isTileExpanded(match.id, 'bowler')
+              const centuryExpanded = isTileExpanded(match.id, 'century')
+              const wicketExpanded = isTileExpanded(match.id, 'wicket')
               const homeTeamPlayers = getTeamPlayers(match.id, match.home_team)
               const awayTeamPlayers = getTeamPlayers(match.id, match.away_team)
               const allPlayers = [...homeTeamPlayers, ...awayTeamPlayers]
@@ -670,51 +715,12 @@ export default function Predictions({ user, refreshTrigger }) {
                       />
                       {momExpanded && (
                         <div style={{ padding: '14px' }}>
-                          {allPlayers.length > 0 ? (
-                            <>
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
-                                {[[match.home_team, homeTeamPlayers], [match.away_team, awayTeamPlayers]].map(([team, teamPlayers]) => (
-                                  <div key={`mom-${match.id}-${team}`}>
-                                    <div style={{
-                                      background: 'linear-gradient(135deg, #2d3b5f 0%, #3d4b7f 100%)',
-                                      color: 'white', padding: '8px 12px',
-                                      borderRadius: '8px 8px 0 0', fontWeight: '700', fontSize: '12px',
-                                    }}>{team}</div>
-                                    <div style={{
-                                      background: 'rgba(255,255,255,0.5)', padding: '10px',
-                                      borderRadius: '0 0 8px 8px',
-                                      display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '8px',
-                                    }}>
-                                      {(teamPlayers.length > 0 ? teamPlayers : allPlayers.slice(0, 6)).map(player => {
-                                        const pk = typeof player === 'string' ? player : player.name
-                                        return (
-                                          <PlayerCard
-                                            key={`mom-${match.id}-${pk}`}
-                                            player={player}
-                                            selected={pred.man_of_match === pk}
-                                            locked={!isOpen}
-                                            accent="#f39c12"
-                                            onClick={() => updatePrediction(match.id, 'man_of_match', pk)}
-                                          />
-                                        )
-                                      })}
-                                      <PlayerCard
-                                        player={{ name: 'Other' }}
-                                        selected={pred.man_of_match === 'Other'}
-                                        locked={!isOpen}
-                                        accent="#f39c12"
-                                        onClick={() => updatePrediction(match.id, 'man_of_match', 'Other')}
-                                      />
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </>
-                          ) : (
-                            <div style={{ fontSize: '13px', color: '#999', textAlign: 'center', padding: '20px', background: 'rgba(0,0,0,0.03)', borderRadius: '8px' }}>
-                              No squad data available
-                            </div>
-                          )}
+                          <PlayerDropdown
+                            team1={match.home_team} players1={homeTeamPlayers}
+                            team2={match.away_team} players2={awayTeamPlayers}
+                            value={pred.man_of_match} locked={!isOpen} accent="#f39c12" noOption="Other"
+                            onChange={v => updatePrediction(match.id, 'man_of_match', v)}
+                          />
                           <OddsDisplay odds={oddsData[match.id]?.mom || {}} accent="#f39c12" />
                         </div>
                       )}
@@ -734,52 +740,69 @@ export default function Predictions({ user, refreshTrigger }) {
                       />
                       {bowlerExpanded && (
                         <div style={{ padding: '14px' }}>
-                          {allPlayers.length > 0 ? (
-                            <>
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
-                                {[[match.home_team, homeTeamPlayers], [match.away_team, awayTeamPlayers]].map(([team, teamPlayers]) => (
-                                  <div key={`bowl-${match.id}-${team}`}>
-                                    <div style={{
-                                      background: 'linear-gradient(135deg, #2d3b5f 0%, #3d4b7f 100%)',
-                                      color: 'white', padding: '8px 12px',
-                                      borderRadius: '8px 8px 0 0', fontWeight: '700', fontSize: '12px',
-                                    }}>{team}</div>
-                                    <div style={{
-                                      background: 'rgba(255,255,255,0.5)', padding: '10px',
-                                      borderRadius: '0 0 8px 8px',
-                                      display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '8px',
-                                    }}>
-                                      {(teamPlayers.length > 0 ? teamPlayers : allPlayers.slice(0, 6)).map(player => {
-                                        const pk = typeof player === 'string' ? player : player.name
-                                        return (
-                                          <PlayerCard
-                                            key={`bowl-${match.id}-${pk}`}
-                                            player={player}
-                                            selected={pred.best_bowler === pk}
-                                            locked={!isOpen}
-                                            accent="#e74c3c"
-                                            onClick={() => updatePrediction(match.id, 'best_bowler', pk)}
-                                          />
-                                        )
-                                      })}
-                                      <PlayerCard
-                                        player={{ name: 'Other' }}
-                                        selected={pred.best_bowler === 'Other'}
-                                        locked={!isOpen}
-                                        accent="#e74c3c"
-                                        onClick={() => updatePrediction(match.id, 'best_bowler', 'Other')}
-                                      />
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </>
-                          ) : (
-                            <div style={{ fontSize: '13px', color: '#999', textAlign: 'center', padding: '20px', background: 'rgba(0,0,0,0.03)', borderRadius: '8px' }}>
-                              No squad data available
-                            </div>
-                          )}
+                          <PlayerDropdown
+                            team1={match.home_team} players1={homeTeamPlayers}
+                            team2={match.away_team} players2={awayTeamPlayers}
+                            value={pred.best_bowler} locked={!isOpen} accent="#e74c3c" noOption="Other"
+                            onChange={v => updatePrediction(match.id, 'best_bowler', v)}
+                          />
                           <OddsDisplay odds={oddsData[match.id]?.bowler || {}} accent="#e74c3c" />
+                        </div>
+                      )}
+                    </GlassCard>
+
+                    {/* ─── TILE 4: CENTURY SCORER (COLLAPSIBLE) ─── */}
+                    <GlassCard style={{ overflow: 'hidden', border: '1px solid #27ae6033' }}>
+                      <TileHeader
+                        icon="💯"
+                        title="Century Scorer"
+                        accent="#27ae60"
+                        collapsible
+                        expanded={centuryExpanded}
+                        onToggle={() => toggleTile(match.id, 'century')}
+                        selectedPreview={pred.century_scorer || null}
+                        badge={!centuryExpanded && !pred.century_scorer ? 'Tap to pick' : undefined}
+                      />
+                      {centuryExpanded && (
+                        <div style={{ padding: '14px' }}>
+                          <div style={{ marginBottom: '8px', fontSize: '12px', color: '#666', background: 'rgba(39,174,96,0.08)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(39,174,96,0.2)' }}>
+                            💁 Pick the batter most likely to score 100+ runs in this match
+                          </div>
+                          <PlayerDropdown
+                            team1={match.home_team} players1={homeTeamPlayers}
+                            team2={match.away_team} players2={awayTeamPlayers}
+                            value={pred.century_scorer} locked={!isOpen} accent="#27ae60" noOption="None"
+                            onChange={v => updatePrediction(match.id, 'century_scorer', v)}
+                          />
+                          <OddsDisplay odds={oddsData[match.id]?.century || {}} accent="#27ae60" />
+                        </div>
+                      )}
+                    </GlassCard>
+
+                    {/* ─── TILE 5: TOP WICKET TAKER (COLLAPSIBLE) ─── */}
+                    <GlassCard style={{ overflow: 'hidden', border: '1px solid #8e44ad33' }}>
+                      <TileHeader
+                        icon="🎯"
+                        title="Top Wicket Taker"
+                        accent="#8e44ad"
+                        collapsible
+                        expanded={wicketExpanded}
+                        onToggle={() => toggleTile(match.id, 'wicket')}
+                        selectedPreview={pred.top_wicket_taker || null}
+                        badge={!wicketExpanded && !pred.top_wicket_taker ? 'Tap to pick' : undefined}
+                      />
+                      {wicketExpanded && (
+                        <div style={{ padding: '14px' }}>
+                          <div style={{ marginBottom: '8px', fontSize: '12px', color: '#666', background: 'rgba(142,68,173,0.08)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(142,68,173,0.2)' }}>
+                            💁 Pick the bowler most likely to take the most wickets in this match
+                          </div>
+                          <PlayerDropdown
+                            team1={match.home_team} players1={homeTeamPlayers}
+                            team2={match.away_team} players2={awayTeamPlayers}
+                            value={pred.top_wicket_taker} locked={!isOpen} accent="#8e44ad" noOption="Other"
+                            onChange={v => updatePrediction(match.id, 'top_wicket_taker', v)}
+                          />
+                          <OddsDisplay odds={oddsData[match.id]?.wicket || {}} accent="#8e44ad" />
                         </div>
                       )}
                     </GlassCard>
@@ -884,7 +907,7 @@ export default function Predictions({ user, refreshTrigger }) {
                     {user?.role === 'admin' && selectedUser === 'all' && (
                       <th style={{ padding: '14px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>User</th>
                     )}
-                    {['Match', 'Toss', 'Man of Match', 'Best Bowler', 'Score'].map(h => (
+                    {['Match', 'Toss', 'Man of Match', 'Best Bowler', 'Century Scorer', 'Top Wicket Taker', 'Score'].map(h => (
                       <th key={h} style={{ padding: '14px 12px', textAlign: h === 'Score' ? 'center' : 'left', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{h}</th>
                     ))}
                   </tr>
@@ -922,6 +945,22 @@ export default function Predictions({ user, refreshTrigger }) {
                         {h.actual_bowler && (
                           <div style={{ fontSize: '10px', color: h.best_bowler === h.actual_bowler ? '#2e7d32' : '#c62828', marginTop: '2px' }}>
                             {h.best_bowler === h.actual_bowler ? '✅' : '❌'} {h.actual_bowler}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: '14px 12px', fontSize: '13px' }}>
+                        {h.century_scorer || '-'}
+                        {h.actual_century && (
+                          <div style={{ fontSize: '10px', color: h.century_scorer === h.actual_century ? '#2e7d32' : '#c62828', marginTop: '2px' }}>
+                            {h.century_scorer === h.actual_century ? '✅' : '❌'} {h.actual_century}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: '14px 12px', fontSize: '13px' }}>
+                        {h.top_wicket_taker || '-'}
+                        {h.actual_wicket && (
+                          <div style={{ fontSize: '10px', color: h.top_wicket_taker === h.actual_wicket ? '#2e7d32' : '#c62828', marginTop: '2px' }}>
+                            {h.top_wicket_taker === h.actual_wicket ? '✅' : '❌'} {h.actual_wicket}
                           </div>
                         )}
                       </td>

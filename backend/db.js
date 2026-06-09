@@ -117,9 +117,13 @@ db.serialize(() => {
       toss_winner TEXT,
       man_of_match TEXT,
       best_bowler TEXT,
+      century_scorer TEXT,
+      top_wicket_taker TEXT,
       toss_points INTEGER DEFAULT 10,
       mom_points INTEGER DEFAULT 10,
       bowler_points INTEGER DEFAULT 10,
+      century_points INTEGER DEFAULT 10,
+      wicket_points INTEGER DEFAULT 10,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(match_id, user_id),
@@ -135,6 +139,8 @@ db.serialize(() => {
       toss_winner TEXT,
       man_of_match TEXT,
       best_bowler TEXT,
+      century_scorer TEXT,
+      top_wicket_taker TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(match_id) REFERENCES matches(id)
     )
@@ -384,8 +390,56 @@ db.serialize(() => {
         else console.log('✅ Added bowler_points column to predictions table');
       });
     }
-    if (hasTossPoints && hasMomPoints && hasBowlerPoints) {
+    const hasCenturyScorer = columns && columns.some(c => c.name === 'century_scorer');
+    const hasTopWicketTaker = columns && columns.some(c => c.name === 'top_wicket_taker');
+    const hasCenturyPoints = columns && columns.some(c => c.name === 'century_points');
+    const hasWicketPoints = columns && columns.some(c => c.name === 'wicket_points');
+
+    if (!hasCenturyScorer) {
+      db.run('ALTER TABLE predictions ADD COLUMN century_scorer TEXT', (err) => {
+        if (err) console.error('Error adding century_scorer column:', err);
+        else console.log('✅ Added century_scorer column to predictions table');
+      });
+    }
+    if (!hasTopWicketTaker) {
+      db.run('ALTER TABLE predictions ADD COLUMN top_wicket_taker TEXT', (err) => {
+        if (err) console.error('Error adding top_wicket_taker column:', err);
+        else console.log('✅ Added top_wicket_taker column to predictions table');
+      });
+    }
+    if (!hasCenturyPoints) {
+      db.run('ALTER TABLE predictions ADD COLUMN century_points INTEGER DEFAULT 10', (err) => {
+        if (err) console.error('Error adding century_points column:', err);
+        else console.log('✅ Added century_points column to predictions table');
+      });
+    }
+    if (!hasWicketPoints) {
+      db.run('ALTER TABLE predictions ADD COLUMN wicket_points INTEGER DEFAULT 10', (err) => {
+        if (err) console.error('Error adding wicket_points column:', err);
+        else console.log('✅ Added wicket_points column to predictions table');
+      });
+    }
+    if (hasTossPoints && hasMomPoints && hasBowlerPoints && hasCenturyScorer && hasTopWicketTaker && hasCenturyPoints && hasWicketPoints) {
       console.log('✅ All prediction points columns already exist');
+    }
+  });
+
+  // Migration: Add century_scorer and top_wicket_taker to prediction_results
+  db.all(`PRAGMA table_info(prediction_results)`, (err, columns) => {
+    if (err) { console.error('Error checking prediction_results table structure:', err); return; }
+    const hasCenturyScorer = columns && columns.some(c => c.name === 'century_scorer');
+    const hasTopWicketTaker = columns && columns.some(c => c.name === 'top_wicket_taker');
+    if (!hasCenturyScorer) {
+      db.run('ALTER TABLE prediction_results ADD COLUMN century_scorer TEXT', (err) => {
+        if (err) console.error('Error adding century_scorer to prediction_results:', err);
+        else console.log('✅ Added century_scorer column to prediction_results table');
+      });
+    }
+    if (!hasTopWicketTaker) {
+      db.run('ALTER TABLE prediction_results ADD COLUMN top_wicket_taker TEXT', (err) => {
+        if (err) console.error('Error adding top_wicket_taker to prediction_results:', err);
+        else console.log('✅ Added top_wicket_taker column to prediction_results table');
+      });
     }
   });
 
