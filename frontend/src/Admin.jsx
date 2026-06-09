@@ -132,7 +132,14 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
     if (!value) return null
     const raw = String(value).trim()
 
-    // Try direct parsing first - ISO timestamps will parse as local time
+    // ISO date-time without timezone marker: treat as UTC (FIFA/UTC times stored without Z)
+    const isoNoTz = raw.match(/^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}(?::\d{2})?$/)
+    if (isoNoTz) {
+      const utc = new Date(`${raw}Z`)
+      if (!Number.isNaN(utc.getTime())) return utc
+    }
+
+    // Try direct parsing for strings with explicit timezone (Z or ±offset)
     const direct = new Date(raw)
     if (!Number.isNaN(direct.getTime())) return direct
 
