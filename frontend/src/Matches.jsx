@@ -536,6 +536,13 @@ export default function Matches({ seasonId, sport, user, refreshUser, refreshTri
                                 <div style={{color: '#667eea', fontWeight: '800', fontSize: '16px'}}>{m.vote_totals[m.home_team] || 0}</div>
                                 <div style={{color: '#a0aec0', fontSize: '10px'}}>votes</div>
                               </div>
+                              {sport === 'football' && (
+                                <div style={{flex: 1, textAlign: 'center', background: '#edf2f7', borderRadius: '8px', padding: '6px 4px', fontSize: '11px'}}>
+                                  <div style={{color: '#718096', fontWeight: '600', marginBottom: '2px'}}>🤝 Draw</div>
+                                  <div style={{color: '#667eea', fontWeight: '800', fontSize: '16px'}}>{m.vote_totals['Draw'] || 0}</div>
+                                  <div style={{color: '#a0aec0', fontSize: '10px'}}>votes</div>
+                                </div>
+                              )}
                               <div style={{flex: 1, textAlign: 'center', background: '#edf2f7', borderRadius: '8px', padding: '6px 4px', fontSize: '11px'}}>
                                 <div style={{color: '#718096', fontWeight: '600', marginBottom: '2px'}}>{m.away_team}</div>
                                 <div style={{color: '#667eea', fontWeight: '800', fontSize: '16px'}}>{m.vote_totals[m.away_team] || 0}</div>
