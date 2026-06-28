@@ -141,6 +141,29 @@ function openDb() {
         console.log('✅ [MIGRATION] bet_options column already exists');
       }
     });
+
+    // Add draw_enabled column to matches if missing (1=true, 0=false)
+    db.all('PRAGMA table_info(matches)', (err, cols) => {
+      if (err) { console.error('[MIGRATION] Failed to inspect matches table for draw_enabled:', err); return; }
+      const hasCol = cols && cols.some(c => c.name === 'draw_enabled');
+      if (!hasCol) {
+        db.run('ALTER TABLE matches ADD COLUMN draw_enabled INTEGER DEFAULT 1', (e) => {
+          if (e) {
+            console.error('[MIGRATION] Failed to add draw_enabled column:', e);
+            return;
+          }
+          db.run('UPDATE matches SET draw_enabled = 1 WHERE draw_enabled IS NULL', (e2) => {
+            if (e2) console.error('[MIGRATION] Failed to backfill draw_enabled values:', e2);
+            else console.log('✅ [MIGRATION] draw_enabled column added/backfilled on matches');
+          });
+        });
+      } else {
+        db.run('UPDATE matches SET draw_enabled = 1 WHERE draw_enabled IS NULL', (e) => {
+          if (e) console.error('[MIGRATION] Failed to backfill existing draw_enabled NULL values:', e);
+        });
+        console.log('✅ [MIGRATION] draw_enabled column already exists');
+      }
+    });
   });
 })();
 
@@ -730,6 +753,7 @@ app.get('/api/seasons/:id/matches', (req, res) => {
     // Single query: matches + all vote totals via subquery JOIN (eliminates N+1)
     dbConn.all(`
       SELECT m.id, m.season_id, m.home_team, m.away_team, m.venue, m.scheduled_at, m.winner, m.bet_options,
+             COALESCE(m.draw_enabled, 1) AS draw_enabled,
              vt.team AS vote_team, vt.total AS vote_total
       FROM matches m
       LEFT JOIN (
@@ -758,6 +782,7 @@ app.get('/api/seasons/:id/matches', (req, res) => {
             scheduled_at: row.scheduled_at,
             winner: row.winner || null,
             bet_options: row.bet_options || null,
+            draw_enabled: row.draw_enabled === 0 ? 0 : 1,
             vote_totals: {}
           });
         }
@@ -778,7 +803,7 @@ app.get('/api/matches', (req, res) => {
   const db = openDb();
   // Admin can see all matches
   if (req.user && req.user.role === 'admin') {
-    db.all('SELECT id, season_id, home_team, away_team, venue, scheduled_at, winner, bet_options FROM matches', (err, rows) => {
+    db.all('SELECT id, season_id, home_team, away_team, venue, scheduled_at, winner, bet_options, COALESCE(draw_enabled, 1) AS draw_enabled FROM matches', (err, rows) => {
       db.close();
       if (err) return res.status(500).json({ error: 'DB error' });
       res.json(rows || []);
@@ -838,9 +863,20 @@ app.post('/api/matches/:id/vote', (req, res) => {
 
   const db = openDb();
   db.serialize(() => {
-    db.get('SELECT m.scheduled_at, m.winner, m.season_id, m.home_team, m.away_team FROM matches m WHERE m.id = ?', [matchId], (err, match) => {
+    db.get('SELECT m.scheduled_at, m.winner, m.season_id, m.home_team, m.away_team, COALESCE(m.draw_enabled, 1) AS draw_enabled FROM matches m WHERE m.id = ?', [matchId], (err, match) => {
       if (err) { db.close(); return res.status(500).json({ error: 'DB error' }); }
       if (!match) { db.close(); return res.status(404).json({ error: 'Match not found' }); }
+
+      const isDrawEnabled = Number(match.draw_enabled) !== 0;
+      const allowedTeams = [match.home_team, match.away_team, ...(isDrawEnabled ? ['Draw'] : [])];
+      if (!allowedTeams.includes(team)) {
+        db.close();
+        return res.status(400).json({
+          error: !isDrawEnabled && team === 'Draw'
+            ? 'Draw option is disabled for this match'
+            : 'Invalid team selection for this match'
+        });
+      }
 
       // Check season access
       db.get('SELECT balance FROM user_seasons WHERE user_id = ? AND season_id = ?', [req.user.id, match.season_id], (errAssign, seasonRow) => {
@@ -3200,16 +3236,17 @@ app.post('/api/admin/matches', requireRole('admin'), (req, res) => {
 // Admin edit match
 app.put('/api/admin/matches/:id', requireRole('admin'), (req, res) => {
   const id = Number(req.params.id);
-  const { home_team, away_team, scheduled_at, venue, bet_options } = req.body;
+  const { home_team, away_team, scheduled_at, venue, bet_options, draw_enabled } = req.body;
   // Validate bet_options if provided: must be comma-separated positive integers
   if (bet_options) {
     const parts = String(bet_options).split(',').map(s => s.trim());
     const valid = parts.length >= 2 && parts.every(p => /^\d+$/.test(p) && Number(p) > 0);
     if (!valid) return res.status(400).json({ error: 'bet_options must be comma-separated positive integers e.g. 20,50,100' });
   }
+  const drawEnabledValue = draw_enabled === 0 || draw_enabled === '0' || draw_enabled === false ? 0 : 1;
   const db = openDb();
-  db.run('UPDATE matches SET home_team = ?, away_team = ?, scheduled_at = ?, venue = ?, bet_options = ? WHERE id = ?',
-    [home_team, away_team, scheduled_at, venue || null, bet_options || null, id], function(err) {
+  db.run('UPDATE matches SET home_team = ?, away_team = ?, scheduled_at = ?, venue = ?, bet_options = ?, draw_enabled = ? WHERE id = ?',
+    [home_team, away_team, scheduled_at, venue || null, bet_options || null, drawEnabledValue, id], function(err) {
     db.close();
     if (err) return res.status(500).json({ error: 'DB error' });
     if (this.changes === 0) return res.status(404).json({ error: 'Match not found' });
@@ -3277,9 +3314,14 @@ app.post('/api/admin/matches/:id/winner', requireRole(['admin', 'superuser']), (
   const db = openDb();
   db.serialize(() => {
     // First get match details to find season and teams
-    db.get('SELECT season_id, home_team, away_team FROM matches WHERE id = ?', [id], (errMatch, match) => {
+    db.get('SELECT season_id, home_team, away_team, COALESCE(draw_enabled, 1) AS draw_enabled FROM matches WHERE id = ?', [id], (errMatch, match) => {
       if (errMatch) { db.close(); return res.status(500).json({ error: 'DB error' }); }
       if (!match) { db.close(); return res.status(404).json({ error: 'Match not found' }); }
+
+      if (winner === 'Draw' && Number(match.draw_enabled) === 0) {
+        db.close();
+        return res.status(400).json({ error: 'Draw is disabled for this match' });
+      }
 
       // Handle "No Result" — just mark match closed, no balance changes
       if (winner === 'NO_RESULT') {
@@ -3606,8 +3648,8 @@ app.post('/api/admin/upload-matches', requireRole('admin'), (req, res) => {
   const insertMatch = (date, venue, team1, team2, time) => new Promise((resolve, reject) => {
     // Combine date and time into scheduled_at
     const scheduled_at = `${normalizeDateStr(date)}T${time}`;
-    db.run('INSERT INTO matches (season_id, home_team, away_team, scheduled_at, venue) VALUES (?, ?, ?, ?, ?)',
-      [seasonId, team1, team2, scheduled_at, venue], function(err) {
+    db.run('INSERT INTO matches (season_id, home_team, away_team, scheduled_at, venue, draw_enabled) VALUES (?, ?, ?, ?, ?, ?)',
+      [seasonId, team1, team2, scheduled_at, venue, 1], function(err) {
         if (err) return reject(err);
         resolve(this.lastID);
       });

@@ -365,6 +365,10 @@ export default function Matches({ seasonId, sport, user, refreshUser, refreshTri
     return null
   }
 
+  function isDrawEnabledForMatch(match) {
+    return sport === 'football' && Number(match?.draw_enabled ?? 1) !== 0
+  }
+
   const pendingCount = matches.filter(m => {
     if (isVotingDisabled(m)) return false
     const v = votes[m.id]
@@ -536,7 +540,7 @@ export default function Matches({ seasonId, sport, user, refreshUser, refreshTri
                                 <div style={{color: '#667eea', fontWeight: '800', fontSize: '16px'}}>{m.vote_totals[m.home_team] || 0}</div>
                                 <div style={{color: '#a0aec0', fontSize: '10px'}}>votes</div>
                               </div>
-                              {sport === 'football' && (
+                              {isDrawEnabledForMatch(m) && (
                                 <div style={{flex: 1, textAlign: 'center', background: '#edf2f7', borderRadius: '8px', padding: '6px 4px', fontSize: '11px'}}>
                                   <div style={{color: '#718096', fontWeight: '600', marginBottom: '2px'}}>🤝 Draw</div>
                                   <div style={{color: '#667eea', fontWeight: '800', fontSize: '16px'}}>{m.vote_totals['Draw'] || 0}</div>
@@ -559,7 +563,7 @@ export default function Matches({ seasonId, sport, user, refreshUser, refreshTri
                     ) : (
                       <div>
                         <div style={{display: 'flex', gap: '8px', marginBottom: '10px'}}>
-                          {[m.home_team, ...(sport === 'football' ? ['Draw'] : []), m.away_team].map(team => {
+                          {[m.home_team, ...(isDrawEnabledForMatch(m) ? ['Draw'] : []), m.away_team].map(team => {
                             const selected = votes[m.id]?.team === team
                             return (
                               <label key={team} style={{flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '10px 6px', borderRadius: '10px', cursor: 'pointer', border: `2px solid ${selected ? '#667eea' : '#e2e8f0'}`, background: selected ? 'rgba(102,126,234,0.12)' : 'white', fontSize: '12px', fontWeight: '700', color: selected ? '#667eea' : '#4a5568', textAlign: 'center', transition: 'all 0.15s ease'}}>
@@ -648,7 +652,7 @@ export default function Matches({ seasonId, sport, user, refreshUser, refreshTri
                                 disabled={votingDisabled} style={{accentColor: '#667eea'}} />
                               <span style={{fontWeight: '500'}}>{m.home_team}</span>
                             </label>
-                            {sport === 'football' && (
+                            {isDrawEnabledForMatch(m) && (
                               <label style={{display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px'}}>
                                 <input type="radio" name={`vote-${m.id}`} value="Draw" checked={votes[m.id]?.team === 'Draw'}
                                   onChange={e => { dirtyVotes.current.add(m.id); setVotes({...votes, [m.id]: {...(votes[m.id] || {}), team: e.target.value}}) }}
@@ -691,7 +695,9 @@ export default function Matches({ seasonId, sport, user, refreshUser, refreshTri
                       {sport === 'football' && (
                         <td style={{padding: '14px 12px', borderRight: '1px solid #f0f0f0', textAlign: 'center'}}>
                           {votingDisabled ? (
+                            isDrawEnabledForMatch(m) ? (
                             <span style={{fontWeight: '700', fontSize: '15px', color: '#667eea', backgroundColor: '#edf2f7', padding: '4px 12px', borderRadius: '8px', display: 'inline-block'}}>{m.vote_totals && m.vote_totals['Draw'] ? m.vote_totals['Draw'] : 0}</span>
+                            ) : <span style={{color: '#a0aec0', fontSize: '12px'}}>N/A</span>
                           ) : <span style={{color: '#a0aec0', fontSize: '12px'}}>-</span>}
                         </td>
                       )}
