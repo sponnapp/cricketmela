@@ -35,7 +35,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'picker', balance: 500, display_name: '', email: '', season_ids: [] })
   const [csvInput, setCsvInput] = useState('')
   const [selectedSeason, setSelectedSeason] = useState('')
-  const [winnerModal, setWinnerModal] = useState({show: false, matchId: null, team1: '', team2: '', selectedTeam: '', sport: 'cricket'})
+  const [winnerModal, setWinnerModal] = useState({show: false, matchId: null, team1: '', team2: '', selectedTeam: '', sport: 'cricket', drawEnabled: true})
   const [editModal, setEditModal] = useState({show: false, match: null, formData: {}})
   const [editUserModal, setEditUserModal] = useState({show: false, user: null, formData: {}, assignedSeasons: [], authMethod: null, seasonBalances: {}})
   const [passwordResetModal, setPasswordResetModal] = useState({show: false, userId: null, username: '', newPassword: ''})
@@ -817,9 +817,9 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
     }
   }
 
-  async function setWinner(matchId, team1, team2) {
+  async function setWinner(matchId, team1, team2, drawEnabled = true) {
     const sport = seasons.find(s => s.id == selectedSeason)?.sport || 'cricket'
-    setWinnerModal({show: true, matchId, team1, team2, selectedTeam: '', sport})
+    setWinnerModal({show: true, matchId, team1, team2, selectedTeam: '', sport, drawEnabled: !!drawEnabled})
   }
 
   async function submitWinner() {
@@ -834,7 +834,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
       )
       const msg = winnerModal.selectedTeam === 'NO_RESULT' ? 'Match marked as No Result' : winnerModal.selectedTeam === 'Draw' ? 'Match marked as Draw' : 'Winner set successfully'
       toast('success', 'Success', msg)
-      setWinnerModal({show: false, matchId: null, team1: '', team2: '', selectedTeam: '', sport: 'cricket'})
+      setWinnerModal({show: false, matchId: null, team1: '', team2: '', selectedTeam: '', sport: 'cricket', drawEnabled: true})
       fetchMatches(selectedSeason)
     } catch (e) {
       toast('error', 'Error', e.response?.data?.error || 'Failed to set winner')
@@ -850,7 +850,8 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
         away_team: match.away_team,
         venue: match.venue || '',
         scheduled_at: match.scheduled_at || '',
-        bet_options: match.bet_options || ''
+        bet_options: match.bet_options || '',
+        draw_enabled: match.draw_enabled === 0 ? 0 : 1
       }
     })
   }
@@ -1897,7 +1898,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                     <div style={{display: 'flex', gap: '6px', flexWrap: 'wrap'}}>
                       <button onClick={() => editMatch(m)} style={{flex: 1, minWidth: '70px', padding: '8px', fontSize: '12px', backgroundColor: '#667eea', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600'}}>Edit</button>
                       {(isSuperuser || user?.role === 'admin') && (
-                        <button onClick={() => setWinner(m.id, m.home_team, m.away_team)} style={{flex: 1, minWidth: '70px', padding: '8px', fontSize: '12px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600'}}>Set Winner</button>
+                        <button onClick={() => setWinner(m.id, m.home_team, m.away_team, m.draw_enabled !== 0)} style={{flex: 1, minWidth: '70px', padding: '8px', fontSize: '12px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600'}}>Set Winner</button>
                       )}
                       {(isSuperuser || user?.role === 'admin') && (
                         <button onClick={() => openPredictionResultsModal(m)} style={{flex: 1, minWidth: '70px', padding: '8px', fontSize: '12px', backgroundColor: '#9b59b6', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600'}}>🔮 Predict</button>
@@ -1981,7 +1982,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                             </button>
                             {(isSuperuser || user?.role === 'admin') && (
                               <button
-                                onClick={() => setWinner(m.id, m.home_team, m.away_team)}
+                                onClick={() => setWinner(m.id, m.home_team, m.away_team, m.draw_enabled !== 0)}
                                 style={{
                                   padding: '6px 12px',
                                   fontSize: '11px',
@@ -2217,7 +2218,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
                 <input type="radio" name="winner" value={winnerModal.team2} checked={winnerModal.selectedTeam === winnerModal.team2} onChange={e => setWinnerModal({...winnerModal, selectedTeam: e.target.value})} style={{marginRight: '10px'}} />
                 <span style={{fontSize: '16px'}}>{winnerModal.team2}</span>
               </label>
-              {winnerModal.sport === 'football' && (
+              {winnerModal.sport === 'football' && winnerModal.drawEnabled && (
                 <label style={{display: 'block', marginBottom: '15px', cursor: 'pointer'}}>
                   <input type="radio" name="winner" value="Draw" checked={winnerModal.selectedTeam === 'Draw'} onChange={e => setWinnerModal({...winnerModal, selectedTeam: e.target.value})} style={{marginRight: '10px'}} />
                   <span style={{fontSize: '16px'}}>🤝 Draw</span>
@@ -2229,7 +2230,7 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
               </label>
             </div>
             <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px'}}>
-              <button onClick={() => setWinnerModal({show: false, matchId: null, team1: '', team2: '', selectedTeam: '', sport: 'cricket'})} style={{padding: '8px 16px', backgroundColor: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Cancel</button>
+              <button onClick={() => setWinnerModal({show: false, matchId: null, team1: '', team2: '', selectedTeam: '', sport: 'cricket', drawEnabled: true})} style={{padding: '8px 16px', backgroundColor: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Cancel</button>
               <button
                 onClick={submitWinner}
                 style={{padding: '8px 16px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}
@@ -2363,6 +2364,18 @@ export default function Admin({ user, initialTab, onTabChange, addToast, refresh
               {editModal.formData.bet_options && (
                 <p style={{margin: '4px 0 0', fontSize: '12px', color: '#718096'}}>Users will see options: {editModal.formData.bet_options.split(',').join(' / ')} pts</p>
               )}
+            </div>
+            <div style={{margin: '15px 0'}}>
+              <label style={{display: 'block', marginBottom: '5px', fontWeight: 'bold'}}>Draw Option:</label>
+              <select
+                value={editModal.formData.draw_enabled === 0 ? '0' : '1'}
+                onChange={e => setEditModal({...editModal, formData: {...editModal.formData, draw_enabled: e.target.value === '0' ? 0 : 1}})}
+                style={{width: '100%', padding: '8px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px'}}
+              >
+                <option value="1">Enabled</option>
+                <option value="0">Disabled</option>
+              </select>
+              <p style={{margin: '4px 0 0', fontSize: '12px', color: '#718096'}}>Use Disabled for knockout matches (Round of 32/16, Quarter, Semi, Final).</p>
             </div>
             <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px'}}>
               <button onClick={() => setEditModal({show: false, match: null, formData: {}})} style={{padding: '8px 16px', backgroundColor: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Cancel</button>
